@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>iPhone Measure (OpenCV.js)</title>
+  <title>iPhone Epipolar Measure (OpenCV.js + IMU)</title>
 
   <style>
     :root{
-      --maxw: 520px;
+      --maxw: 560px;
       --radius: 14px;
       --border: 1px solid #e8e8e8;
     }
@@ -30,7 +30,7 @@
       background:#000;
     }
 
-    /* Sticky toolbar */
+    /* Sticky toolbar so it feels like an app */
     .toolbar{
       position: sticky;
       top: 0;
@@ -46,8 +46,7 @@
       grid-template-columns: repeat(4, 1fr);
       gap: 8px;
     }
-
-    button{
+    button, input{
       border: var(--border);
       border-radius: 12px;
       padding: 10px 12px;
@@ -97,22 +96,17 @@
       justify-content:flex-start;
       margin-top: 8px;
     }
-    input{
-      border: var(--border);
-      border-radius: 12px;
-      padding: 10px 12px;
-      font-size: 15px;
-    }
+    .small{ font-size: 12px; color:#444; }
+    .ok{ color:#0a7a2f; font-weight: 900; }
+    .warn{ color:#b00020; font-weight: 900; }
 
     #out{
       margin: 8px 0 0;
       text-align:center;
       font-weight: 900;
       font-size: 16px;
+      min-height: 22px;
     }
-    .warn{ color:#b00020; font-weight: 900; }
-    .ok{ color:#0a7a2f; font-weight: 900; }
-    .small{ font-size: 12px; color:#444; }
 
     .resultsBox{
       max-height: 220px;
@@ -133,97 +127,67 @@
       white-space: nowrap;
     }
     th{ position: sticky; top:0; background:#fff; }
-
-    #imuTable{ display:none; width:100%; margin-top:10px; border-collapse:collapse; }
-    #imuTable td, #imuTable th{ border: 1px solid #eee; padding: 6px 8px; font-size: 12px; }
   </style>
 </head>
 
 <body>
-  <h2>Camera Measurement (OpenCV.js)</h2>
+  <h2>Epipolar Measurement (2 views + IMU) — no reference object</h2>
 
+  <!-- I keep the <video> hidden. I draw frames into canvas for display and into a hidden rawCanvas for OpenCV. -->
   <video id="video" autoplay playsinline style="display:none;"></video>
   <canvas id="canvas"></canvas>
 
+  <!-- Toolbar: everything you actually need during demo -->
   <div class="toolbar">
     <button id="startBtn" onclick="startCamera()" disabled>Start</button>
-    <button id="calBtn" onclick="startCalibrate()" disabled>Calibrate</button>
-    <button id="measureBtn" class="primary" onclick="startMeasureROI()" disabled>Measure</button>
-    <button id="stopBtn" onclick="stopCamera()" disabled>Stop</button>
+    <button id="imuBtn" onclick="toggleIMU()" disabled>IMU</button>
+    <button id="cap1Btn" class="primary" onclick="captureView1()" disabled>Capture 1</button>
+    <button id="cap2Btn" class="primary" onclick="captureView2()" disabled>Capture 2</button>
 
     <div class="pill">
-      <span>Freeze frame (multi-object)</span>
-      <input type="checkbox" id="freezeToggle">
+      <span>Preset baseline (cm) — you physically move phone this distance</span>
+      <input id="baselineCm" type="number" value="20" step="1" style="width:110px;">
     </div>
+
+    <div class="pill">
+      <span>Freeze display after Capture 2 (recommended)</span>
+      <input id="freezeToggle" type="checkbox" checked>
+    </div>
+
+    <button onclick="resetAll()" style="grid-column: 1 / -1;">Reset</button>
   </div>
 
   <div class="wrap">
     <div class="small">
-      Status: <span id="status" class="warn">Loading OpenCV.js…</span>
-      • <span id="calInfo">Calibration: none</span>
+      OpenCV: <span id="cvStatus" class="warn">Loading…</span>
+      • Stage: <span id="stageStatus">not started</span>
+    </div>
+
+    <div class="small" style="margin-top:6px;">
+      IMU Δ (from Capture 1):
+      yaw <span id="dyaw">0</span>°
+      pitch <span id="dpitch">0</span>°
+      roll <span id="droll">0</span>°
+      • <span id="imuGate" class="warn">IMU not enabled</span>
     </div>
 
     <div id="out"></div>
 
-    <details>
+    <details open>
       <summary>
-        <span>Calibration</span>
-        <span class="small">tap to open</span>
+        <span>How I use this during demo (my steps)</span>
+        <span class="small">tap to collapse</span>
       </summary>
 
-      <div class="small">
-        One calibration mode: <b>4-corner planar reference</b> (credit card / any rectangle).
-        Tap 4 corners in any order; it auto-orders them.
-      </div>
-
-      <div class="row">
-        <input id="cardW" type="number" value="85.6" step="0.1" style="width:110px;">
-        <span class="small">W (mm)</span>
-        <input id="cardH" type="number" value="53.98" step="0.1" style="width:110px;">
-        <span class="small">H (mm)</span>
-      </div>
-
-      <div class="small">
-        Tip: keep the reference near your objects on the same surface. More top-down = better accuracy.
-      </div>
-    </details>
-
-    <details>
-      <summary>
-        <span>Options</span>
-        <span class="small">debug / IMU</span>
-      </summary>
-
-      <div class="pill">
-        <span>Edges + Corners (debug)</span>
-        <input type="checkbox" id="featureToggle">
-      </div>
-
-      <div class="pill" style="margin-top:8px;">
-        <span>Show IMU</span>
-        <input type="checkbox" id="imuToggle" onclick="toggleIMU()">
-      </div>
-
-      <table id="imuTable">
-        <tr><th colspan="2">Acceleration (m/s²)</th></tr>
-        <tr><td>X</td><td id="ax">0</td></tr>
-        <tr><td>Y</td><td id="ay">0</td></tr>
-        <tr><td>Z</td><td id="az">0</td></tr>
-
-        <tr><th colspan="2">Gyroscope (deg/s)</th></tr>
-        <tr><td>Alpha</td><td id="gx">0</td></tr>
-        <tr><td>Beta</td><td id="gy">0</td></tr>
-        <tr><td>Gamma</td><td id="gz">0</td></tr>
-
-        <tr><th colspan="2">Orientation (deg)</th></tr>
-        <tr><td>Yaw</td><td id="yaw">0</td></tr>
-        <tr><td>Pitch</td><td id="pitch">0</td></tr>
-        <tr><td>Roll</td><td id="roll">0</td></tr>
-      </table>
-
-      <div class="row">
-        <button onclick="resetAll()">Reset</button>
-      </div>
+      <ol class="small" style="margin-top:8px;">
+        <li>Start</li>
+        <li>IMU → allow permission</li>
+        <li>Capture 1 (don’t move during capture)</li>
+        <li>Move phone sideways by the baseline (e.g., 20 cm). Try to keep pitch/roll steady.</li>
+        <li>When IMU gate turns green, press Capture 2</li>
+        <li>Now I measure objects: I just drag a rectangle around an object (ROI) and it measures.</li>
+        <li>I can drag multiple different objects without recapturing (extra credit b).</li>
+      </ol>
     </details>
 
     <details open>
@@ -233,15 +197,17 @@
       </summary>
 
       <div class="row">
-        <input id="objName" type="text" placeholder="name (optional)" style="width: 160px;">
-        <input id="gtMm" type="number" step="0.1" placeholder="GT mm (optional)" style="width: 150px;">
+        <input id="objName" type="text" placeholder="object name (optional)" style="width: 200px;">
+        <input id="gtMm" type="number" step="0.1" placeholder="GT mm (optional)" style="width: 140px;">
         <button onclick="clearResults()">Clear</button>
       </div>
 
       <div class="resultsBox">
         <table>
           <thead>
-            <tr><th>#</th><th>Object</th><th>Measured</th><th>GT</th><th>Err%</th></tr>
+            <tr>
+              <th>#</th><th>Object</th><th>Measured</th><th>GT</th><th>Err%</th><th>Pts</th>
+            </tr>
           </thead>
           <tbody id="resultsBody"></tbody>
         </table>
@@ -253,11 +219,53 @@
   <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 
   <script>
-  /* =========================
-     GLOBALS / STATE
-  ========================= */
-  let cvReady = false;
+  /********************************************************************
+   * IMPORTANT CONCEPT CHECK (in my own words):
+   * ---------------------------------------------------------------
+   * - I’m doing “two-view geometry” with one iPhone camera.
+   * - I capture View 1, then I physically translate the phone (baseline),
+   *   then I capture View 2.
+   * - Epipolar geometry gives me R and direction of t (up to scale).
+   * - I force metric scale by saying: “my baseline is B cm”.
+   * - Then I triangulate points in 3D and compute object size in mm.
+   *
+   * This matches the notes:
+   *  (u')^T F u = 0  (epipolar constraint)
+   *  F = K^{-T} E K^{-1}  so E = K^T F K
+   *  P1 = K[I|0], P2 = K[R|t]
+   ********************************************************************/
 
+  /********************************************************************
+   * 0) CAMERA INTRINSICS (YOU WILL REPLACE THESE AFTER CHECKERBOARD CALIB)
+   * ---------------------------------------------------------------
+   * K is the intrinsic matrix. From the camera model notes,
+   * u = fX/Z + px, v = fY/Z + py and K stores (fx, fy, cx, cy). :contentReference[oaicite:6]{index=6}
+   *
+   * I store K at a known calibration resolution (calW, calH).
+   * If my actual video stream is a different resolution (W,H),
+   * I scale fx, fy, cx, cy accordingly.
+   ********************************************************************/
+  const CALIB = {
+    // Put the resolution you used during calibration images
+    calW: 1920,
+    calH: 1080,
+
+    // Replace these with your calibrated intrinsics (pixels)
+    fx: 1400,  // <-- placeholder
+    fy: 1400,  // <-- placeholder
+    cx: 960,   // <-- placeholder
+    cy: 540,   // <-- placeholder
+
+    // Optional distortion coefficients (k1,k2,p1,p2,k3)
+    // You can keep zeros if you aren't using distortion correction.
+    // (iPhone wide-angle can have noticeable distortion)
+    dist: [0,0,0,0,0]
+  };
+
+  /********************************************************************
+   * 1) GLOBAL STATE
+   ********************************************************************/
+  let cvReady = false;
   let streaming = false;
   let streamHandle = null;
 
@@ -265,99 +273,103 @@
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
+  // rawCanvas always holds the image I want OpenCV to read (not the one with overlays).
   const rawCanvas = document.createElement("canvas");
   const rawCtx = rawCanvas.getContext("2d", { willReadFrequently: true });
 
-  const featureToggle = document.getElementById("featureToggle");
-  const imuToggle = document.getElementById("imuToggle");
-  const imuTable = document.getElementById("imuTable");
-  const statusEl = document.getElementById("status");
-  const calInfoEl = document.getElementById("calInfo");
+  // UI elements
+  const cvStatus = document.getElementById("cvStatus");
+  const stageStatus = document.getElementById("stageStatus");
+  const outEl = document.getElementById("out");
+  const freezeToggle = document.getElementById("freezeToggle");
 
   const startBtn = document.getElementById("startBtn");
-  const stopBtn  = document.getElementById("stopBtn");
-  const calBtn   = document.getElementById("calBtn");
-  const measureBtn = document.getElementById("measureBtn");
+  const imuBtn   = document.getElementById("imuBtn");
+  const cap1Btn  = document.getElementById("cap1Btn");
+  const cap2Btn  = document.getElementById("cap2Btn");
 
-  const freezeToggle = document.getElementById("freezeToggle");
-  let frozen = false;
+  const dyawEl   = document.getElementById("dyaw");
+  const dpitchEl = document.getElementById("dpitch");
+  const drollEl  = document.getElementById("droll");
+  const imuGateEl= document.getElementById("imuGate");
 
-  // UI
-  const resCount = document.getElementById("resCount");
   const resultsBody = document.getElementById("resultsBody");
+  const resCount = document.getElementById("resCount");
 
-  // mode
-  let mode = "idle"; // idle | cal4 | measure
+  // Stage machine:
+  //  - live: camera running
+  //  - v1: captured view1
+  //  - ready: captured view2 + pose computed (now we can measure by drag ROI)
+  let stage = "idle";
 
-  // calibration
-  let calPts4 = [];
-  let H = null;          // homography: image px -> plane mm
-  let calibrated = false;
+  // Freeze just controls whether I keep drawing live frames to screen.
+  // After Capture2 I want the scene stable while I measure multiple objects.
+  let frozenDisplay = false;
 
-  // ROI drag
-  let drag = { active:false, x0:0, y0:0, x1:0, y1:0 };
+  // IMU state
+  let imuEnabled = false;
+  let imuNow = { yaw:0, pitch:0, roll:0 };
+  let imuAtV1 = null; // stored at Capture 1
+  const ROT_THRESH_DEG = { yaw: 6, pitch: 4, roll: 4 }; // gate Capture2 (tuneable)
 
-  // live measurement throttling
-  let lastLiveT = 0;
-  const LIVE_INTERVAL_MS = 140; // ~7 updates/sec
+  // Two frames stored as grayscale cv.Mat
+  let gray1 = null;
+  let gray2 = null;
 
-  // overlay from last measurement
-  let overlayShape = null; // {type:'rect', pts:[{x,y}...]} or {type:'circle', c:{x,y}, r:number}
+  // Intrinsic matrix actually used at runtime (scaled to current video resolution)
+  let K = null;       // cv.Mat 3x3 CV_64F
 
-  // results
+  // Pose and projection matrices
+  let R = null;       // cv.Mat 3x3
+  let t = null;       // cv.Mat 3x1 (scaled)
+  let P1 = null;      // cv.Mat 3x4
+  let P2 = null;      // cv.Mat 3x4
+
+  // We keep a “pose ready” flag
+  let poseReady = false;
+
+  // ROI drag state (extra credit a: drag to select object)
+  let roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
+
+  // Overlay shapes for visualization
+  let lastOverlay = null; // {type:'rect', x,y,w,h} or null
+
+  // Results
   let results = [];
 
   function setOut(msg, isWarn=false) {
-    const out = document.getElementById("out");
-    out.textContent = msg;
-    out.className = isWarn ? "warn" : "";
+    outEl.textContent = msg;
+    outEl.className = isWarn ? "warn" : "";
   }
-
+  function setStage(s) {
+    stage = s;
+    stageStatus.textContent = s;
+  }
   function updateResCount(){ resCount.textContent = String(results.length); }
 
-  function updateCalInfo() {
-    if (calibrated && H) {
-      calInfoEl.textContent = "Calibration: 4-corner homography ✅";
-    } else {
-      calInfoEl.textContent = "Calibration: none";
-    }
-  }
-
-  /* =========================
-     FREEZE TOGGLE
-  ========================= */
-  freezeToggle.addEventListener("change", () => {
-    frozen = freezeToggle.checked;
-    if (frozen) {
-      if (streaming) rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
-      setOut("Frozen ✅ Drag ROIs to measure multiple objects in the same scene.", false);
-    } else {
-      setOut("Live camera resumed.", false);
-    }
-  });
-
-  /* =========================
-     OpenCV READY GATE
-  ========================= */
+  /********************************************************************
+   * 2) OpenCV READY GATE
+   ********************************************************************/
   (function waitForCv(){
     const timer = setInterval(() => {
       if (typeof cv !== "undefined" && cv && typeof cv.onRuntimeInitialized !== "undefined") {
         clearInterval(timer);
         cv.onRuntimeInitialized = () => {
           cvReady = true;
-          statusEl.textContent = "OpenCV.js ready ✅";
-          statusEl.className = "ok";
+          cvStatus.textContent = "ready ✅";
+          cvStatus.className = "ok";
           startBtn.disabled = false;
         };
       }
     }, 50);
   })();
 
-  /* =========================
-     CAMERA START/STOP
-  ========================= */
+  /********************************************************************
+   * 3) CAMERA START/STOP
+   ********************************************************************/
   async function startCamera() {
-    if (!cvReady) { setOut("Wait for OpenCV ✅ then start.", true); return; }
+    if (!cvReady) { setOut("Wait for OpenCV first.", true); return; }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" } },
@@ -374,21 +386,24 @@
         rawCanvas.width = video.videoWidth;
         rawCanvas.height = video.videoHeight;
 
+        // Build the runtime K matrix (scaled from calibration resolution)
+        K = buildScaledK(video.videoWidth, video.videoHeight);
+
         streaming = true;
-        stopBtn.disabled = false;
-        calBtn.disabled = false;
-        measureBtn.disabled = false;
+        imuBtn.disabled = false;
+        cap1Btn.disabled = false;
+        cap2Btn.disabled = true;
 
-        frozen = false;
-        freezeToggle.checked = false;
+        setStage("live");
+        setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
 
-        setOut("Start → Calibrate (tap 4 corners) → Measure (drag ROI).", false);
-        updateCalInfo();
-        processVideo();
+        // Start draw loop
+        requestAnimationFrame(drawLoop);
       };
+
     } catch (err) {
       console.error(err);
-      setOut("Camera failed. Must be HTTPS + allow permissions.", true);
+      setOut("Camera failed. Must be HTTPS and allow camera permission.", true);
     }
   }
 
@@ -398,214 +413,472 @@
       for (const tr of streamHandle.getTracks()) tr.stop();
       streamHandle = null;
     }
-    stopBtn.disabled = true;
-    calBtn.disabled = true;
-    measureBtn.disabled = true;
-
-    frozen = false;
-    freezeToggle.checked = false;
-
-    setOut("Camera stopped.", false);
   }
 
-  /* =========================
-     MAIN LOOP
-  ========================= */
-  function processVideo() {
+  /********************************************************************
+   * 4) DRAW LOOP (display)
+   * ---------------------------------------------------------------
+   * - While live and not frozenDisplay: draw current video to canvas
+   * - After capture2, we often freeze so ROI measuring is stable.
+   ********************************************************************/
+  function drawLoop() {
     if (!streaming) return;
 
-    if (!frozen) {
+    if (!frozenDisplay) {
       rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
     }
 
-    // draw raw to visible
+    // Draw raw scene to visible canvas
     ctx.drawImage(rawCanvas, 0, 0, canvas.width, canvas.height);
 
-    // optional debug overlay (display-only)
-    if (featureToggle.checked && cvReady) {
-      try {
-        let src = cv.imread(rawCanvas);
-        let gray = new cv.Mat();
-        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    // Draw ROI overlay while dragging
+    if (roi.active || (roi.x0!==roi.x1 && roi.y0!==roi.y1)) {
+      const x = Math.min(roi.x0, roi.x1);
+      const y = Math.min(roi.y0, roi.y1);
+      const w = Math.abs(roi.x1 - roi.x0);
+      const h = Math.abs(roi.y1 - roi.y0);
 
-        let edges = new cv.Mat();
-        cv.Canny(gray, edges, 80, 150);
-
-        let edgesColor = new cv.Mat();
-        cv.cvtColor(edges, edgesColor, cv.COLOR_GRAY2RGBA);
-
-        let corners = new cv.Mat();
-        cv.goodFeaturesToTrack(gray, corners, 120, 0.01, 10);
-        for (let i = 0; i < corners.rows; i++) {
-          let x = corners.data32F[i * 2];
-          let y = corners.data32F[i * 2 + 1];
-          cv.circle(edgesColor, new cv.Point(x, y), 5, [255,0,0,255], -1);
-        }
-        cv.imshow(canvas, edgesColor);
-
-        src.delete(); gray.delete(); edges.delete(); edgesColor.delete(); corners.delete();
-      } catch(e) {}
+      ctx.save();
+      ctx.strokeStyle = "lime";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x,y,w,h);
+      ctx.restore();
     }
 
-    // live measurement while dragging (throttled)
-    if (mode === "measure" && drag.active && calibrated) {
-      const now = performance.now();
-      if (now - lastLiveT > LIVE_INTERVAL_MS) {
-        lastLiveT = now;
-
-        const x = Math.min(drag.x0, drag.x1);
-        const y = Math.min(drag.y0, drag.y1);
-        const w = Math.abs(drag.x1 - drag.x0);
-        const h = Math.abs(drag.y1 - drag.y0);
-
-        if (w >= 12 && h >= 12) {
-          const res = measureInROI_rawCanvas(x, y, w, h, true);
-          if (res) {
-            overlayShape = res.overlay;
-            setOut(`LIVE: ${res.measuredText}`, false);
-          }
-        }
-      }
-    }
-
-    drawOverlay();
-    requestAnimationFrame(processVideo);
-  }
-
-  /* =========================
-     COORDINATE MAPPING
-  ========================= */
-  function canvasPointFromEvent(e) {
-    const rect = canvas.getBoundingClientRect();
-    const touch = e.touches ? e.touches[0] : null;
-    const clientX = touch ? touch.clientX : e.clientX;
-    const clientY = touch ? touch.clientY : e.clientY;
-    const x = (clientX - rect.left) * (canvas.width / rect.width);
-    const y = (clientY - rect.top)  * (canvas.height / rect.height);
-    return {x, y};
-  }
-
-  /* =========================
-     OVERLAY DRAW
-  ========================= */
-  function drawOverlay() {
-    ctx.save();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "lime";
-    ctx.fillStyle = "lime";
-
-    // calibration points
-    if (mode === "cal4") {
-      for (const p of calPts4) {
-        ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, 2*Math.PI); ctx.fill();
-      }
-    }
-
-    // drag rect
-    if (mode === "measure" && (drag.active || (drag.x0!==drag.x1 && drag.y0!==drag.y1))) {
-      const x = Math.min(drag.x0, drag.x1);
-      const y = Math.min(drag.y0, drag.y1);
-      const w = Math.abs(drag.x1 - drag.x0);
-      const h = Math.abs(drag.y1 - drag.y0);
-      ctx.strokeRect(x, y, w, h);
-    }
-
-    // last measurement overlay
-    if (overlayShape) {
-      ctx.lineWidth = 5;
+    // Draw last measured ROI (so I can see what I just measured)
+    if (lastOverlay) {
+      ctx.save();
       ctx.strokeStyle = "yellow";
-      if (overlayShape.type === "rect") {
-        const pts = overlayShape.pts;
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.closePath();
-        ctx.stroke();
-      } else if (overlayShape.type === "circle") {
-        ctx.beginPath();
-        ctx.arc(overlayShape.c.x, overlayShape.c.y, overlayShape.r, 0, 2*Math.PI);
-        ctx.stroke();
-      }
+      ctx.lineWidth = 4;
+      ctx.strokeRect(lastOverlay.x, lastOverlay.y, lastOverlay.w, lastOverlay.h);
+      ctx.restore();
     }
 
-    ctx.restore();
+    requestAnimationFrame(drawLoop);
   }
 
-  /* =========================
-     ONE CALIBRATION MODE (4 corners)
-  ========================= */
-  function startCalibrate() {
-    if (!streaming) { setOut("Start camera first.", true); return; }
-    mode = "cal4";
-    calPts4 = [];
-    setOut("Calibration: tap the 4 corners of your reference rectangle.", false);
-  }
-
-  function finalizeCalibration4() {
-    const W = parseFloat(document.getElementById("cardW").value);
-    const Hh = parseFloat(document.getElementById("cardH").value);
-    if (!(W > 0 && Hh > 0)) { setOut("Enter reference W/H in mm.", true); return; }
-    if (!cvReady) { setOut("OpenCV not ready.", true); return; }
-
-    const q = orderQuad(calPts4);
-
-    const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-      q[0].x, q[0].y,
-      q[1].x, q[1].y,
-      q[2].x, q[2].y,
-      q[3].x, q[3].y
-    ]);
-
-    const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-      0,   0,
-      W,   0,
-      W,  Hh,
-      0,  Hh
-    ]);
+  /********************************************************************
+   * 5) IMU TOGGLE (iOS requires permission request after user gesture)
+   * - iOS Safari requires DeviceOrientationEvent.requestPermission() in many cases. :contentReference[oaicite:7]{index=7}
+   ********************************************************************/
+  async function toggleIMU() {
+    if (imuEnabled) {
+      imuEnabled = false;
+      imuGateEl.textContent = "IMU off";
+      imuGateEl.className = "warn";
+      window.removeEventListener("deviceorientation", onOrientation);
+      return;
+    }
 
     try {
-      const newH = cv.getPerspectiveTransform(srcPts, dstPts); // 3x3
-      if (H) H.delete();
-      H = newH;
-      calibrated = true;
-      mode = "idle";
-      updateCalInfo();
-      setOut("Calibrated ✅ Now press Measure and drag an ROI.", false);
+      // Request permission if required (iOS)
+      if (typeof DeviceOrientationEvent !== "undefined" &&
+          typeof DeviceOrientationEvent.requestPermission === "function") {
+        const p = await DeviceOrientationEvent.requestPermission();
+        if (p !== "granted") throw new Error("Orientation denied");
+      }
+
+      imuEnabled = true;
+      imuGateEl.textContent = "IMU on (waiting for Capture 1)";
+      imuGateEl.className = "ok";
+      window.addEventListener("deviceorientation", onOrientation);
+
     } catch (e) {
       console.error(e);
-      setOut("Calibration failed. Try tapping corners again.", true);
-    } finally {
-      srcPts.delete();
-      dstPts.delete();
+      imuEnabled = false;
+      imuGateEl.textContent = "IMU permission denied";
+      imuGateEl.className = "warn";
+      setOut("IMU permission denied. You can still run, but Capture2 gate will be rough.", true);
     }
   }
 
-  function orderQuad(pts) {
-    // TL min(x+y), BR max(x+y), TR min(x-y), BL max(x-y)
-    const sum = pts.map(p => p.x + p.y);
-    const diff = pts.map(p => p.x - p.y);
-    const tl = pts[sum.indexOf(Math.min(...sum))];
-    const br = pts[sum.indexOf(Math.max(...sum))];
-    const tr = pts[diff.indexOf(Math.min(...diff))];
-    const bl = pts[diff.indexOf(Math.max(...diff))];
-    return [tl, tr, br, bl];
+  function onOrientation(e) {
+    // DeviceOrientationEvent gives angles in degrees:
+    // alpha ~ yaw, beta ~ pitch, gamma ~ roll (approx).
+    imuNow.yaw = (e.alpha ?? 0);
+    imuNow.pitch = (e.beta ?? 0);
+    imuNow.roll = (e.gamma ?? 0);
+
+    // If we already captured view1, compute deltas for gating Capture2
+    if (imuAtV1) {
+      const dy = angleDiffDeg(imuNow.yaw, imuAtV1.yaw);
+      const dp = angleDiffDeg(imuNow.pitch, imuAtV1.pitch);
+      const dr = angleDiffDeg(imuNow.roll, imuAtV1.roll);
+
+      dyawEl.textContent = dy.toFixed(1);
+      dpitchEl.textContent = dp.toFixed(1);
+      drollEl.textContent = dr.toFixed(1);
+
+      const ok = (Math.abs(dy) < ROT_THRESH_DEG.yaw &&
+                  Math.abs(dp) < ROT_THRESH_DEG.pitch &&
+                  Math.abs(dr) < ROT_THRESH_DEG.roll);
+
+      if (stage === "v1") {
+        imuGateEl.textContent = ok ? "OK for Capture 2 ✅ (rotation small)" : "Move mostly sideways (reduce rotation)";
+        imuGateEl.className = ok ? "ok" : "warn";
+        cap2Btn.disabled = !ok; // gate capture2 based on IMU stability
+      }
+    }
   }
 
-  /* =========================
-     MEASURE STARTER
-  ========================= */
-  function startMeasureROI() {
-    if (!streaming) { setOut("Start camera first.", true); return; }
-    if (!calibrated || !H) { setOut("Calibrate first (tap 4 corners).", true); return; }
-    mode = "measure";
-    drag.active = false;
-    overlayShape = null;
-    setOut("Drag an ROI around an object. Measurements update live.", false);
+  // Small helper to compute wrapped angle difference (deg)
+  function angleDiffDeg(a, b) {
+    let d = a - b;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    return d;
   }
 
-  /* =========================
-     CANVAS EVENTS
-  ========================= */
+  /********************************************************************
+   * 6) CAPTURE VIEW 1 / VIEW 2
+   * ---------------------------------------------------------------
+   * I grab gray frames from rawCanvas (which mirrors video unless frozenDisplay)
+   ********************************************************************/
+  function grabGrayFrame() {
+    // Read RGBA from rawCanvas, convert to grayscale
+    const src = cv.imread(rawCanvas);
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    src.delete();
+    return gray;
+  }
+
+  function captureView1() {
+    if (!streaming) return;
+
+    cleanupFrames();
+
+    gray1 = grabGrayFrame();
+
+    // Store IMU pose at Capture 1 (so we can show deltas)
+    imuAtV1 = imuEnabled ? { ...imuNow } : null;
+
+    // Reset UI gating text
+    dyawEl.textContent = "0";
+    dpitchEl.textContent = "0";
+    drollEl.textContent = "0";
+
+    cap2Btn.disabled = !imuEnabled; // if IMU is off, I disable capture2 to force permission (recommended)
+    setStage("v1");
+
+    setOut("Captured View 1 ✅ Now move phone sideways by baseline cm. Keep pitch/roll steady.", false);
+    imuGateEl.textContent = imuEnabled ? "Move sideways; wait for green gate" : "Enable IMU to proceed";
+    imuGateEl.className = imuEnabled ? "warn" : "warn";
+  }
+
+  function captureView2() {
+    if (!streaming || !gray1) return;
+
+    gray2 = grabGrayFrame();
+
+    // After capture2, optionally freeze display so the scene is stable
+    frozenDisplay = freezeToggle.checked;
+
+    // Compute pose (R,t) using global points
+    const ok = computePoseFromTwoViews();
+    if (!ok) {
+      setOut("Pose failed. Try again: more texture, more sideways baseline, less rotation.", true);
+      setStage("v1");
+      cap2Btn.disabled = false; // let you retry
+      return;
+    }
+
+    poseReady = true;
+    setStage("ready");
+    cap2Btn.disabled = true;
+    setOut("Pose ready ✅ Now drag ROI around objects to measure (no more captures needed).", false);
+  }
+
+  /********************************************************************
+   * 7) POSE FROM TWO VIEWS (GLOBAL FEATURES)
+   * ---------------------------------------------------------------
+   * This is the epipolar geometry core:
+   *  - Detect lots of corners in gray1 (full image)
+   *  - Track them to gray2 using Lucas-Kanade optical flow :contentReference[oaicite:8]{index=8}
+   *  - Estimate F with RANSAC
+   *  - Convert to E = K^T F K (from notes)
+   *  - recoverPose(E, pts1, pts2, K) -> R, t direction :contentReference[oaicite:9]{index=9}
+   *  - Scale t using preset baseline (cm input)
+   *  - Build P1, P2 for triangulation
+   ********************************************************************/
+  function computePoseFromTwoViews() {
+    if (!gray1 || !gray2 || !K) return false;
+
+    // Check OpenCV.js has the stuff we need
+    if (typeof cv.calcOpticalFlowPyrLK !== "function" ||
+        typeof cv.findFundamentalMat !== "function" ||
+        typeof cv.recoverPose !== "function" ||
+        typeof cv.triangulatePoints !== "function") {
+      setOut("OpenCV.js build missing calib3d/optical-flow functions. Use docs.opencv.org/4.x opencv.js.", true);
+      return false;
+    }
+
+    // 1) Detect corners in gray1
+    const corners1 = new cv.Mat();
+    cv.goodFeaturesToTrack(
+      gray1,
+      corners1,
+      900,       // max corners
+      0.01,      // quality level
+      10         // min distance
+    );
+
+    if (corners1.rows < 60) {
+      corners1.delete();
+      setOut("Not enough features. Try better lighting / more texture background.", true);
+      return false;
+    }
+
+    // 2) Track to gray2 using LK optical flow
+    const corners2 = new cv.Mat();
+    const status = new cv.Mat();
+    const err = new cv.Mat();
+
+    const winSize = new cv.Size(21,21);
+    const maxLevel = 3;
+    const criteria = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+
+    cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, winSize, maxLevel, criteria);
+
+    // 3) Filter good tracks into JS arrays
+    const pts1 = [];
+    const pts2 = [];
+
+    for (let i=0; i<status.rows; i++) {
+      const ok = status.ucharPtr(i,0)[0];
+      if (!ok) continue;
+
+      const x1 = corners1.data32F[i*2];
+      const y1 = corners1.data32F[i*2 + 1];
+      const x2 = corners2.data32F[i*2];
+      const y2 = corners2.data32F[i*2 + 1];
+
+      // Basic sanity check (inside image)
+      if (x2 < 0 || x2 >= gray2.cols || y2 < 0 || y2 >= gray2.rows) continue;
+
+      pts1.push({x:x1, y:y1});
+      pts2.push({x:x2, y:y2});
+    }
+
+    corners1.delete(); corners2.delete(); status.delete(); err.delete();
+
+    if (pts1.length < 60) {
+      setOut("Too few tracked points after filtering. Try again with less rotation.", true);
+      return false;
+    }
+
+    // 4) Estimate F with RANSAC (robust to outliers)
+    const pts1Mat = pointsToMat(pts1);
+    const pts2Mat = pointsToMat(pts2);
+    const mask = new cv.Mat();
+
+    const F = cv.findFundamentalMat(pts1Mat, pts2Mat, cv.FM_RANSAC, 1.5, 0.99, mask);
+
+    // Count inliers
+    let inliers = 0;
+    for (let i=0;i<mask.rows;i++) inliers += (mask.ucharPtr(i,0)[0] ? 1 : 0);
+
+    if (!F || F.rows !== 3 || inliers < 40) {
+      pts1Mat.delete(); pts2Mat.delete(); mask.delete();
+      if (F) F.delete();
+      setOut(`F failed or too few inliers (${inliers}). Increase baseline / reduce blur.`, true);
+      return false;
+    }
+
+    // 5) Compute E = K^T * F * K (from notes: F = K^{-T} E K^{-1}) :contentReference[oaicite:10]{index=10}
+    const E = computeEfromF(F, K);
+
+    // 6) Recover pose from E
+    // NOTE: recoverPose expects points and camera matrix; it returns R and t (direction).
+    cleanupPose();
+
+    R = new cv.Mat();
+    t = new cv.Mat();
+    const poseMask = new cv.Mat();
+
+    // Use the same point mats (pixel coords) + K
+    const num = cv.recoverPose(E, pts1Mat, pts2Mat, K, R, t, poseMask);
+
+    // Scale translation using baseline
+    const baselineCm = parseFloat(document.getElementById("baselineCm").value);
+    const baselineM = (isFinite(baselineCm) && baselineCm > 0) ? (baselineCm / 100.0) : null;
+    if (!baselineM) {
+      setOut("Baseline must be > 0 cm.", true);
+      pts1Mat.delete(); pts2Mat.delete(); mask.delete(); F.delete(); E.delete(); poseMask.delete();
+      return false;
+    }
+
+    const tnorm = Math.hypot(t.doubleAt(0,0), t.doubleAt(1,0), t.doubleAt(2,0));
+    const s = baselineM / Math.max(tnorm, 1e-9);
+    t.doublePtr(0,0)[0] *= s;
+    t.doublePtr(1,0)[0] *= s;
+    t.doublePtr(2,0)[0] *= s;
+
+    // 7) Build projection matrices P1 = K[I|0], P2 = K[R|t] :contentReference[oaicite:11]{index=11}
+    P1 = buildP1(K);
+    P2 = buildP2(K, R, t);
+
+    // Cleanup temp mats
+    pts1Mat.delete(); pts2Mat.delete(); mask.delete();
+    F.delete(); E.delete(); poseMask.delete();
+
+    setOut(`Pose OK ✅ inliers=${inliers}, poseInliers=${num}`, false);
+    return true;
+  }
+
+  /********************************************************************
+   * 8) MEASUREMENT BY ROI (THIS IS YOUR EXTRA CREDIT A INTERFACE)
+   * ---------------------------------------------------------------
+   * Once poseReady, every ROI drag runs:
+   *  - detect corners INSIDE ROI on view1
+   *  - track those points to view2
+   *  - triangulate points with P1,P2
+   *  - compute 3D extents (PCA-like via SVD)
+   *  - auto decide: ball D vs phone/box L/W vs spoon length
+   ********************************************************************/
+  function measureROI(rx, ry, rw, rh) {
+    if (!poseReady || !gray1 || !gray2 || !P1 || !P2) return null;
+
+    // ROI clamp
+    rx = Math.max(0, Math.min(rx, gray1.cols-1));
+    ry = Math.max(0, Math.min(ry, gray1.rows-1));
+    rw = Math.max(1, Math.min(rw, gray1.cols - rx));
+    rh = Math.max(1, Math.min(rh, gray1.rows - ry));
+
+    // Build mask for goodFeaturesToTrack so I only get points inside ROI
+    const mask = new cv.Mat(gray1.rows, gray1.cols, cv.CV_8U);
+    mask.setTo(new cv.Scalar(0));
+    const roiRect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
+    const maskROI = mask.roi(roiRect);
+    maskROI.setTo(new cv.Scalar(255));
+    maskROI.delete();
+
+    // Detect points inside ROI
+    const p1 = new cv.Mat();
+    cv.goodFeaturesToTrack(gray1, p1, 400, 0.01, 6, mask);
+
+    mask.delete();
+
+    if (p1.rows < 25) {
+      p1.delete();
+      return { ok:false, msg:"Not enough texture in ROI. Try tighter box or better lighting." };
+    }
+
+    // Track to view2
+    const p2 = new cv.Mat();
+    const status = new cv.Mat();
+    const err = new cv.Mat();
+
+    const winSize = new cv.Size(21,21);
+    const maxLevel = 3;
+    const criteria = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+
+    cv.calcOpticalFlowPyrLK(gray1, gray2, p1, p2, status, err, winSize, maxLevel, criteria);
+
+    // Filter good points into 2xN mats for triangulatePoints
+    const xs1 = [];
+    const ys1 = [];
+    const xs2 = [];
+    const ys2 = [];
+
+    for (let i=0; i<status.rows; i++) {
+      const ok = status.ucharPtr(i,0)[0];
+      if (!ok) continue;
+
+      const x1 = p1.data32F[i*2];
+      const y1 = p1.data32F[i*2 + 1];
+      const x2 = p2.data32F[i*2];
+      const y2 = p2.data32F[i*2 + 1];
+
+      // Keep only if still inside image
+      if (x2 < 0 || x2 >= gray2.cols || y2 < 0 || y2 >= gray2.rows) continue;
+
+      xs1.push(x1); ys1.push(y1);
+      xs2.push(x2); ys2.push(y2);
+    }
+
+    p1.delete(); p2.delete(); status.delete(); err.delete();
+
+    const N = xs1.length;
+    if (N < 20) return { ok:false, msg:"Too few tracked points in ROI. Try again." };
+
+    // Build 2xN mats for triangulatePoints
+    const m1 = new cv.Mat(2, N, cv.CV_64F);
+    const m2 = new cv.Mat(2, N, cv.CV_64F);
+    for (let i=0;i<N;i++){
+      m1.doublePtr(0,i)[0] = xs1[i];
+      m1.doublePtr(1,i)[0] = ys1[i];
+      m2.doublePtr(0,i)[0] = xs2[i];
+      m2.doublePtr(1,i)[0] = ys2[i];
+    }
+
+    // Triangulate => 4xN homogeneous points
+    const X4 = new cv.Mat();
+    cv.triangulatePoints(P1, P2, m1, m2, X4);
+    m1.delete(); m2.delete();
+
+    // Convert to Nx3 point cloud (meters)
+    const pts3 = [];
+    for (let i=0;i<N;i++){
+      const X = X4.doubleAt(0,i);
+      const Y = X4.doubleAt(1,i);
+      const Z = X4.doubleAt(2,i);
+      const W = X4.doubleAt(3,i);
+      if (Math.abs(W) < 1e-12) continue;
+
+      const x = X/W, y = Y/W, z = Z/W;
+
+      // Quick sanity filter:
+      // - reject crazy depths
+      // - reject negative z if it explodes (depends on coordinate convention)
+      if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
+      if (Math.abs(z) > 10) continue;  // >10m is probably wrong for tabletop demo
+
+      pts3.push([x,y,z]);
+    }
+    X4.delete();
+
+    if (pts3.length < 15) return { ok:false, msg:"Triangulation unstable. Try bigger baseline / less blur." };
+
+    // Compute principal extents using SVD (PCA-ish)
+    const ext = computeExtentsSVD(pts3); // meters
+    if (!ext) return { ok:false, msg:"SVD failed." };
+
+    // Convert to mm
+    const e1 = ext.e1 * 1000;
+    const e2 = ext.e2 * 1000;
+    const e3 = ext.e3 * 1000;
+
+    // Auto classify based on extents ratios
+    const r12 = e1 / Math.max(e2, 1e-9);
+    const r23 = e2 / Math.max(e3, 1e-9);
+
+    let measuredText = "";
+    let primaryMm = e1; // default "max length"
+
+    // Ball-ish: extents all similar
+    if (r12 < 1.2 && r23 < 1.2) {
+      const D = (e1 + e2 + e3) / 3.0;
+      measuredText = `D≈${D.toFixed(1)} mm (ball-ish)`;
+      primaryMm = D;
+    }
+    // Spoon-ish: very elongated
+    else if (r12 > 2.2) {
+      measuredText = `Length≈${e1.toFixed(1)} mm (spoon-ish)`;
+      primaryMm = e1;
+    }
+    // Phone/box-ish: two big dims, thickness small
+    else {
+      measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
+      primaryMm = e1;
+    }
+
+    return { ok:true, primaryMm, measuredText, Npts: pts3.length };
+  }
+
+  /********************************************************************
+   * 9) ROI DRAG EVENTS (THIS IS THE “ONE DRAG SELECT” UX)
+   ********************************************************************/
   canvas.addEventListener("mousedown", onDown);
   canvas.addEventListener("mousemove", onMove);
   canvas.addEventListener("mouseup", onUp);
@@ -614,275 +887,66 @@
   canvas.addEventListener("touchmove", onMove, {passive:false});
   canvas.addEventListener("touchend", onUp, {passive:false});
 
+  function canvasPointFromEvent(e) {
+    const rect = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : null;
+    const cx = t ? t.clientX : e.clientX;
+    const cy = t ? t.clientY : e.clientY;
+    return {
+      x: (cx - rect.left) * (canvas.width / rect.width),
+      y: (cy - rect.top)  * (canvas.height / rect.height)
+    };
+  }
+
   function onDown(e) {
     e.preventDefault();
     const p = canvasPointFromEvent(e);
-
-    if (mode === "cal4") {
-      calPts4.push(p);
-      if (calPts4.length === 4) finalizeCalibration4();
-      if (calPts4.length > 4) calPts4 = calPts4.slice(-4);
-      return;
-    }
-
-    if (mode === "measure") {
-      drag.active = true;
-      drag.x0 = drag.x1 = p.x;
-      drag.y0 = drag.y1 = p.y;
-    }
+    roi.active = true;
+    roi.x0 = roi.x1 = p.x;
+    roi.y0 = roi.y1 = p.y;
   }
 
   function onMove(e) {
-    if (!drag.active) return;
+    if (!roi.active) return;
     e.preventDefault();
     const p = canvasPointFromEvent(e);
-    drag.x1 = p.x; drag.y1 = p.y;
+    roi.x1 = p.x; roi.y1 = p.y;
   }
 
   function onUp(e) {
-    if (mode !== "measure") return;
-    if (!drag.active) return;
+    if (!roi.active) return;
     e.preventDefault();
-    drag.active = false;
+    roi.active = false;
 
-    const x = Math.min(drag.x0, drag.x1);
-    const y = Math.min(drag.y0, drag.y1);
-    const w = Math.abs(drag.x1 - drag.x0);
-    const h = Math.abs(drag.y1 - drag.y0);
+    const x = Math.min(roi.x0, roi.x1);
+    const y = Math.min(roi.y0, roi.y1);
+    const w = Math.abs(roi.x1 - roi.x0);
+    const h = Math.abs(roi.y1 - roi.y0);
+
     if (w < 12 || h < 12) return;
 
-    const res = measureInROI_rawCanvas(x, y, w, h, false);
-    if (!res) {
-      setOut("Could not detect object. Try tighter ROI / better lighting.", true);
-      return;
-    }
+    // Store overlay
+    lastOverlay = { x,y,w,h };
 
-    overlayShape = res.overlay;
-    setOut(`FINAL: ${res.measuredText}`, false);
-    logResult(res.primaryMm, res.measuredText);
-
-    // stay in measure mode so you can drag another ROI (extra credit b)
-  }
-
-  /* =========================
-     MEASUREMENT CORE
-     - Segments largest blob in ROI (Otsu both polarities)
-     - Computes oriented box dims (L, W) in mm via homography mapping
-     - If near-circular, also computes diameter estimate (D) using local scale
-  ========================= */
-  function measureInROI_rawCanvas(x, y, w, h, fast) {
-    if (!cvReady || !H) return null;
-
-    // clamp ROI
-    x = Math.max(0, Math.min(x, rawCanvas.width - 1));
-    y = Math.max(0, Math.min(y, rawCanvas.height - 1));
-    w = Math.max(1, Math.min(w, rawCanvas.width - x));
-    h = Math.max(1, Math.min(h, rawCanvas.height - y));
-
-    let src=null, roi=null, gray=null, blur=null, bw=null, bwInv=null;
-    let kernel=null, bwClean=null, bwCleanInv=null;
-
-    try {
-      src = cv.imread(rawCanvas);
-      roi = src.roi(new cv.Rect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)));
-
-      // optional downsample for live updates
-      let scale = 1.0;
-      if (fast) {
-        const maxDim = Math.max(w, h);
-        if (maxDim > 320) {
-          scale = 320 / maxDim;
-          const dsize = new cv.Size(Math.max(1, Math.round(w*scale)), Math.max(1, Math.round(h*scale)));
-          const roiSmall = new cv.Mat();
-          cv.resize(roi, roiSmall, dsize, 0, 0, cv.INTER_AREA);
-          roi.delete();
-          roi = roiSmall;
-          w = roi.cols; h = roi.rows;
-        }
+    // If pose is ready, measure immediately (slick UX).
+    if (poseReady) {
+      const res = measureROI(x,y,w,h);
+      if (!res.ok) {
+        setOut(res.msg, true);
+        return;
       }
-
-      gray = new cv.Mat();
-      cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY);
-
-      blur = new cv.Mat();
-      cv.GaussianBlur(gray, blur, new cv.Size(5,5), 0);
-
-      bw = new cv.Mat();
-      bwInv = new cv.Mat();
-      cv.threshold(blur, bw, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
-      cv.threshold(blur, bwInv, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
-
-      kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5));
-      bwClean = new cv.Mat();
-      bwCleanInv = new cv.Mat();
-      cv.morphologyEx(bw, bwClean, cv.MORPH_OPEN, kernel);
-      cv.morphologyEx(bwClean, bwClean, cv.MORPH_CLOSE, kernel);
-      cv.morphologyEx(bwInv, bwCleanInv, cv.MORPH_OPEN, kernel);
-      cv.morphologyEx(bwCleanInv, bwCleanInv, cv.MORPH_CLOSE, kernel);
-
-      function bestContourFrom(binaryMat) {
-        const cts = new cv.MatVector();
-        const hier = new cv.Mat();
-        cv.findContours(binaryMat, cts, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-        let best = null;
-        let bestArea = 0;
-        const roiArea = binaryMat.rows * binaryMat.cols;
-
-        for (let i=0; i<cts.size(); i++) {
-          const cnt = cts.get(i);
-          const area = cv.contourArea(cnt);
-          if (area > bestArea && area > 250 && area < 0.92 * roiArea) {
-            if (best) best.delete();
-            best = cnt;
-            bestArea = area;
-          } else {
-            cnt.delete();
-          }
-        }
-        cts.delete(); hier.delete();
-        return best;
-      }
-
-      const cntA = bestContourFrom(bwClean);
-      const cntB = bestContourFrom(bwCleanInv);
-
-      let cnt = null;
-      if (cntA && cntB) {
-        const aA = cv.contourArea(cntA);
-        const aB = cv.contourArea(cntB);
-        cnt = (aA >= aB) ? cntA : cntB;
-        if (cnt === cntA) cntB.delete(); else cntA.delete();
-      } else {
-        cnt = cntA || cntB;
-      }
-      if (!cnt) return null;
-
-      // rotated rect in ROI coords
-      const rect = cv.minAreaRect(cnt);
-
-      // build box points ourselves (avoid OpenCV.js API variability)
-      const box = computeBoxPoints(rect.center.x, rect.center.y, rect.size.width, rect.size.height, rect.angle);
-
-      // undo downsample scale back to original ROI pixels, then to full-image pixels
-      const ptsPx = box.map(p => {
-        let xx = p.x, yy = p.y;
-        if (fast && scale !== 1.0) { xx /= scale; yy /= scale; }
-        return { x: x + xx, y: y + yy };
-      });
-
-      // map corners to mm plane
-      const ptsMm = ptsPx.map(p => applyHomography(H, p.x, p.y)).filter(Boolean);
-      if (ptsMm.length !== 4) { cnt.delete(); return null; }
-
-      // edge lengths in mm
-      const edges = [];
-      for (let i=0;i<4;i++){
-        const a = ptsMm[i];
-        const b = ptsMm[(i+1)%4];
-        edges.push(Math.hypot(b.X - a.X, b.Y - a.Y));
-      }
-      const Lmm = Math.max(...edges);
-      const Wmm = Math.min(...edges);
-
-      // Determine if it is "ball-like" (near-square box)
-      const ratio = (Wmm > 1e-6) ? (Lmm / Wmm) : 999;
-      let measuredText = `L=${Lmm.toFixed(1)} mm, W=${Wmm.toFixed(1)} mm`;
-      let primaryMm = Lmm;
-      let overlay = { type: 'rect', pts: ptsPx };
-
-      // Optional: diameter estimate using enclosing circle + local scale
-      // Use only when shape is near circular and user probably expects diameter.
-      if (ratio < 1.15) {
-        // Try minEnclosingCircle (exists in OpenCV.js builds)
-        if (typeof cv.minEnclosingCircle === "function") {
-          const circ = cv.minEnclosingCircle(cnt); // {center:{x,y}, radius}
-          let cx = circ.center.x, cy = circ.center.y, r = circ.radius;
-
-          // rescale center/radius if downsampled
-          if (fast && scale !== 1.0) { cx /= scale; cy /= scale; r /= scale; }
-
-          const cPx = { x: x + cx, y: y + cy };
-
-          // local mm/px from homography (average of x/y steps)
-          const mmpp = localMmPerPx(H, cPx.x, cPx.y);
-          if (mmpp && isFinite(mmpp)) {
-            const Dmm = 2.0 * r * mmpp;
-            measuredText = `D=${Dmm.toFixed(1)} mm`;
-            primaryMm = Dmm;
-            overlay = { type: 'circle', c: cPx, r: r };
-          }
-        }
-      }
-
-      cnt.delete();
-      return { Lmm, Wmm, primaryMm, measuredText, overlay };
-
-    } catch (e) {
-      console.error(e);
-      return null;
-    } finally {
-      if (src) src.delete();
-      if (roi) roi.delete();
-      if (gray) gray.delete();
-      if (blur) blur.delete();
-      if (bw) bw.delete();
-      if (bwInv) bwInv.delete();
-      if (kernel) kernel.delete();
-      if (bwClean) bwClean.delete();
-      if (bwCleanInv) bwCleanInv.delete();
+      setOut(`FINAL: ${res.measuredText}`, false);
+      logResult(res);
+    } else {
+      // If not ready, just tell you what to do next.
+      setOut("ROI drawn ✅ Now capture View 1 and View 2 first.", true);
     }
   }
 
-  // Compute 4 corners of rotated rectangle from center, size, angle (degrees)
-  function computeBoxPoints(cx, cy, w, h, angleDeg) {
-    const a = angleDeg * Math.PI/180.0;
-    const cos = Math.cos(a), sin = Math.sin(a);
-    const hw = w/2.0, hh = h/2.0;
-
-    // corners in local rect coords
-    const pts = [
-      {x: -hw, y: -hh},
-      {x:  hw, y: -hh},
-      {x:  hw, y:  hh},
-      {x: -hw, y:  hh},
-    ];
-
-    // rotate + translate
-    return pts.map(p => ({
-      x: cx + (p.x * cos - p.y * sin),
-      y: cy + (p.x * sin + p.y * cos)
-    }));
-  }
-
-  function applyHomography(Hmat, x, y) {
-    const h = Hmat.data64F || Hmat.data32F;
-    if (!h) return null;
-
-    const X = h[0]*x + h[1]*y + h[2];
-    const Y = h[3]*x + h[4]*y + h[5];
-    const W = h[6]*x + h[7]*y + h[8];
-    if (Math.abs(W) < 1e-9) return null;
-    return { X: X/W, Y: Y/W };
-  }
-
-  // local scale from homography at (x,y): average mm per pixel along x/y
-  function localMmPerPx(Hmat, x, y) {
-    const P  = applyHomography(Hmat, x, y);
-    const Px = applyHomography(Hmat, x + 10, y);
-    const Py = applyHomography(Hmat, x, y + 10);
-    if (!P || !Px || !Py) return null;
-    const sx = Math.hypot(Px.X - P.X, Px.Y - P.Y) / 10.0;
-    const sy = Math.hypot(Py.X - P.X, Py.Y - P.Y) / 10.0;
-    return 0.5 * (sx + sy);
-  }
-
-  /* =========================
-     RESULTS TABLE
-     - We store a "primary" mm (D if ball-like else L)
-     - And show the full measuredText (either D=... or L/W)
-  ========================= */
-  function logResult(primaryMm, measuredText) {
+  /********************************************************************
+   * 10) RESULTS TABLE LOGGING
+   ********************************************************************/
+  function logResult(res) {
     const nameIn = (document.getElementById("objName").value || "").trim();
     const name = nameIn.length ? nameIn : `Object ${results.length + 1}`;
 
@@ -890,24 +954,24 @@
     const gtMm = (isFinite(gtVal) && gtVal > 0) ? gtVal : null;
 
     let errPct = null;
-    if (gtMm != null) errPct = Math.abs(primaryMm - gtMm) / gtMm * 100.0;
+    if (gtMm != null) errPct = Math.abs(res.primaryMm - gtMm) / gtMm * 100.0;
 
-    results.push({ name, measuredText, gtMm, errPct });
+    results.push({ name, measuredText: res.measuredText, gtMm, errPct, npts: res.Npts });
     updateResCount();
 
-    const idx = results.length;
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${idx}</td>
+      <td>${results.length}</td>
       <td>${escapeHtml(name)}</td>
-      <td>${escapeHtml(measuredText)}</td>
+      <td>${escapeHtml(res.measuredText)}</td>
       <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
       <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
+      <td>${res.Npts}</td>
     `;
     resultsBody.appendChild(tr);
 
     if (errPct != null && errPct > 10) {
-      setOut(`${name}: ${measuredText} | GT ${gtMm.toFixed(1)} | error ${errPct.toFixed(1)}%`, true);
+      setOut(`${name}: ${res.measuredText} | GT ${gtMm.toFixed(1)} | error ${errPct.toFixed(1)}%`, true);
     }
   }
 
@@ -922,75 +986,168 @@
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  /* =========================
-     IMU (optional)
-  ========================= */
-  async function toggleIMU() {
-    if (!imuToggle.checked) {
-      imuTable.style.display = "none";
-      window.removeEventListener("devicemotion", handleMotion);
-      window.removeEventListener("deviceorientation", handleOrientation);
-      return;
+  /********************************************************************
+   * 11) MATH + OPENCV HELPERS
+   ********************************************************************/
+  function buildScaledK(W, H) {
+    // Scale intrinsic parameters from calibration resolution to runtime resolution
+    const sx = W / CALIB.calW;
+    const sy = H / CALIB.calH;
+
+    const fx = CALIB.fx * sx;
+    const fy = CALIB.fy * sy;
+    const cx = CALIB.cx * sx;
+    const cy = CALIB.cy * sy;
+
+    // Build cv.Mat 3x3 (CV_64F)
+    const Km = cv.matFromArray(3,3,cv.CV_64F, [
+      fx, 0,  cx,
+      0,  fy, cy,
+      0,  0,  1
+    ]);
+    return Km;
+  }
+
+  function pointsToMat(pts) {
+    // Nx1 CV_32FC2
+    const data = [];
+    for (const p of pts) { data.push(p.x, p.y); }
+    return cv.matFromArray(pts.length, 1, cv.CV_32FC2, data);
+  }
+
+  function computeEfromF(F, K) {
+    // E = K^T * F * K
+    const Kt = new cv.Mat();
+    cv.transpose(K, Kt);
+
+    const tmp = new cv.Mat();
+    const E = new cv.Mat();
+
+    // tmp = K^T * F
+    cv.gemm(Kt, F, 1, new cv.Mat(), 0, tmp);
+    // E = tmp * K
+    cv.gemm(tmp, K, 1, new cv.Mat(), 0, E);
+
+    Kt.delete(); tmp.delete();
+    return E;
+  }
+
+  function buildP1(K) {
+    // P1 = K [I|0]
+    const fx = K.doubleAt(0,0), fy = K.doubleAt(1,1);
+    const cx = K.doubleAt(0,2), cy = K.doubleAt(1,2);
+    return cv.matFromArray(3,4,cv.CV_64F, [
+      fx, 0,  cx, 0,
+      0,  fy, cy, 0,
+      0,  0,  1,  0
+    ]);
+  }
+
+  function buildP2(K, R, t) {
+    // Build [R|t] then multiply by K
+    const Rt = cv.matFromArray(3,4,cv.CV_64F, [
+      R.doubleAt(0,0), R.doubleAt(0,1), R.doubleAt(0,2), t.doubleAt(0,0),
+      R.doubleAt(1,0), R.doubleAt(1,1), R.doubleAt(1,2), t.doubleAt(1,0),
+      R.doubleAt(2,0), R.doubleAt(2,1), R.doubleAt(2,2), t.doubleAt(2,0),
+    ]);
+
+    const P = new cv.Mat();
+    cv.gemm(K, Rt, 1, new cv.Mat(), 0, P); // P = K * [R|t]
+    Rt.delete();
+    return P;
+  }
+
+  function computeExtentsSVD(pts3) {
+    // pts3: array of [x,y,z] in meters
+    // I compute extents along principal axes using SVD of centered data.
+
+    const N = pts3.length;
+    if (N < 5) return null;
+
+    // Compute mean
+    let mx=0,my=0,mz=0;
+    for (const p of pts3) { mx+=p[0]; my+=p[1]; mz+=p[2]; }
+    mx/=N; my/=N; mz/=N;
+
+    // Build centered matrix A (N x 3)
+    const A = new cv.Mat(N, 3, cv.CV_64F);
+    for (let i=0;i<N;i++){
+      A.doublePtr(i,0)[0] = pts3[i][0] - mx;
+      A.doublePtr(i,1)[0] = pts3[i][1] - my;
+      A.doublePtr(i,2)[0] = pts3[i][2] - mz;
     }
-    imuTable.style.display = "table";
 
-    try {
-      if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
-        const p1 = await DeviceMotionEvent.requestPermission();
-        if (p1 !== "granted") throw new Error("Motion denied");
-      }
-      if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-        const p2 = await DeviceOrientationEvent.requestPermission();
-        if (p2 !== "granted") throw new Error("Orientation denied");
-      }
-      window.addEventListener("devicemotion", handleMotion);
-      window.addEventListener("deviceorientation", handleOrientation);
-    } catch (err) {
-      console.error(err);
-      imuToggle.checked = false;
-      imuTable.style.display = "none";
-      setOut("IMU permission denied.", true);
+    // SVD: A = U * diag(W) * Vt
+    const W = new cv.Mat();
+    const U = new cv.Mat();
+    const Vt = new cv.Mat();
+    cv.SVDecomp(A, W, U, Vt);
+
+    // Principal axes are rows of Vt (3x3). Project points: Y = A * V (V = Vt^T)
+    const V = new cv.Mat();
+    cv.transpose(Vt, V);
+
+    const Y = new cv.Mat();
+    cv.gemm(A, V, 1, new cv.Mat(), 0, Y); // (N x 3)
+
+    // Find min/max along each axis
+    let min0=1e9,max0=-1e9,min1=1e9,max1=-1e9,min2=1e9,max2=-1e9;
+    for (let i=0;i<N;i++){
+      const a0 = Y.doubleAt(i,0);
+      const a1 = Y.doubleAt(i,1);
+      const a2 = Y.doubleAt(i,2);
+      if (a0<min0) min0=a0; if (a0>max0) max0=a0;
+      if (a1<min1) min1=a1; if (a1>max1) max1=a1;
+      if (a2<min2) min2=a2; if (a2>max2) max2=a2;
     }
+
+    // extents along principal axes (meters)
+    const e = [max0-min0, max1-min1, max2-min2].sort((a,b)=>b-a);
+
+    // cleanup
+    A.delete(); W.delete(); U.delete(); Vt.delete(); V.delete(); Y.delete();
+
+    return { e1:e[0], e2:e[1], e3:e[2] };
   }
 
-  function handleMotion(event) {
-    document.getElementById("ax").innerText = (event.acceleration?.x || 0).toFixed(2);
-    document.getElementById("ay").innerText = (event.acceleration?.y || 0).toFixed(2);
-    document.getElementById("az").innerText = (event.acceleration?.z || 0).toFixed(2);
-    document.getElementById("gx").innerText = (event.rotationRate?.alpha || 0).toFixed(2);
-    document.getElementById("gy").innerText = (event.rotationRate?.beta || 0).toFixed(2);
-    document.getElementById("gz").innerText = (event.rotationRate?.gamma || 0).toFixed(2);
+  /********************************************************************
+   * 12) CLEANUP HELPERS
+   ********************************************************************/
+  function cleanupFrames() {
+    if (gray1) { gray1.delete(); gray1 = null; }
+    if (gray2) { gray2.delete(); gray2 = null; }
+    poseReady = false;
+    frozenDisplay = false;
   }
 
-  function handleOrientation(event) {
-    document.getElementById("yaw").innerText   = (event.alpha || 0).toFixed(2);
-    document.getElementById("pitch").innerText = (event.beta  || 0).toFixed(2);
-    document.getElementById("roll").innerText  = (event.gamma || 0).toFixed(2);
+  function cleanupPose() {
+    if (R) { R.delete(); R = null; }
+    if (t) { t.delete(); t = null; }
+    if (P1) { P1.delete(); P1 = null; }
+    if (P2) { P2.delete(); P2 = null; }
   }
 
-  /* =========================
-     RESET
-  ========================= */
   function resetAll() {
-    mode = "idle";
-    calPts4 = [];
-    calibrated = false;
-    overlayShape = null;
+    cleanupFrames();
+    cleanupPose();
 
-    if (H) { H.delete(); H = null; }
+    results = [];
+    resultsBody.innerHTML = "";
+    updateResCount();
 
-    drag.active = false;
+    roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
+    lastOverlay = null;
+    imuAtV1 = null;
 
-    frozen = false;
-    freezeToggle.checked = false;
-
-    setOut("Reset done. Calibrate again.", false);
-    updateCalInfo();
+    cap2Btn.disabled = true;
+    setStage(streaming ? "live" : "idle");
+    setOut("Reset ✅ Start over: Capture 1 then Capture 2 then drag ROI.", false);
+    imuGateEl.textContent = imuEnabled ? "IMU on" : "IMU off";
+    imuGateEl.className = imuEnabled ? "ok" : "warn";
   }
 
-  // init
+  // Initialize result counter
   updateResCount();
-  updateCalInfo();
   </script>
 </body>
 </html>
