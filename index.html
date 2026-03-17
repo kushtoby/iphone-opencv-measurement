@@ -84,6 +84,12 @@
         <button id="clearBtn" onclick="clearResults()">Clear Results</button>
       </div>
 
+      <!-- NEW: Freeze frame toggle -->
+      <label>
+        <input type="checkbox" id="freezeToggle">
+        Freeze frame (measure multiple objects in same scene)
+      </label>
+
       <label>Object name:
         <input id="objName" type="text" placeholder="e.g., spoon" style="width:200px;">
       </label>
@@ -154,6 +160,10 @@ const cal2Btn  = document.getElementById("cal2Btn");
 const cal4Btn  = document.getElementById("cal4Btn");
 const measureBtn = document.getElementById("measureBtn");
 
+/* NEW: Freeze toggle state */
+const freezeToggle = document.getElementById("freezeToggle");
+let frozen = false;
+
 let mode = "idle"; // idle | cal2 | cal4 | measure
 
 // 2-point scale
@@ -183,6 +193,21 @@ function setOut(msg, isWarn=false) {
   out.textContent = msg;
   out.className = isWarn ? "warn" : "";
 }
+
+/* NEW: Freeze toggle handler */
+freezeToggle.addEventListener("change", () => {
+  frozen = freezeToggle.checked;
+
+  if (frozen) {
+    if (streaming) {
+      // capture current frame into rawCanvas once
+      rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
+    }
+    setOut("Frozen ✅ Drag ROIs to measure multiple objects in the same scene.", false);
+  } else {
+    setOut("Live camera resumed.", false);
+  }
+});
 
 /* =========================
    OpenCV READY GATE
@@ -228,6 +253,10 @@ async function startCamera() {
       cal4Btn.disabled = false;
       measureBtn.disabled = false;
 
+      // NEW: ensure unfrozen when starting camera
+      frozen = false;
+      freezeToggle.checked = false;
+
       setOut("Camera started. Calibrate (2 pts or 4 corners), then drag to measure.", false);
       updateCalInfo();
       processVideo();
@@ -248,6 +277,11 @@ function stopCamera() {
   cal2Btn.disabled = true;
   cal4Btn.disabled = true;
   measureBtn.disabled = true;
+
+  // NEW: clear freeze when stopping camera
+  frozen = false;
+  freezeToggle.checked = false;
+
   setOut("Camera stopped.", false);
 }
 
@@ -257,8 +291,10 @@ function stopCamera() {
 function processVideo() {
   if (!streaming) return;
 
-  // draw raw frame (never overwrite)
-  rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
+  // NEW: Only update raw frame if not frozen
+  if (!frozen) {
+    rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
+  }
 
   // draw raw to visible
   ctx.drawImage(rawCanvas, 0, 0, canvas.width, canvas.height);
@@ -387,7 +423,6 @@ function startCalibrate4() {
   if (!streaming) { setOut("Start camera first.", true); return; }
   mode = "cal4";
   calPts4 = [];
-  // keep old H until we finish? we'll overwrite safely at the end
   setOut("Calibrate (4 corners): tap the 4 corners of the card/rectangle.", false);
 }
 
@@ -469,6 +504,8 @@ function onUp(e) {
   liveLine = { p0: res.p0_px, p1: res.p1_px };
   setOut(`FINAL: ${res.lengthMm.toFixed(1)} mm`, false);
   logResult(res.lengthMm);
+
+  // IMPORTANT: we stay in measure mode so you can drag another ROI (extra credit b)
 }
 
 /* =========================
@@ -493,7 +530,6 @@ function finalizeCalibration2() {
    CALIBRATION FINALIZE: 4 CORNERS HOMOGRAPHY
 ========================= */
 function orderQuad(pts) {
-  // robust ordering: TL min(x+y), BR max(x+y), TR min(x-y), BL max(x-y)
   const sum = pts.map(p => p.x + p.y);
   const diff = pts.map(p => p.x - p.y);
 
@@ -514,15 +550,13 @@ function finalizeCalibration4() {
 
   const q = orderQuad(calPts4);
 
-  // src (image px)
   const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
-    q[0].x, q[0].y,  // TL
-    q[1].x, q[1].y,  // TR
-    q[2].x, q[2].y,  // BR
-    q[3].x, q[3].y   // BL
+    q[0].x, q[0].y,
+    q[1].x, q[1].y,
+    q[2].x, q[2].y,
+    q[3].x, q[3].y
   ]);
 
-  // dst (plane mm)
   const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
     0,   0,
     W,   0,
@@ -531,11 +565,11 @@ function finalizeCalibration4() {
   ]);
 
   try {
-    const newH = cv.getPerspectiveTransform(srcPts, dstPts); // 3x3
+    const newH = cv.getPerspectiveTransform(srcPts, dstPts);
     if (H) H.delete();
     H = newH;
     useHomography = true;
-    mmPerPx = null; // not needed when using H
+    mmPerPx = null;
     mode = "idle";
     setOut("Homography calibrated ✅ (4 corners). Now Measure (drag box).", false);
     updateCalInfo();
@@ -560,14 +594,10 @@ function updateCalInfo() {
 
 /* =========================
    MEASUREMENT: find contour blob + farthest pair
-   - Uses Otsu threshold (more stable than edges)
-   - Uses farthest contour points for length (better than minAreaRect)
-   - If homography is calibrated, converts endpoints to mm via H
 ========================= */
 function measureInROI_rawCanvas(x, y, w, h, fast) {
   if (!cvReady) return null;
 
-  // clamp ROI
   x = Math.max(0, Math.min(x, rawCanvas.width - 1));
   y = Math.max(0, Math.min(y, rawCanvas.height - 1));
   w = Math.max(1, Math.min(w, rawCanvas.width - x));
@@ -575,7 +605,6 @@ function measureInROI_rawCanvas(x, y, w, h, fast) {
 
   let src=null, roi=null, gray=null, blur=null, bw=null, bwInv=null;
   let kernel=null, bwClean=null, bwCleanInv=null;
-  let contours=null, hierarchy=null;
 
   try {
     src = cv.imread(rawCanvas);
@@ -592,7 +621,6 @@ function measureInROI_rawCanvas(x, y, w, h, fast) {
         cv.resize(roi, roiSmall, dsize, 0, 0, cv.INTER_AREA);
         roi.delete();
         roi = roiSmall;
-        // update w,h for processing
         w = roi.cols; h = roi.rows;
       }
     }
@@ -603,7 +631,6 @@ function measureInROI_rawCanvas(x, y, w, h, fast) {
     blur = new cv.Mat();
     cv.GaussianBlur(gray, blur, new cv.Size(5,5), 0);
 
-    // Otsu both polarities, choose best contour later
     bw = new cv.Mat();
     bwInv = new cv.Mat();
     cv.threshold(blur, bw, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
@@ -617,7 +644,6 @@ function measureInROI_rawCanvas(x, y, w, h, fast) {
     cv.morphologyEx(bwInv, bwCleanInv, cv.MORPH_OPEN, kernel);
     cv.morphologyEx(bwCleanInv, bwCleanInv, cv.MORPH_CLOSE, kernel);
 
-    // helper: pick best contour by area, but avoid selecting "almost entire ROI"
     function bestContourFrom(binaryMat) {
       const cts = new cv.MatVector();
       const hier = new cv.Mat();
@@ -630,10 +656,9 @@ function measureInROI_rawCanvas(x, y, w, h, fast) {
       for (let i=0; i<cts.size(); i++) {
         const cnt = cts.get(i);
         const area = cv.contourArea(cnt);
-        // ignore too tiny, ignore near-full ROI (likely background)
         if (area > bestArea && area > 200 && area < 0.90 * roiArea) {
           if (best) best.delete();
-          best = cnt; // keep this
+          best = cnt;
           bestArea = area;
         } else {
           cnt.delete();
@@ -658,12 +683,10 @@ function measureInROI_rawCanvas(x, y, w, h, fast) {
 
     if (!cnt) return null;
 
-    // get contour points
-    const data = cnt.data32S; // [x0,y0,x1,y1,...] in ROI coords (possibly downsampled ROI)
+    const data = cnt.data32S;
     const n = data.length / 2;
     if (n < 2) { cnt.delete(); return null; }
 
-    // farthest pair (O(n^2) but n is usually small after chain approx)
     let maxD2 = -1;
     let iBest=0, jBest=1;
     for (let i=0; i<n; i++) {
@@ -676,23 +699,18 @@ function measureInROI_rawCanvas(x, y, w, h, fast) {
       }
     }
 
-    // endpoints in ROI coords
     let p0r = { x: data[2*iBest], y: data[2*iBest+1] };
     let p1r = { x: data[2*jBest], y: data[2*jBest+1] };
 
-    // undo downsample scaling back to original ROI pixels
     if (fast && scale !== 1.0) {
       p0r.x /= scale; p0r.y /= scale;
       p1r.x /= scale; p1r.y /= scale;
     }
 
-    // convert to full-image pixel coords (add ROI offset)
     const p0 = { x: x + p0r.x, y: y + p0r.y };
     const p1 = { x: x + p1r.x, y: y + p1r.y };
 
-    // compute length in mm
     let lengthMm = null;
-    const lengthPx = Math.sqrt(maxD2) * (fast && scale !== 1.0 ? (1/scale) : 1);
 
     if (useHomography && H) {
       const P0 = applyHomography(H, p0.x, p0.y);
@@ -727,14 +745,10 @@ function measureInROI_rawCanvas(x, y, w, h, fast) {
     if (kernel) kernel.delete();
     if (bwClean) bwClean.delete();
     if (bwCleanInv) bwCleanInv.delete();
-    if (contours) contours.delete();
-    if (hierarchy) hierarchy.delete();
   }
 }
 
-// Apply 3x3 homography (image px -> plane mm)
 function applyHomography(Hmat, x, y) {
-  // Hmat is cv.Mat 3x3 (CV_64F)
   const h = Hmat.data64F || Hmat.data32F;
   if (!h) return null;
 
@@ -842,6 +856,11 @@ function resetAll() {
   liveLine = null;
   drag.active = false;
   if (H) { H.delete(); H = null; }
+
+  // NEW: reset freeze state
+  frozen = false;
+  freezeToggle.checked = false;
+
   setOut("Reset done. Calibrate again.", false);
   updateCalInfo();
 }
