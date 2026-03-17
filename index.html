@@ -6,18 +6,18 @@
   <title>iPhone Measure (OpenCV.js)</title>
   <style>
     body { text-align:center; font-family:sans-serif; margin: 12px; }
-    canvas { width:100%; max-width:520px; border-radius:12px; border: 1px solid #ddd; touch-action: none; }
+    canvas { width:100%; max-width:520px; border-radius:12px; border: 1px solid #ddd; touch-action:none; }
     button, select, input { padding:10px 14px; margin:6px; font-size: 16px; }
     label { display:block; margin:8px; font-size:16px; }
-    table { margin:10px auto; border-collapse: collapse; }
-    td, th { border:1px solid #ccc; padding:6px 10px; }
+    table { margin:10px auto; border-collapse: collapse; width: 100%; max-width: 520px; }
+    td, th { border:1px solid #ccc; padding:6px 10px; font-size: 14px; }
     #imuTable { display:none; }
     #panel { max-width: 520px; margin: 0 auto; text-align: left; }
-    #out { margin-top: 10px; font-weight: 700; text-align: center; }
+    #out { margin-top: 10px; font-weight: 800; text-align: center; }
     .row { display:flex; flex-wrap: wrap; gap: 6px; justify-content:center; }
     .small { font-size: 13px; color: #444; }
-    .warn { color: #a00; font-weight: 700; }
-    .ok { color: #080; font-weight: 700; }
+    .warn { color: #a00; font-weight: 800; }
+    .ok { color: #080; font-weight: 800; }
     .box { padding: 10px; border: 1px solid #eee; border-radius: 10px; margin-top: 8px; }
   </style>
 </head>
@@ -32,7 +32,7 @@
   <div class="row">
     <button id="startBtn" onclick="startCamera()" disabled>Start Camera</button>
     <button id="stopBtn" onclick="stopCamera()" disabled>Stop</button>
-    <button id="resetBtn" onclick="resetAll()">Reset</button>
+    <button onclick="resetAll()">Reset</button>
   </div>
 
   <div class="box">
@@ -42,7 +42,7 @@
 
     <label>
       <input type="checkbox" id="featureToggle">
-      Show Edges + Corners (debug)
+      Show Edges + Corners (debug only)
     </label>
 
     <label>
@@ -50,80 +50,78 @@
       Show IMU Data (optional)
     </label>
 
-    <label>
-      Mode:
-      <select id="modeSel">
-        <option value="ref" selected>Known-length segment (recommended)</option>
-        <option value="noref">No reference (experimental)</option>
-      </select>
-    </label>
+    <div class="box">
+      <div class="small">
+        Calibration options (use ONE):
+        <ul>
+          <li><b>Best:</b> 4-corner credit card (homography) → reduces perspective error.</li>
+          <li>Fallback: 2-point known segment (mm/px) → more error if phone is tilted.</li>
+        </ul>
+      </div>
 
-    <div id="refUI" class="box">
       <div class="row">
-        <button id="calRefBtn" onclick="startCalibrateRef()" disabled>Calibrate (tap 2 pts)</button>
+        <button id="cal2Btn" onclick="startCalibrate2()" disabled>Calibrate (2 pts)</button>
         <input id="knownMm" type="number" value="85.6" step="0.1" style="width:110px;">
         <span style="align-self:center;">mm</span>
       </div>
-      <div class="row">
-        <button id="measureRoiBtn" onclick="startMeasureROI()" disabled>Measure (drag box)</button>
-      </div>
-      <div class="small">
-        Tip: Use a longer known segment if you can (e.g., 100 mm ruler mark). Keep it near the object.
-      </div>
-    </div>
 
-    <div id="noRefUI" class="box" style="display:none;">
-      <div class="small warn">
-        Experimental: accuracy can drift. Use only as “bonus”.
-      </div>
-      <label>Phone height above table (mm):
-        <input id="camH" type="number" value="450" step="1" style="width:120px;">
-      </label>
-      <label>Assumed horizontal FOV (deg):
-        <input id="fovDeg" type="number" value="60" step="0.1" style="width:120px;">
-      </label>
       <div class="row">
-        <button id="measureNoRefBtn" onclick="startMeasureNoRef()" disabled>Measure (tap 2 endpoints)</button>
+        <button id="cal4Btn" onclick="startCalibrate4()" disabled>Calibrate (4 corners)</button>
+        <input id="cardW" type="number" value="85.6" step="0.1" style="width:90px;">
+        <span style="align-self:center;">W mm</span>
+        <input id="cardH" type="number" value="53.98" step="0.1" style="width:90px;">
+        <span style="align-self:center;">H mm</span>
       </div>
+
       <div class="small">
-        Keep the phone steady. Try to minimize roll/tilt for better results.
+        Tip: For the 4-corner method, tap corners in any order — it auto-orders them.
       </div>
     </div>
 
     <div class="box">
+      <div class="row">
+        <button id="measureBtn" onclick="startMeasureROI()" disabled>Measure (drag box)</button>
+        <button id="clearBtn" onclick="clearResults()">Clear Results</button>
+      </div>
+
       <label>Object name:
         <input id="objName" type="text" placeholder="e.g., spoon" style="width:200px;">
       </label>
       <label>Ground truth (mm) (optional, for error %):
         <input id="gtMm" type="number" step="0.1" placeholder="e.g., 165.0" style="width:140px;">
       </label>
-      <div class="row">
-        <button onclick="downloadCSV()">Download CSV</button>
-        <button onclick="clearResults()">Clear Results</button>
-      </div>
-      <div class="small" id="resCount">Results: 0</div>
+
+      <div class="small" id="calInfo">Calibration: none</div>
+      <div id="out"></div>
     </div>
-
-    <div id="out"></div>
   </div>
-
-  <table id="imuTable">
-    <tr><th colspan="2">Acceleration (m/s²)</th></tr>
-    <tr><td>X</td><td id="ax">0</td></tr>
-    <tr><td>Y</td><td id="ay">0</td></tr>
-    <tr><td>Z</td><td id="az">0</td></tr>
-
-    <tr><th colspan="2">Gyroscope (deg/s)</th></tr>
-    <tr><td>Alpha</td><td id="gx">0</td></tr>
-    <tr><td>Beta</td><td id="gy">0</td></tr>
-    <tr><td>Gamma</td><td id="gz">0</td></tr>
-
-    <tr><th colspan="2">Orientation (deg)</th></tr>
-    <tr><td>Yaw</td><td id="yaw">0</td></tr>
-    <tr><td>Pitch</td><td id="pitch">0</td></tr>
-    <tr><td>Roll</td><td id="roll">0</td></tr>
-  </table>
 </div>
+
+<table id="resultsTable">
+  <thead>
+    <tr>
+      <th>#</th><th>Object</th><th>Measured (mm)</th><th>GT (mm)</th><th>Error %</th>
+    </tr>
+  </thead>
+  <tbody id="resultsBody"></tbody>
+</table>
+
+<table id="imuTable">
+  <tr><th colspan="2">Acceleration (m/s²)</th></tr>
+  <tr><td>X</td><td id="ax">0</td></tr>
+  <tr><td>Y</td><td id="ay">0</td></tr>
+  <tr><td>Z</td><td id="az">0</td></tr>
+
+  <tr><th colspan="2">Gyroscope (deg/s)</th></tr>
+  <tr><td>Alpha</td><td id="gx">0</td></tr>
+  <tr><td>Beta</td><td id="gy">0</td></tr>
+  <tr><td>Gamma</td><td id="gz">0</td></tr>
+
+  <tr><th colspan="2">Orientation (deg)</th></tr>
+  <tr><td>Yaw</td><td id="yaw">0</td></tr>
+  <tr><td>Pitch</td><td id="pitch">0</td></tr>
+  <tr><td>Roll</td><td id="roll">0</td></tr>
+</table>
 
 <!-- OpenCV.js -->
 <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
@@ -148,36 +146,48 @@ const featureToggle = document.getElementById("featureToggle");
 const imuToggle = document.getElementById("imuToggle");
 const imuTable = document.getElementById("imuTable");
 const statusEl = document.getElementById("status");
-
-const modeSel = document.getElementById("modeSel");
-const refUI = document.getElementById("refUI");
-const noRefUI = document.getElementById("noRefUI");
+const calInfoEl = document.getElementById("calInfo");
 
 const startBtn = document.getElementById("startBtn");
 const stopBtn  = document.getElementById("stopBtn");
-const calRefBtn = document.getElementById("calRefBtn");
-const measureRoiBtn = document.getElementById("measureRoiBtn");
-const measureNoRefBtn = document.getElementById("measureNoRefBtn");
+const cal2Btn  = document.getElementById("cal2Btn");
+const cal4Btn  = document.getElementById("cal4Btn");
+const measureBtn = document.getElementById("measureBtn");
 
-let mode = "idle"; // "idle" | "calibrate_ref" | "measure_roi" | "measure_noref"
+let mode = "idle"; // idle | cal2 | cal4 | measure
 
-let calPts = [];     // [{x,y},{x,y}]
+// 2-point scale
+let calPts2 = [];     // [{x,y},{x,y}]
 let mmPerPx = null;
 
+// 4-corner homography
+let calPts4 = [];     // 4 points
+let H = null;         // cv.Mat 3x3 mapping image px -> plane mm
+let useHomography = false;
+
+// drag ROI
 let drag = { active:false, x0:0, y0:0, x1:0, y1:0 };
 
-let objPts = [];     // for no-ref mode: two endpoints
-let imu = { pitch: 0, roll: 0 }; // radians
+// live measurement throttling
+let lastLiveT = 0;
+const LIVE_INTERVAL_MS = 140; // ~7 updates/sec
+let liveLine = null; // {p0:{x,y}, p1:{x,y}} farthest points (px) for overlay
 
-let lastMeasurement = null; // { measuredMm, measuredPx, mode, timestamp }
+// results
+let results = [];
+const resultsBody = document.getElementById("resultsBody");
 
-let results = []; // log rows
+// output
+function setOut(msg, isWarn=false) {
+  const out = document.getElementById("out");
+  out.textContent = msg;
+  out.className = isWarn ? "warn" : "";
+}
 
 /* =========================
    OpenCV READY GATE
 ========================= */
 (function waitForCv(){
-  // cv loads async. When ready, it sets cv.onRuntimeInitialized.
   const timer = setInterval(() => {
     if (typeof cv !== "undefined" && cv && typeof cv.onRuntimeInitialized !== "undefined") {
       clearInterval(timer);
@@ -186,38 +196,16 @@ let results = []; // log rows
         statusEl.textContent = "OpenCV.js ready ✅";
         statusEl.className = "ok";
         startBtn.disabled = false;
-        // other buttons remain disabled until camera starts
       };
     }
   }, 50);
 })();
 
 /* =========================
-   UI: MODE TOGGLE
-========================= */
-modeSel.addEventListener("change", () => {
-  const m = modeSel.value;
-  refUI.style.display = (m === "ref") ? "block" : "none";
-  noRefUI.style.display = (m === "noref") ? "block" : "none";
-
-  // reset interaction state, but keep streaming
-  mode = "idle";
-  calPts = [];
-  objPts = [];
-  drag.active = false;
-  mmPerPx = (m === "ref") ? mmPerPx : null; // keep existing mmPerPx only for ref
-  setOut("");
-});
-
-/* =========================
    CAMERA START/STOP
 ========================= */
 async function startCamera() {
-  if (!cvReady) {
-    setOut("OpenCV not ready yet. Wait for ✅.", true);
-    return;
-  }
-
+  if (!cvReady) { setOut("Wait for OpenCV ✅ then start.", true); return; }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: "environment" } },
@@ -229,7 +217,6 @@ async function startCamera() {
     await video.play();
 
     video.onloadedmetadata = () => {
-      // Full-resolution internal canvas sizes match video frame size
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       rawCanvas.width = video.videoWidth;
@@ -237,17 +224,17 @@ async function startCamera() {
 
       streaming = true;
       stopBtn.disabled = false;
-      calRefBtn.disabled = false;
-      measureRoiBtn.disabled = false;
-      measureNoRefBtn.disabled = false;
+      cal2Btn.disabled = false;
+      cal4Btn.disabled = false;
+      measureBtn.disabled = false;
 
-      setOut("Camera started. Choose a mode and measure.", false);
+      setOut("Camera started. Calibrate (2 pts or 4 corners), then drag to measure.", false);
+      updateCalInfo();
       processVideo();
     };
-
   } catch (err) {
     console.error(err);
-    setOut("Camera failed. Use HTTPS hosting and allow permissions.", true);
+    setOut("Camera failed. Must be HTTPS + allow permissions.", true);
   }
 }
 
@@ -258,9 +245,9 @@ function stopCamera() {
     streamHandle = null;
   }
   stopBtn.disabled = true;
-  calRefBtn.disabled = true;
-  measureRoiBtn.disabled = true;
-  measureNoRefBtn.disabled = true;
+  cal2Btn.disabled = true;
+  cal4Btn.disabled = true;
+  measureBtn.disabled = true;
   setOut("Camera stopped.", false);
 }
 
@@ -270,13 +257,13 @@ function stopCamera() {
 function processVideo() {
   if (!streaming) return;
 
-  // 1) draw raw frame (never overwrite)
+  // draw raw frame (never overwrite)
   rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
 
-  // 2) draw raw frame to visible canvas
+  // draw raw to visible
   ctx.drawImage(rawCanvas, 0, 0, canvas.width, canvas.height);
 
-  // 3) optional debug overlay: edges + corners (display-only)
+  // optional debug overlay (display only)
   if (featureToggle.checked && cvReady) {
     try {
       let src = cv.imread(rawCanvas);
@@ -291,38 +278,40 @@ function processVideo() {
 
       let corners = new cv.Mat();
       cv.goodFeaturesToTrack(gray, corners, 120, 0.01, 10);
-
       for (let i = 0; i < corners.rows; i++) {
         let x = corners.data32F[i * 2];
         let y = corners.data32F[i * 2 + 1];
         cv.circle(edgesColor, new cv.Point(x, y), 5, [255,0,0,255], -1);
       }
-
       cv.imshow(canvas, edgesColor);
 
       src.delete(); gray.delete(); edges.delete(); edgesColor.delete(); corners.delete();
-    } catch (e) {
-      // If anything goes wrong, just skip debug overlay
-      console.warn("debug overlay skipped:", e);
+    } catch(e) {}
+  }
+
+  // live measurement while dragging (throttled)
+  if (mode === "measure" && drag.active) {
+    const now = performance.now();
+    if (now - lastLiveT > LIVE_INTERVAL_MS) {
+      lastLiveT = now;
+      const x = Math.min(drag.x0, drag.x1);
+      const y = Math.min(drag.y0, drag.y1);
+      const w = Math.abs(drag.x1 - drag.x0);
+      const h = Math.abs(drag.y1 - drag.y0);
+      if (w >= 12 && h >= 12) {
+        const res = measureInROI_rawCanvas(x, y, w, h, true); // fast mode
+        if (res) {
+          liveLine = { p0: res.p0_px, p1: res.p1_px };
+          setOut(`LIVE: ${res.lengthMm.toFixed(1)} mm`, false);
+        }
+      }
     }
   }
 
-  // 4) draw interaction overlays on top (cal points / drag rectangle / endpoint taps)
+  // draw overlays (points, box, live line)
   drawOverlay();
 
   requestAnimationFrame(processVideo);
-}
-
-/* =========================
-   OUTPUT / HELPERS
-========================= */
-function setOut(msg, isWarn=false) {
-  const out = document.getElementById("out");
-  out.textContent = msg;
-  out.className = isWarn ? "warn" : "";
-}
-function updateResultsCount() {
-  document.getElementById("resCount").textContent = `Results: ${results.length}`;
 }
 
 /* =========================
@@ -333,15 +322,13 @@ function canvasPointFromEvent(e) {
   const touch = e.touches ? e.touches[0] : null;
   const clientX = touch ? touch.clientX : e.clientX;
   const clientY = touch ? touch.clientY : e.clientY;
-
-  // map CSS pixels -> canvas pixels
   const x = (clientX - rect.left) * (canvas.width / rect.width);
   const y = (clientY - rect.top)  * (canvas.height / rect.height);
   return {x, y};
 }
 
 /* =========================
-   OVERLAY DRAWING
+   OVERLAY DRAW
 ========================= */
 function drawOverlay() {
   ctx.save();
@@ -349,23 +336,20 @@ function drawOverlay() {
   ctx.strokeStyle = "lime";
   ctx.fillStyle = "lime";
 
-  // calibration points/line
-  if (calPts.length > 0) {
-    for (const p of calPts) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 8, 0, 2*Math.PI);
-      ctx.fill();
-    }
+  // cal points
+  const pts = (mode === "cal2") ? calPts2 : (mode === "cal4" ? calPts4 : []);
+  for (const p of pts) {
+    ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, 2*Math.PI); ctx.fill();
   }
-  if (calPts.length === 2) {
+  if (mode === "cal2" && calPts2.length === 2) {
     ctx.beginPath();
-    ctx.moveTo(calPts[0].x, calPts[0].y);
-    ctx.lineTo(calPts[1].x, calPts[1].y);
+    ctx.moveTo(calPts2[0].x, calPts2[0].y);
+    ctx.lineTo(calPts2[1].x, calPts2[1].y);
     ctx.stroke();
   }
 
-  // drag rectangle
-  if (mode === "measure_roi" && (drag.active || (drag.x0!==drag.x1 && drag.y0!==drag.y1))) {
+  // drag rect
+  if (mode === "measure" && (drag.active || (drag.x0!==drag.x1 && drag.y0!==drag.y1))) {
     const x = Math.min(drag.x0, drag.x1);
     const y = Math.min(drag.y0, drag.y1);
     const w = Math.abs(drag.x1 - drag.x0);
@@ -373,54 +357,57 @@ function drawOverlay() {
     ctx.strokeRect(x, y, w, h);
   }
 
-  // no-ref endpoints + line
-  if (mode === "measure_noref" && objPts.length > 0) {
-    for (const p of objPts) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 8, 0, 2*Math.PI);
-      ctx.fill();
-    }
-    if (objPts.length === 2) {
-      ctx.beginPath();
-      ctx.moveTo(objPts[0].x, objPts[0].y);
-      ctx.lineTo(objPts[1].x, objPts[1].y);
-      ctx.stroke();
-    }
+  // live farthest line
+  if (liveLine && mode === "measure") {
+    ctx.strokeStyle = "yellow";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(liveLine.p0.x, liveLine.p0.y);
+    ctx.lineTo(liveLine.p1.x, liveLine.p1.y);
+    ctx.stroke();
   }
 
   ctx.restore();
 }
 
 /* =========================
-   INTERACTION MODE STARTERS
+   CALIBRATION STARTERS
 ========================= */
-function startCalibrateRef() {
+function startCalibrate2() {
   if (!streaming) { setOut("Start camera first.", true); return; }
-  if (modeSel.value !== "ref") { setOut("Switch mode to Known-length segment first.", true); return; }
-  mode = "calibrate_ref";
-  calPts = [];
-  setOut("Calibration: tap 2 endpoints of a known-length segment.", false);
+  mode = "cal2";
+  calPts2 = [];
+  useHomography = false;
+  if (H) { H.delete(); H = null; }
+  setOut("Calibrate (2 pts): tap 2 endpoints of a known-length segment.", false);
+  updateCalInfo();
 }
 
-function startMeasureROI() {
+function startCalibrate4() {
   if (!streaming) { setOut("Start camera first.", true); return; }
-  if (modeSel.value !== "ref") { setOut("Switch mode to Known-length segment first.", true); return; }
-  if (!mmPerPx) { setOut("Calibrate first (mmPerPx not set).", true); return; }
-  mode = "measure_roi";
-  drag.active = false;
-  setOut("ROI measure: drag a box around the object.", false);
-}
-
-function startMeasureNoRef() {
-  if (!streaming) { setOut("Start camera first.", true); return; }
-  if (modeSel.value !== "noref") { setOut("Switch mode to No reference first.", true); return; }
-  mode = "measure_noref";
-  objPts = [];
-  setOut("No-ref: tap 2 endpoints on the object.", false);
+  mode = "cal4";
+  calPts4 = [];
+  // keep old H until we finish? we'll overwrite safely at the end
+  setOut("Calibrate (4 corners): tap the 4 corners of the card/rectangle.", false);
 }
 
 /* =========================
-   CANVAS EVENTS (touch+mouse)
+   MEASURE STARTER
+========================= */
+function startMeasureROI() {
+  if (!streaming) { setOut("Start camera first.", true); return; }
+  if (!(useHomography || mmPerPx)) {
+    setOut("Calibrate first (2 pts or 4 corners).", true);
+    return;
+  }
+  mode = "measure";
+  drag.active = false;
+  liveLine = null;
+  setOut("Drag a box around the object. Measurement updates LIVE.", false);
+}
+
+/* =========================
+   CANVAS EVENTS
 ========================= */
 canvas.addEventListener("mousedown", onDown);
 canvas.addEventListener("mousemove", onMove);
@@ -434,35 +421,21 @@ function onDown(e) {
   e.preventDefault();
   const p = canvasPointFromEvent(e);
 
-  if (mode === "calibrate_ref") {
-    calPts.push(p);
-    if (calPts.length === 2) finalizeCalibrationRef();
-    if (calPts.length > 2) calPts = [calPts[1], calPts[2]];
+  if (mode === "cal2") {
+    calPts2.push(p);
+    if (calPts2.length === 2) finalizeCalibration2();
+    if (calPts2.length > 2) calPts2 = [calPts2[1], calPts2[2]];
     return;
   }
 
-  if (mode === "measure_noref") {
-    objPts.push(p);
-    if (objPts.length === 2) {
-      const Lmm = measureNoRef(objPts[0], objPts[1]);
-      if (Lmm == null || !isFinite(Lmm)) {
-        setOut("No-ref failed (bad tilt/FOV/height). Try again more top-down.", true);
-      } else {
-        lastMeasurement = {
-          measuredMm: Lmm,
-          measuredPx: null,
-          mode: "noref",
-          timestamp: new Date().toISOString()
-        };
-        setOut(`No-ref length ≈ ${Lmm.toFixed(1)} mm`, false);
-        logResult(Lmm);
-      }
-      objPts = [];
-    }
+  if (mode === "cal4") {
+    calPts4.push(p);
+    if (calPts4.length === 4) finalizeCalibration4();
+    if (calPts4.length > 4) calPts4 = calPts4.slice(-4);
     return;
   }
 
-  if (mode === "measure_roi") {
+  if (mode === "measure") {
     drag.active = true;
     drag.x0 = drag.x1 = p.x;
     drag.y0 = drag.y1 = p.y;
@@ -477,65 +450,121 @@ function onMove(e) {
 }
 
 function onUp(e) {
-  if (mode !== "measure_roi") return;
+  if (mode !== "measure") return;
   if (!drag.active) return;
   e.preventDefault();
   drag.active = false;
-
-  if (!mmPerPx) {
-    setOut("Calibrate first.", true);
-    return;
-  }
 
   const x = Math.min(drag.x0, drag.x1);
   const y = Math.min(drag.y0, drag.y1);
   const w = Math.abs(drag.x1 - drag.x0);
   const h = Math.abs(drag.y1 - drag.y0);
+  if (w < 12 || h < 12) return;
 
-  if (w < 10 || h < 10) return;
-
-  const res = measureInROI_rawCanvas(x, y, w, h);
+  const res = measureInROI_rawCanvas(x, y, w, h, false);
   if (!res) {
-    setOut("Could not detect object in ROI. Try a tighter box or better lighting.", true);
+    setOut("Could not detect object. Try tighter box / better lighting.", true);
     return;
   }
-
-  lastMeasurement = {
-    measuredMm: res.lengthMm,
-    measuredPx: res.lengthPx,
-    mode: "ref",
-    timestamp: new Date().toISOString()
-  };
-
-  setOut(`Length ≈ ${res.lengthMm.toFixed(1)} mm (px=${res.lengthPx.toFixed(1)})`, false);
+  liveLine = { p0: res.p0_px, p1: res.p1_px };
+  setOut(`FINAL: ${res.lengthMm.toFixed(1)} mm`, false);
   logResult(res.lengthMm);
 }
 
 /* =========================
-   MODE 1: Known-length calibration
+   CALIBRATION FINALIZE: 2-POINT
 ========================= */
-function finalizeCalibrationRef() {
-  if (calPts.length !== 2) return;
-
-  const dx = calPts[0].x - calPts[1].x;
-  const dy = calPts[0].y - calPts[1].y;
-  const distPx = Math.hypot(dx, dy);
-
+function finalizeCalibration2() {
   const knownMm = parseFloat(document.getElementById("knownMm").value);
-  if (!(knownMm > 0) || distPx < 5) {
-    setOut("Calibration failed. Try again with points farther apart.", true);
-    return;
-  }
-
+  if (!(knownMm > 0)) { setOut("Enter known mm > 0.", true); return; }
+  const dx = calPts2[0].x - calPts2[1].x;
+  const dy = calPts2[0].y - calPts2[1].y;
+  const distPx = Math.hypot(dx, dy);
+  if (distPx < 5) { setOut("Points too close. Try again.", true); return; }
   mmPerPx = knownMm / distPx;
+  useHomography = false;
+  if (H) { H.delete(); H = null; }
   mode = "idle";
-  setOut(`Calibrated ✅  mmPerPx = ${mmPerPx.toFixed(5)}. Now click “Measure (drag box)”.`, false);
+  setOut(`Calibrated ✅ mmPerPx=${mmPerPx.toFixed(5)}. Now Measure (drag box).`, false);
+  updateCalInfo();
 }
 
 /* =========================
-   ROI MEASUREMENT (reads from rawCanvas)
+   CALIBRATION FINALIZE: 4 CORNERS HOMOGRAPHY
 ========================= */
-function measureInROI_rawCanvas(x, y, w, h) {
+function orderQuad(pts) {
+  // robust ordering: TL min(x+y), BR max(x+y), TR min(x-y), BL max(x-y)
+  const sum = pts.map(p => p.x + p.y);
+  const diff = pts.map(p => p.x - p.y);
+
+  const tl = pts[sum.indexOf(Math.min(...sum))];
+  const br = pts[sum.indexOf(Math.max(...sum))];
+  const tr = pts[diff.indexOf(Math.min(...diff))];
+  const bl = pts[diff.indexOf(Math.max(...diff))];
+
+  return [tl, tr, br, bl];
+}
+
+function finalizeCalibration4() {
+  const W = parseFloat(document.getElementById("cardW").value);
+  const Hh = parseFloat(document.getElementById("cardH").value);
+  if (!(W > 0 && Hh > 0)) { setOut("Enter card W/H in mm.", true); return; }
+
+  if (!cvReady) { setOut("OpenCV not ready.", true); return; }
+
+  const q = orderQuad(calPts4);
+
+  // src (image px)
+  const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    q[0].x, q[0].y,  // TL
+    q[1].x, q[1].y,  // TR
+    q[2].x, q[2].y,  // BR
+    q[3].x, q[3].y   // BL
+  ]);
+
+  // dst (plane mm)
+  const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+    0,   0,
+    W,   0,
+    W,  Hh,
+    0,  Hh
+  ]);
+
+  try {
+    const newH = cv.getPerspectiveTransform(srcPts, dstPts); // 3x3
+    if (H) H.delete();
+    H = newH;
+    useHomography = true;
+    mmPerPx = null; // not needed when using H
+    mode = "idle";
+    setOut("Homography calibrated ✅ (4 corners). Now Measure (drag box).", false);
+    updateCalInfo();
+  } catch (e) {
+    console.error(e);
+    setOut("Homography calibration failed. Try tapping corners again.", true);
+  } finally {
+    srcPts.delete();
+    dstPts.delete();
+  }
+}
+
+function updateCalInfo() {
+  if (useHomography && H) {
+    calInfoEl.textContent = "Calibration: 4-corner homography (recommended) ✅";
+  } else if (mmPerPx) {
+    calInfoEl.textContent = `Calibration: 2-point scale mm/px = ${mmPerPx.toFixed(5)} ✅`;
+  } else {
+    calInfoEl.textContent = "Calibration: none";
+  }
+}
+
+/* =========================
+   MEASUREMENT: find contour blob + farthest pair
+   - Uses Otsu threshold (more stable than edges)
+   - Uses farthest contour points for length (better than minAreaRect)
+   - If homography is calibrated, converts endpoints to mm via H
+========================= */
+function measureInROI_rawCanvas(x, y, w, h, fast) {
   if (!cvReady) return null;
 
   // clamp ROI
@@ -544,12 +573,29 @@ function measureInROI_rawCanvas(x, y, w, h) {
   w = Math.max(1, Math.min(w, rawCanvas.width - x));
   h = Math.max(1, Math.min(h, rawCanvas.height - y));
 
-  let src = null, roi = null, gray = null, blur = null, edges = null, kernel = null, closed = null;
-  let contours = null, hierarchy = null;
+  let src=null, roi=null, gray=null, blur=null, bw=null, bwInv=null;
+  let kernel=null, bwClean=null, bwCleanInv=null;
+  let contours=null, hierarchy=null;
 
   try {
     src = cv.imread(rawCanvas);
     roi = src.roi(new cv.Rect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)));
+
+    // optional downsample for live updates
+    let scale = 1.0;
+    if (fast) {
+      const maxDim = Math.max(w, h);
+      if (maxDim > 320) {
+        scale = 320 / maxDim;
+        const dsize = new cv.Size(Math.max(1, Math.round(w*scale)), Math.max(1, Math.round(h*scale)));
+        const roiSmall = new cv.Mat();
+        cv.resize(roi, roiSmall, dsize, 0, 0, cv.INTER_AREA);
+        roi.delete();
+        roi = roiSmall;
+        // update w,h for processing
+        w = roi.cols; h = roi.rows;
+      }
+    }
 
     gray = new cv.Mat();
     cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY);
@@ -557,191 +603,150 @@ function measureInROI_rawCanvas(x, y, w, h) {
     blur = new cv.Mat();
     cv.GaussianBlur(gray, blur, new cv.Size(5,5), 0);
 
-    edges = new cv.Mat();
-    cv.Canny(blur, edges, 60, 140);
+    // Otsu both polarities, choose best contour later
+    bw = new cv.Mat();
+    bwInv = new cv.Mat();
+    cv.threshold(blur, bw, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+    cv.threshold(blur, bwInv, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
 
-    kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5,5));
-    closed = new cv.Mat();
-    cv.morphologyEx(edges, closed, cv.MORPH_CLOSE, kernel);
+    kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5));
+    bwClean = new cv.Mat();
+    bwCleanInv = new cv.Mat();
+    cv.morphologyEx(bw, bwClean, cv.MORPH_OPEN, kernel);
+    cv.morphologyEx(bwClean, bwClean, cv.MORPH_CLOSE, kernel);
+    cv.morphologyEx(bwInv, bwCleanInv, cv.MORPH_OPEN, kernel);
+    cv.morphologyEx(bwCleanInv, bwCleanInv, cv.MORPH_CLOSE, kernel);
 
-    contours = new cv.MatVector();
-    hierarchy = new cv.Mat();
-    cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    // helper: pick best contour by area, but avoid selecting "almost entire ROI"
+    function bestContourFrom(binaryMat) {
+      const cts = new cv.MatVector();
+      const hier = new cv.Mat();
+      cv.findContours(binaryMat, cts, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-    if (contours.size() === 0) return null;
+      let best = null;
+      let bestArea = 0;
+      const roiArea = binaryMat.rows * binaryMat.cols;
 
-    // pick largest contour
-    let bestIdx = 0, bestArea = 0;
-    for (let i = 0; i < contours.size(); i++) {
-      const area = cv.contourArea(contours.get(i));
-      if (area > bestArea) { bestArea = area; bestIdx = i; }
+      for (let i=0; i<cts.size(); i++) {
+        const cnt = cts.get(i);
+        const area = cv.contourArea(cnt);
+        // ignore too tiny, ignore near-full ROI (likely background)
+        if (area > bestArea && area > 200 && area < 0.90 * roiArea) {
+          if (best) best.delete();
+          best = cnt; // keep this
+          bestArea = area;
+        } else {
+          cnt.delete();
+        }
+      }
+      cts.delete(); hier.delete();
+      return best;
     }
-    if (bestArea < 200) return null;
 
-    const cnt = contours.get(bestIdx);
-    const rect = cv.minAreaRect(cnt); // {center:{x,y}, size:{width,height}, angle}
-    const lengthPx = Math.max(rect.size.width, rect.size.height);
-    const lengthMm = lengthPx * mmPerPx;
+    const cntA = bestContourFrom(bwClean);
+    const cntB = bestContourFrom(bwCleanInv);
+
+    let cnt = null;
+    if (cntA && cntB) {
+      const aA = cv.contourArea(cntA);
+      const aB = cv.contourArea(cntB);
+      cnt = (aA >= aB) ? cntA : cntB;
+      if (cnt === cntA) cntB.delete(); else cntA.delete();
+    } else {
+      cnt = cntA || cntB;
+    }
+
+    if (!cnt) return null;
+
+    // get contour points
+    const data = cnt.data32S; // [x0,y0,x1,y1,...] in ROI coords (possibly downsampled ROI)
+    const n = data.length / 2;
+    if (n < 2) { cnt.delete(); return null; }
+
+    // farthest pair (O(n^2) but n is usually small after chain approx)
+    let maxD2 = -1;
+    let iBest=0, jBest=1;
+    for (let i=0; i<n; i++) {
+      const xi = data[2*i], yi = data[2*i+1];
+      for (let j=i+1; j<n; j++) {
+        const xj = data[2*j], yj = data[2*j+1];
+        const dx = xi-xj, dy = yi-yj;
+        const d2 = dx*dx + dy*dy;
+        if (d2 > maxD2) { maxD2 = d2; iBest=i; jBest=j; }
+      }
+    }
+
+    // endpoints in ROI coords
+    let p0r = { x: data[2*iBest], y: data[2*iBest+1] };
+    let p1r = { x: data[2*jBest], y: data[2*jBest+1] };
+
+    // undo downsample scaling back to original ROI pixels
+    if (fast && scale !== 1.0) {
+      p0r.x /= scale; p0r.y /= scale;
+      p1r.x /= scale; p1r.y /= scale;
+    }
+
+    // convert to full-image pixel coords (add ROI offset)
+    const p0 = { x: x + p0r.x, y: y + p0r.y };
+    const p1 = { x: x + p1r.x, y: y + p1r.y };
+
+    // compute length in mm
+    let lengthMm = null;
+    const lengthPx = Math.sqrt(maxD2) * (fast && scale !== 1.0 ? (1/scale) : 1);
+
+    if (useHomography && H) {
+      const P0 = applyHomography(H, p0.x, p0.y);
+      const P1 = applyHomography(H, p1.x, p1.y);
+      if (!P0 || !P1) { cnt.delete(); return null; }
+      lengthMm = Math.hypot(P1.X - P0.X, P1.Y - P0.Y);
+    } else if (mmPerPx) {
+      lengthMm = Math.hypot(p1.x - p0.x, p1.y - p0.y) * mmPerPx;
+    } else {
+      cnt.delete();
+      return null;
+    }
 
     cnt.delete();
-
-    return { lengthPx, lengthMm };
+    return {
+      lengthMm,
+      lengthPx: Math.hypot(p1.x - p0.x, p1.y - p0.y),
+      p0_px: p0,
+      p1_px: p1
+    };
 
   } catch (e) {
-    console.error("measureInROI error:", e);
+    console.error(e);
     return null;
-
   } finally {
     if (src) src.delete();
     if (roi) roi.delete();
     if (gray) gray.delete();
     if (blur) blur.delete();
-    if (edges) edges.delete();
+    if (bw) bw.delete();
+    if (bwInv) bwInv.delete();
     if (kernel) kernel.delete();
-    if (closed) closed.delete();
+    if (bwClean) bwClean.delete();
+    if (bwCleanInv) bwCleanInv.delete();
     if (contours) contours.delete();
     if (hierarchy) hierarchy.delete();
   }
 }
 
-/* =========================
-   MODE 2: No-reference measurement (experimental)
-   - Uses height (mm) + assumed FOV + pitch/roll
-   - Intersects pixel ray with plane Z=0
-========================= */
-function rotX(a) {
-  const c=Math.cos(a), s=Math.sin(a);
-  return [[1,0,0],[0,c,-s],[0,s,c]];
-}
-function rotY(a) {
-  const c=Math.cos(a), s=Math.sin(a);
-  return [[c,0,s],[0,1,0],[-s,0,c]];
-}
-function matMul(A,B){
-  return A.map((r,i)=>B[0].map((_,j)=>r.reduce((sum,__,k)=>sum + A[i][k]*B[k][j],0)));
-}
-function matVec(A,v){
-  return A.map(r=>r[0]*v[0] + r[1]*v[1] + r[2]*v[2]);
-}
-function norm3(v){
-  const n = Math.hypot(v[0], v[1], v[2]);
-  return (n>0) ? [v[0]/n, v[1]/n, v[2]/n] : [0,0,0];
-}
+// Apply 3x3 homography (image px -> plane mm)
+function applyHomography(Hmat, x, y) {
+  // Hmat is cv.Mat 3x3 (CV_64F)
+  const h = Hmat.data64F || Hmat.data32F;
+  if (!h) return null;
 
-function pixelToPlaneMm(p) {
-  const H = parseFloat(document.getElementById("camH").value); // mm
-  const fovDeg = parseFloat(document.getElementById("fovDeg").value);
-  if (!(H > 0) || !(fovDeg > 1)) return null;
-
-  const w = rawCanvas.width, h = rawCanvas.height;
-  const fov = fovDeg * Math.PI/180;
-
-  // approximate fx, fy from FOV
-  const fx = (w/2) / Math.tan(fov/2);
-  const fy = fx;
-  const cx = w/2, cy = h/2;
-
-  // ray direction in camera coords (z forward)
-  const x = (p.x - cx)/fx;
-  const y = (p.y - cy)/fy;
-  let d_cam = norm3([x, y, 1]);
-
-  // Approx rotation using pitch/roll.
-  // NOTE: sign conventions vary by phone/browser. This is "good enough" for bonus mode.
-  const R = matMul(rotY(imu.roll), rotX(imu.pitch));
-  const d_w = matVec(R, d_cam);
-
-  const dz = d_w[2];
-  if (Math.abs(dz) < 1e-6) return null;
-
-  // Camera position (0,0,H), plane Z=0. Solve H + s*dz = 0 => s = -H/dz
-  const s = -H / dz;
-  const X = s * d_w[0];
-  const Y = s * d_w[1];
-
-  return [X, Y];
-}
-
-function measureNoRef(p0, p1) {
-  const P0 = pixelToPlaneMm(p0);
-  const P1 = pixelToPlaneMm(p1);
-  if (!P0 || !P1) return null;
-  return Math.hypot(P1[0]-P0[0], P1[1]-P0[1]);
+  const X = h[0]*x + h[1]*y + h[2];
+  const Y = h[3]*x + h[4]*y + h[5];
+  const W = h[6]*x + h[7]*y + h[8];
+  if (Math.abs(W) < 1e-9) return null;
+  return { X: X/W, Y: Y/W };
 }
 
 /* =========================
-   IMU PERMISSIONS / HANDLERS
-========================= */
-let imuEnabled = false;
-
-async function toggleIMU() {
-  if (!imuToggle.checked) {
-    imuTable.style.display = "none";
-    imuEnabled = false;
-    window.removeEventListener("devicemotion", handleMotion);
-    window.removeEventListener("deviceorientation", handleOrientation);
-    setOut("IMU off.", false);
-    return;
-  }
-
-  imuTable.style.display = "table";
-
-  // iOS permissions
-  try {
-    // DeviceMotionEvent permission
-    if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
-      const p1 = await DeviceMotionEvent.requestPermission();
-      if (p1 !== "granted") {
-        setOut("IMU permission denied (motion).", true);
-        imuToggle.checked = false;
-        imuTable.style.display = "none";
-        return;
-      }
-    }
-    // DeviceOrientationEvent permission
-    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-      const p2 = await DeviceOrientationEvent.requestPermission();
-      if (p2 !== "granted") {
-        setOut("IMU permission denied (orientation).", true);
-        imuToggle.checked = false;
-        imuTable.style.display = "none";
-        return;
-      }
-    }
-
-    window.addEventListener("devicemotion", handleMotion);
-    window.addEventListener("deviceorientation", handleOrientation);
-    imuEnabled = true;
-    setOut("IMU on.", false);
-
-  } catch (err) {
-    console.error(err);
-    setOut("IMU permission error.", true);
-  }
-}
-
-function handleMotion(event) {
-  document.getElementById("ax").innerText = (event.acceleration?.x || 0).toFixed(2);
-  document.getElementById("ay").innerText = (event.acceleration?.y || 0).toFixed(2);
-  document.getElementById("az").innerText = (event.acceleration?.z || 0).toFixed(2);
-
-  document.getElementById("gx").innerText = (event.rotationRate?.alpha || 0).toFixed(2);
-  document.getElementById("gy").innerText = (event.rotationRate?.beta || 0).toFixed(2);
-  document.getElementById("gz").innerText = (event.rotationRate?.gamma || 0).toFixed(2);
-}
-
-function handleOrientation(event) {
-  // store radians for no-ref
-  imu.pitch = (event.beta  || 0) * Math.PI/180;   // pitch
-  imu.roll  = (event.gamma || 0) * Math.PI/180;   // roll
-
-  document.getElementById("yaw").innerText   = (event.alpha || 0).toFixed(2);
-  document.getElementById("pitch").innerText = (event.beta  || 0).toFixed(2);
-  document.getElementById("roll").innerText  = (event.gamma || 0).toFixed(2);
-}
-
-/* =========================
-   RESULTS LOGGING + CSV
+   RESULTS TABLE (on-page)
 ========================= */
 function logResult(measuredMm) {
   const name = (document.getElementById("objName").value || "").trim() || "object";
@@ -749,77 +754,80 @@ function logResult(measuredMm) {
   const gtMm = (isFinite(gtVal) && gtVal > 0) ? gtVal : null;
 
   let errPct = null;
-  if (gtMm != null) {
-    errPct = Math.abs(measuredMm - gtMm) / gtMm * 100.0;
-  }
+  if (gtMm != null) errPct = Math.abs(measuredMm - gtMm) / gtMm * 100.0;
 
-  const row = {
-    timestamp: new Date().toISOString(),
-    mode: (modeSel.value === "ref") ? "known_length" : "no_ref",
-    object: name,
-    measured_mm: measuredMm,
-    groundtruth_mm: gtMm,
-    error_percent: errPct
-  };
+  results.push({ name, measuredMm, gtMm, errPct });
 
-  results.push(row);
-  updateResultsCount();
+  const idx = results.length;
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>${idx}</td>
+    <td>${escapeHtml(name)}</td>
+    <td>${measuredMm.toFixed(1)}</td>
+    <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
+    <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
+  `;
+  resultsBody.appendChild(tr);
 
-  if (errPct != null) {
-    setOut(`${name}: ${measuredMm.toFixed(1)} mm | GT ${gtMm.toFixed(1)} | error ${errPct.toFixed(1)}%`, errPct > 10);
+  if (errPct != null && errPct > 10) {
+    setOut(`${name}: ${measuredMm.toFixed(1)} mm | GT ${gtMm.toFixed(1)} | error ${errPct.toFixed(1)}%`, true);
   }
 }
 
 function clearResults() {
   results = [];
-  updateResultsCount();
+  resultsBody.innerHTML = "";
   setOut("Results cleared.", false);
 }
 
-function downloadCSV() {
-  if (results.length === 0) {
-    setOut("No results to download yet.", true);
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* =========================
+   IMU (optional)
+========================= */
+async function toggleIMU() {
+  if (!imuToggle.checked) {
+    imuTable.style.display = "none";
+    window.removeEventListener("devicemotion", handleMotion);
+    window.removeEventListener("deviceorientation", handleOrientation);
     return;
   }
+  imuTable.style.display = "table";
 
-  const headers = ["timestamp","mode","object","measured_mm","groundtruth_mm","error_percent"];
-  const lines = [headers.join(",")];
-
-  for (const r of results) {
-    const line = [
-      r.timestamp,
-      r.mode,
-      csvSafe(r.object),
-      numSafe(r.measured_mm),
-      (r.groundtruth_mm == null ? "" : numSafe(r.groundtruth_mm)),
-      (r.error_percent == null ? "" : numSafe(r.error_percent))
-    ].join(",");
-    lines.push(line);
+  try {
+    if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+      const p1 = await DeviceMotionEvent.requestPermission();
+      if (p1 !== "granted") throw new Error("Motion denied");
+    }
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+      const p2 = await DeviceOrientationEvent.requestPermission();
+      if (p2 !== "granted") throw new Error("Orientation denied");
+    }
+    window.addEventListener("devicemotion", handleMotion);
+    window.addEventListener("deviceorientation", handleOrientation);
+  } catch (err) {
+    console.error(err);
+    imuToggle.checked = false;
+    imuTable.style.display = "none";
+    setOut("IMU permission denied.", true);
   }
-
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "measurements.csv";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(url);
-  setOut("Downloaded measurements.csv", false);
 }
 
-function csvSafe(s) {
-  // quote if needed
-  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
-    return '"' + s.replaceAll('"','""') + '"';
-  }
-  return s;
+function handleMotion(event) {
+  document.getElementById("ax").innerText = (event.acceleration?.x || 0).toFixed(2);
+  document.getElementById("ay").innerText = (event.acceleration?.y || 0).toFixed(2);
+  document.getElementById("az").innerText = (event.acceleration?.z || 0).toFixed(2);
+  document.getElementById("gx").innerText = (event.rotationRate?.alpha || 0).toFixed(2);
+  document.getElementById("gy").innerText = (event.rotationRate?.beta || 0).toFixed(2);
+  document.getElementById("gz").innerText = (event.rotationRate?.gamma || 0).toFixed(2);
 }
-function numSafe(x) {
-  return (typeof x === "number") ? x.toFixed(4) : "";
+
+function handleOrientation(event) {
+  document.getElementById("yaw").innerText   = (event.alpha || 0).toFixed(2);
+  document.getElementById("pitch").innerText = (event.beta  || 0).toFixed(2);
+  document.getElementById("roll").innerText  = (event.gamma || 0).toFixed(2);
 }
 
 /* =========================
@@ -827,14 +835,16 @@ function numSafe(x) {
 ========================= */
 function resetAll() {
   mode = "idle";
-  calPts = [];
-  objPts = [];
-  drag.active = false;
+  calPts2 = [];
+  calPts4 = [];
   mmPerPx = null;
-  lastMeasurement = null;
-  setOut("Reset done. Start camera and calibrate again.", false);
+  useHomography = false;
+  liveLine = null;
+  drag.active = false;
+  if (H) { H.delete(); H = null; }
+  setOut("Reset done. Calibrate again.", false);
+  updateCalInfo();
 }
-updateResultsCount();
 </script>
 
 </body>
