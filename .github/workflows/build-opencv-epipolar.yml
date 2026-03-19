@@ -17,7 +17,7 @@ jobs:
       - name: Install build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3 cmake ninja-build build-essential git
+          sudo apt-get install -y python3 cmake ninja-build build-essential git nodejs
 
       - name: Clone OpenCV source
         run: |
@@ -25,49 +25,59 @@ jobs:
 
       - name: Patch out deprecated Emscripten flag (DEMANGLE_SUPPORT)
         run: |
+          echo "Before patch:"
           grep -R --line-number "DEMANGLE_SUPPORT" opencv | head -n 50 || true
+
           find opencv -type f \( -name "*.cmake" -o -name "*.txt" -o -name "*.py" -o -name "*.in" -o -name "CMakeLists.txt" \) \
             -print0 | xargs -0 sed -i 's/-s[ ]*DEMANGLE_SUPPORT=1//g; s/-sDEMANGLE_SUPPORT=1//g; s/DEMANGLE_SUPPORT=1//g'
+
           echo "After patch:"
           grep -R --line-number "DEMANGLE_SUPPORT" opencv | head -n 50 || true
 
-      # IMPORTANT: robust whitelist injection (no regex on "UsacParams" etc.)
-      - name: Patch OpenCV.js whitelist to include epipolar functions (robust)
+      - name: Patch OpenCV.js whitelist to include epipolar functions (regex robust)
         run: |
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
           cfg = Path("opencv/platforms/js/opencv_js.config.py")
           txt = cfg.read_text(encoding="utf-8")
 
-          marker = "calib3d = {'': ["
-          if marker not in txt:
-            raise SystemExit("Could not find calib3d whitelist start marker")
+          need = [
+            "findFundamentalMat",
+            "findEssentialMat",
+            "recoverPose",
+            "triangulatePoints",
+            "undistortPoints",
+          ]
 
-          # We inject immediately after the marker. This guarantees the funcs land in calib3d '' list.
-          inject = "\n".join([
-            "        'findFundamentalMat',",
-            "        'findEssentialMat',",
-            "        'recoverPose',",
-            "        'triangulatePoints',",
-            "        'undistortPoints',",
-          ]) + "\n"
+          # Find the calib3d '' list start regardless of formatting:
+          # e.g. calib3d = {'': [ ... ]} or calib3d={'':[
+          m = re.search(r"calib3d\s*=\s*\{\s*['\"]\s*['\"]\s*:\s*\[", txt)
+          if not m:
+            raise SystemExit("Could not locate calib3d '' list start in opencv_js.config.py")
 
-          idx = txt.index(marker) + len(marker)
-          txt2 = txt[:idx] + "\n" + inject + txt[idx:]
+          insert_at = m.end()
+
+          inject = "".join([f"\n        '{fn}'," for fn in need])
+          txt2 = txt[:insert_at] + inject + txt[insert_at:]
 
           cfg.write_text(txt2, encoding="utf-8")
-          print("Injected epipolar exports into calib3d whitelist.")
+
+          print("Injected into calib3d whitelist:", need)
+          print("--- calib3d snippet (proof) ---")
+          print(txt2[m.start():m.start()+400])
+          print("------------------------------")
           PY
 
-          # Show proof in logs (so we know it patched the file)
-          grep -n "findFundamentalMat" -n opencv/platforms/js/opencv_js.config.py || true
-          grep -n "recoverPose" -n opencv/platforms/js/opencv_js.config.py || true
-          grep -n "triangulatePoints" -n opencv/platforms/js/opencv_js.config.py || true
+          # show proof in workflow logs
+          grep -n "findFundamentalMat" opencv/platforms/js/opencv_js.config.py || true
+          grep -n "recoverPose" opencv/platforms/js/opencv_js.config.py || true
+          grep -n "triangulatePoints" opencv/platforms/js/opencv_js.config.py || true
 
       - name: Build OpenCV.js (wasm, separate .wasm file)
         run: |
-          # Limit parallel build to reduce runner flakiness
+          # Reduce parallelism to avoid runner flakiness
           export MAKEFLAGS="-j2"
 
           cd opencv
@@ -87,20 +97,19 @@ jobs:
           cp build_epipolar/bin/opencv_js.wasm assets/opencv/opencv_js.wasm
           ls -lah assets/opencv
 
-      # CRITICAL: fail fast if the functions still aren't exported
       - name: Verify epipolar exports exist in built opencv.js
         run: |
-          node -e "
-            const fs=require('fs');
-            const s=fs.readFileSync('assets/opencv/opencv.js','utf8');
-            const need=['findFundamentalMat','recoverPose','triangulatePoints'];
-            const missing=need.filter(k=>!s.includes(k));
-            if(missing.length){
-              console.error('Missing exports in opencv.js:', missing.join(', '));
-              process.exit(1);
-            }
-            console.log('OK: opencv.js contains:', need.join(', '));
-          "
+          node - <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('assets/opencv/opencv.js','utf8');
+          const need = ['findFundamentalMat','recoverPose','triangulatePoints'];
+          const missing = need.filter(k => !s.includes(k));
+          if (missing.length) {
+            console.error('Missing exports in opencv.js:', missing.join(', '));
+            process.exit(1);
+          }
+          console.log('OK: opencv.js contains:', need.join(', '));
+          NODE
 
       - name: Upload OpenCV.js artifacts
         uses: actions/upload-artifact@v4
