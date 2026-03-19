@@ -18,7 +18,6 @@
       color:#111;
     }
     h2{ margin: 6px 0 10px; font-size: 18px; }
-
     .wrap{ max-width: var(--maxw); margin: 0 auto; text-align:left; }
 
     canvas{
@@ -68,6 +67,7 @@
       padding: 10px 12px;
       background:#fff;
       font-size: 14px;
+      gap: 10px;
     }
     .pill input{ transform: scale(1.15); }
 
@@ -127,6 +127,16 @@
       white-space: nowrap;
     }
     th{ position: sticky; top:0; background:#fff; }
+
+    /* Debug box */
+    pre{
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.25;
+    }
   </style>
 </head>
 
@@ -151,8 +161,13 @@
     </div>
 
     <div class="pill">
-      <span>Freeze display after Capture 2 (recommended)</span>
+      <span>Freeze display after Capture 2</span>
       <input id="freezeToggle" type="checkbox" checked>
+    </div>
+
+    <div class="pill">
+      <span>Undistort (toggle)</span>
+      <input id="undToggle" type="checkbox">
     </div>
 
     <button onclick="resetAll()" style="grid-column: 1 / -1;">Reset</button>
@@ -162,6 +177,7 @@
     <div class="small">
       OpenCV: <span id="cvStatus" class="warn">Loading…</span>
       • Stage: <span id="stageStatus">not started</span>
+      • Stream: <span id="streamInfo">?</span>
     </div>
 
     <div class="small" style="margin-top:6px;">
@@ -176,6 +192,18 @@
 
     <details open>
       <summary>
+        <span>Debug log (this is what I show my professor when it fails)</span>
+        <span class="small">tap to collapse</span>
+      </summary>
+      <div class="row">
+        <button onclick="clearLog()">Clear log</button>
+        <span class="small">Tip: after Capture 2 fails, scroll here and read the exact “reason”.</span>
+      </div>
+      <pre id="log"></pre>
+    </details>
+
+    <details open>
+      <summary>
         <span>How I use this during demo (my steps)</span>
         <span class="small">tap to collapse</span>
       </summary>
@@ -184,7 +212,7 @@
         <li>Start</li>
         <li>IMU → allow permission</li>
         <li>Capture 1 (I keep the phone still)</li>
-        <li>I move phone sideways by the baseline (e.g., 20 cm). I try not to tilt/rotate.</li>
+        <li>I move phone sideways by the baseline (e.g., 10–20 cm). I try not to tilt/rotate.</li>
         <li>When IMU gate turns green, I press Capture 2</li>
         <li>Now I measure: I drag a rectangle around an object (ROI) and it measures.</li>
         <li>I can drag multiple objects without recapturing (extra credit b).</li>
@@ -234,22 +262,22 @@
    *     ball-ish => diameter
    *     spoon-ish => length
    *     phone/box-ish => length & width
+   *
+   * DEBUG GOAL:
+   * - When capture2 fails, I want the page to tell me EXACTLY where it died:
+   *     Not enough corners? Tracking collapsed? Too few RANSAC inliers? recoverPose unstable?
    ********************************************************************/
 
   /********************************************************************
    * 0) YOUR iPHONE CALIBRATION RESULTS (HARD-CODED)
    * ---------------------------------------------------------------
-   * You already ran checkerboard calibration and got:
+   * From your checkerboard calibration:
    * Image size (W,H): (1920, 2560)
    * K:
-   *   fx=1977.60619, fy=1981.57064
-   *   cx=962.418592, cy=1247.75805
-   * dist: [k1,k2,p1,p2,k3]
-   *
-   * NOTE: These numbers are valid ONLY for that calibration resolution.
-   * In the web app, the live video resolution might be different, so I scale K.
-   *
-   * Distortion coefficients do NOT scale with resolution.
+   *  fx=1977.60619, fy=1981.57064
+   *  cx=962.418592, cy=1247.75805
+   * dist (k1,k2,p1,p2,k3):
+   *  [0.247937836, -0.915690663, -0.00215712011, -0.000132342062, 0.550086004]
    ********************************************************************/
   const CALIB = {
     calW: 1920,
@@ -260,9 +288,6 @@
     cy: 1247.75805,
     dist: [0.247937836, -0.915690663, -0.00215712011, -0.000132342062, 0.550086004]
   };
-
-  // I strongly recommend undistortion for iPhone (your k-values aren’t tiny).
-  const USE_UNDISTORT = false;
 
   /********************************************************************
    * 1) GLOBAL STATE
@@ -284,6 +309,8 @@
   const stageStatus = document.getElementById("stageStatus");
   const outEl = document.getElementById("out");
   const freezeToggle = document.getElementById("freezeToggle");
+  const undToggle = document.getElementById("undToggle");
+  const streamInfoEl = document.getElementById("streamInfo");
 
   const startBtn = document.getElementById("startBtn");
   const imuBtn   = document.getElementById("imuBtn");
@@ -298,11 +325,33 @@
   const resultsBody = document.getElementById("resultsBody");
   const resCount = document.getElementById("resCount");
 
+  // Debug log
+  const logEl = document.getElementById("log");
+  function logLine(s){
+    console.log(s);
+    logEl.textContent += s + "\n";
+  }
+  function clearLog(){
+    logEl.textContent = "";
+  }
+
   // Stage machine:
   // - live  : camera running, no view1 yet
   // - v1    : captured view1, waiting for view2
   // - ready : captured view2 and pose computed; now I can measure by ROI drag
   let stage = "idle";
+
+  function setStage(s) {
+    stage = s;
+    stageStatus.textContent = s;
+  }
+
+  function setOut(msg, isWarn=false) {
+    outEl.textContent = msg;
+    outEl.className = isWarn ? "warn" : "";
+  }
+
+  function updateResCount(){ resCount.textContent = String(results.length); }
 
   // Freeze controls whether I keep updating the displayed scene after capture2.
   let frozenDisplay = false;
@@ -311,7 +360,7 @@
   let imuEnabled = false;
   let imuNow = { yaw:0, pitch:0, roll:0 };
   let imuAtV1 = null;
-  const ROT_THRESH_DEG = { yaw: 6, pitch: 4, roll: 4 }; // I can tune this
+  const ROT_THRESH_DEG = { yaw: 6, pitch: 4, roll: 4 };
 
   // Two frames stored as grayscale cv.Mat (already undistorted if enabled)
   let gray1 = null;
@@ -331,22 +380,10 @@
 
   // ROI drag state (extra credit a interface)
   let roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
-
-  // I draw the last ROI in yellow so I see what I measured
   let lastOverlay = null;
 
-  // Results in memory
+  // Results
   let results = [];
-
-  function setOut(msg, isWarn=false) {
-    outEl.textContent = msg;
-    outEl.className = isWarn ? "warn" : "";
-  }
-  function setStage(s) {
-    stage = s;
-    stageStatus.textContent = s;
-  }
-  function updateResCount(){ resCount.textContent = String(results.length); }
 
   /********************************************************************
    * 2) OpenCV READY
@@ -388,6 +425,8 @@
         rawCanvas.width = video.videoWidth;
         rawCanvas.height = video.videoHeight;
 
+        streamInfoEl.textContent = `${video.videoWidth}×${video.videoHeight}`;
+
         // Build runtime K (scaled from calibration)
         if (K) { K.delete(); K = null; }
         K = buildScaledK(video.videoWidth, video.videoHeight);
@@ -396,6 +435,9 @@
         if (DIST) { DIST.delete(); DIST = null; }
         DIST = cv.matFromArray(1, 5, cv.CV_64F, CALIB.dist);
 
+        // Default: keep undistort OFF unless you toggle it
+        undToggle.checked = false;
+
         streaming = true;
         imuBtn.disabled = false;
         cap1Btn.disabled = false;
@@ -403,6 +445,15 @@
 
         setStage("live");
         setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
+
+        clearLog();
+        logLine("=== START CAMERA ===");
+        logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
+        logLine(`calib  = ${CALIB.calW}x${CALIB.calH}`);
+        logLine(`undistort toggle = ${undToggle.checked}`);
+
+        // Print scaled K to the debug log (this matters a lot)
+        logLine(`Kscaled fx=${K.doubleAt(0,0).toFixed(2)} fy=${K.doubleAt(1,1).toFixed(2)} cx=${K.doubleAt(0,2).toFixed(2)} cy=${K.doubleAt(1,2).toFixed(2)}`);
 
         requestAnimationFrame(drawLoop);
       };
@@ -415,11 +466,6 @@
 
   /********************************************************************
    * 4) DRAW LOOP (DISPLAY)
-   * ---------------------------------------------------------------
-   * - If not frozen, keep updating rawCanvas from live video.
-   * - Display rawCanvas to the visible canvas.
-   * - Draw ROI rectangle while dragging (green).
-   * - Draw last measured ROI (yellow).
    ********************************************************************/
   function drawLoop() {
     if (!streaming) return;
@@ -458,8 +504,6 @@
 
   /********************************************************************
    * 5) IMU TOGGLE
-   * ---------------------------------------------------------------
-   * iOS Safari usually requires permission for DeviceOrientationEvent.
    ********************************************************************/
   async function toggleIMU() {
     if (imuEnabled) {
@@ -529,22 +573,20 @@
    * 6) CAPTURE VIEW 1 / VIEW 2
    ********************************************************************/
   function grabGrayFrame() {
-    // 1) Read RGBA from rawCanvas
+    // Read RGBA -> gray
     const src = cv.imread(rawCanvas);
-
-    // 2) Convert to grayscale
     const gray = new cv.Mat();
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     src.delete();
 
-    // 3) (Recommended) undistort grayscale using K and DIST
-    if (USE_UNDISTORT && DIST && K && typeof cv.undistort === "function") {
+    // Optional undistort (I toggle it so I can test quickly)
+    const useUnd = undToggle.checked;
+    if (useUnd && DIST && K && typeof cv.undistort === "function") {
       const und = new cv.Mat();
       cv.undistort(gray, und, K, DIST);
       gray.delete();
       return und;
     }
-
     return gray;
   }
 
@@ -556,34 +598,39 @@
 
     gray1 = grabGrayFrame();
 
-    // Store IMU pose at Capture 1 so I can show delta
     imuAtV1 = imuEnabled ? { ...imuNow } : null;
 
     dyawEl.textContent = "0";
     dpitchEl.textContent = "0";
     drollEl.textContent = "0";
 
-    // I want IMU enabled for best gating, but if you *really* want, you could remove this line.
+    // I want IMU enabled for best gating (you can remove this if you want free capture2)
     cap2Btn.disabled = !imuEnabled;
 
     setStage("v1");
     setOut("Captured View 1 ✅ Now move phone sideways by baseline cm. Keep pitch/roll steady.", false);
 
-    imuGateEl.textContent = imuEnabled ? "Move sideways; wait for green gate" : "Enable IMU to proceed";
-    imuGateEl.className = "warn";
+    clearLog();
+    logLine("=== CAPTURE 1 ===");
+    logLine(`undistort toggle = ${undToggle.checked}`);
+    logLine(`gray1: ${gray1.cols}x${gray1.rows}`);
+    logLine(`baseline cm = ${document.getElementById("baselineCm").value}`);
+    logLine(`Kscaled fx=${K.doubleAt(0,0).toFixed(2)} fy=${K.doubleAt(1,1).toFixed(2)} cx=${K.doubleAt(0,2).toFixed(2)} cy=${K.doubleAt(1,2).toFixed(2)}`);
   }
 
   function captureView2() {
     if (!streaming || !gray1) return;
 
     gray2 = grabGrayFrame();
-
-    // Freeze display after Capture2 so measuring is stable
     frozenDisplay = freezeToggle.checked;
 
-    const ok = computePoseFromTwoViews();
-    if (!ok) {
-      setOut("Pose failed. Try again: more texture, bigger baseline, less blur, less rotation.", true);
+    logLine("=== CAPTURE 2 ===");
+    logLine(`gray2: ${gray2.cols}x${gray2.rows}`);
+
+    const res = computePoseFromTwoViews(); // returns {ok, reason, stats}
+    if (!res.ok) {
+      logLine("POSE FAIL: " + res.reason);
+      setOut("Pose failed: " + res.reason, true);
       setStage("v1");
       cap2Btn.disabled = false; // let you retry
       return;
@@ -592,61 +639,59 @@
     poseReady = true;
     setStage("ready");
     cap2Btn.disabled = true;
+
+    logLine(`POSE OK ✅ inliersF=${res.stats.inliersF} poseInliers=${res.stats.poseInliers}`);
     setOut("Pose ready ✅ Now drag ROI around objects to measure (no more captures needed).", false);
   }
 
   /********************************************************************
-   * 7) POSE FROM TWO VIEWS (GLOBAL FEATURES)
+   * 7) POSE FROM TWO VIEWS (GLOBAL FEATURES) — DEBUG VERSION
    * ---------------------------------------------------------------
-   * Steps:
-   *  1) detect corners in gray1
-   *  2) track to gray2 (Lucas-Kanade)
-   *  3) estimate F via RANSAC
-   *  4) E = K^T F K
-   *  5) recoverPose(E) -> R,t direction
-   *  6) scale t using baseline
-   *  7) build P1,P2 for triangulation
+   * Instead of returning true/false only, I return the exact reason it failed.
    ********************************************************************/
   function computePoseFromTwoViews() {
-    if (!gray1 || !gray2 || !K) return false;
+    if (!gray1 || !gray2 || !K) return { ok:false, reason:"Missing gray1/gray2/K", stats:{} };
 
     if (typeof cv.calcOpticalFlowPyrLK !== "function" ||
         typeof cv.findFundamentalMat !== "function" ||
         typeof cv.recoverPose !== "function" ||
         typeof cv.triangulatePoints !== "function") {
-      setOut("OpenCV.js build missing needed functions. Use the official opencv.js from docs.opencv.org/4.x.", true);
-      return false;
+      return { ok:false, reason:"opencv.js missing LK / calib3d functions", stats:{} };
     }
 
-    // 1) corners in view1
+    // ---- Tunable parameters (these matter) ----
+    const MAX_CORNERS = 1500;
+    const QUALITY = 0.005;
+    const MIN_DIST = 8;
+
+    const LK_WIN = new cv.Size(31,31);
+    const LK_LEVEL = 4;
+    const LK_CRIT = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+
+    const RANSAC_THRESH = 2.0;  // pixels
+    const RANSAC_CONF = 0.99;
+
+    // ---- 1) Detect corners in view1 ----
     const corners1 = new cv.Mat();
-    cv.goodFeaturesToTrack(gray1, corners1, 900, 0.01, 10);
+    cv.goodFeaturesToTrack(gray1, corners1, MAX_CORNERS, QUALITY, MIN_DIST);
+    logLine(`corners1 = ${corners1.rows}`);
 
-    setOut(`corners1=${corners1.rows}`, false);
-
-    if (corners1.rows < 60) {
+    if (corners1.rows < 80) {
       corners1.delete();
-      setOut("Not enough features. Use better lighting / more texture background.", true);
-      return false;
+      return { ok:false, reason:`Not enough corners (${corners1.rows}). Add texture/lighting.`, stats:{corners:corners1.rows} };
     }
 
-    // 2) track with LK
+    // ---- 2) Track corners to view2 ----
     const corners2 = new cv.Mat();
     const status = new cv.Mat();
     const err = new cv.Mat();
+    cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, LK_WIN, LK_LEVEL, LK_CRIT);
 
-    const winSize = new cv.Size(21,21);
-    const maxLevel = 3;
-    const criteria = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
-
-    cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, winSize, maxLevel, criteria);
-
-    // 3) filter matches
+    // Filter tracks
     const pts1 = [];
     const pts2 = [];
     for (let i=0; i<status.rows; i++) {
-      const ok = status.ucharPtr(i,0)[0];
-      if (!ok) continue;
+      if (!status.ucharPtr(i,0)[0]) continue;
 
       const x1 = corners1.data32F[i*2];
       const y1 = corners1.data32F[i*2 + 1];
@@ -655,85 +700,85 @@
 
       if (x2 < 0 || x2 >= gray2.cols || y2 < 0 || y2 >= gray2.rows) continue;
 
-      pts1.push({x:x1, y:y1});
-      pts2.push({x:x2, y:y2});
+      pts1.push({x:x1,y:y1});
+      pts2.push({x:x2,y:y2});
     }
 
     corners1.delete(); corners2.delete(); status.delete(); err.delete();
 
-    if (pts1.length < 60) {
-      setOut("Too few tracked points. Reduce rotation and blur; increase texture.", true);
-      return false;
+    logLine(`tracked = ${pts1.length}`);
+
+    if (pts1.length < 80) {
+      return { ok:false, reason:`Tracking collapsed (${pts1.length}). Too much motion/blur/baseline.`, stats:{tracked:pts1.length} };
     }
 
-    setOut(`tracked=${pts1.length}`, false);
-
-    // 4) F with RANSAC
+    // ---- 3) Fundamental matrix with RANSAC ----
     const pts1Mat = pointsToMat(pts1);
     const pts2Mat = pointsToMat(pts2);
     const mask = new cv.Mat();
 
-    const F = cv.findFundamentalMat(pts1Mat, pts2Mat, cv.FM_RANSAC, 1.5, 0.99, mask);
+    const F = cv.findFundamentalMat(pts1Mat, pts2Mat, cv.FM_RANSAC, RANSAC_THRESH, RANSAC_CONF, mask);
 
-    let inliers = 0;
-    for (let i=0;i<mask.rows;i++) inliers += (mask.ucharPtr(i,0)[0] ? 1 : 0);
+    let inliersF = 0;
+    for (let i=0;i<mask.rows;i++) inliersF += mask.ucharPtr(i,0)[0] ? 1 : 0;
+    logLine(`F inliers = ${inliersF}`);
 
-    if (!F || F.rows !== 3 || inliers < 40) {
+    if (!F || F.rows !== 3 || inliersF < 60) {
       pts1Mat.delete(); pts2Mat.delete(); mask.delete();
       if (F) F.delete();
-      setOut(`F failed / too few inliers (${inliers}). Increase baseline or reduce blur.`, true);
-      return false;
+      return {
+        ok:false,
+        reason:`F RANSAC failed / too few inliers (${inliersF}). Usually rotation, K mismatch, or poor texture.`,
+        stats:{tracked:pts1.length, inliersF}
+      };
     }
-    setOut(`tracked=${pts1.length}, inliers=${inliers}`, false);
 
-    // 5) E = K^T F K
+    // ---- 4) Essential matrix ----
     const E = computeEfromF(F, K);
 
-    // 6) recoverPose -> R,t direction
+    // ---- 5) recoverPose ----
     cleanupPose();
-
     R = new cv.Mat();
     t = new cv.Mat();
     const poseMask = new cv.Mat();
+    const poseInliers = cv.recoverPose(E, pts1Mat, pts2Mat, K, R, t, poseMask);
+    logLine(`recoverPose inliers = ${poseInliers}`);
 
-    const numPoseInliers = cv.recoverPose(E, pts1Mat, pts2Mat, K, R, t, poseMask);
+    // cleanup temp mats
+    pts1Mat.delete(); pts2Mat.delete(); mask.delete();
+    F.delete(); E.delete(); poseMask.delete();
 
-    // 7) scale t using baseline
-    const baselineCm = parseFloat(document.getElementById("baselineCm").value);
-    const baselineM = (isFinite(baselineCm) && baselineCm > 0) ? (baselineCm / 100.0) : null;
-    if (!baselineM) {
-      pts1Mat.delete(); pts2Mat.delete(); mask.delete(); F.delete(); E.delete(); poseMask.delete();
-      setOut("Baseline must be > 0 cm.", true);
-      return false;
+    if (!isFinite(t.doubleAt(0,0)) || poseInliers < 40) {
+      return {
+        ok:false,
+        reason:`recoverPose unstable (poseInliers=${poseInliers}). K/undistort mismatch or too much rotation.`,
+        stats:{tracked:pts1.length, inliersF, poseInliers}
+      };
     }
 
+    // ---- 6) scale t using baseline (cm) ----
+    const baselineCm = parseFloat(document.getElementById("baselineCm").value);
+    if (!(isFinite(baselineCm) && baselineCm > 0)) {
+      return { ok:false, reason:"Baseline must be > 0 cm", stats:{tracked:pts1.length, inliersF, poseInliers} };
+    }
+
+    const baselineM = baselineCm / 100.0;
     const tnorm = Math.hypot(t.doubleAt(0,0), t.doubleAt(1,0), t.doubleAt(2,0));
     const s = baselineM / Math.max(tnorm, 1e-9);
+
     t.doublePtr(0,0)[0] *= s;
     t.doublePtr(1,0)[0] *= s;
     t.doublePtr(2,0)[0] *= s;
 
-    // 8) build P1,P2
+    // ---- 7) Build projection matrices ----
     P1 = buildP1(K);
     P2 = buildP2(K, R, t);
 
-    // cleanup temps
-    pts1Mat.delete(); pts2Mat.delete(); mask.delete();
-    F.delete(); E.delete(); poseMask.delete();
-
-    setOut(`Pose OK ✅ inliers=${inliers}, poseInliers=${numPoseInliers}`, false);
-    return true;
+    return { ok:true, reason:"ok", stats:{tracked:pts1.length, inliersF, poseInliers} };
   }
 
   /********************************************************************
-   * 8) ROI MEASUREMENT (EXTRA CREDIT A UX)
-   * ---------------------------------------------------------------
-   * After poseReady:
-   *  - detect corners inside ROI on view1
-   *  - track to view2
-   *  - triangulate 3D points
-   *  - compute principal extents (SVD) -> size
-   *  - auto classify
+   * 8) ROI MEASUREMENT
    ********************************************************************/
   function measureROI(rx, ry, rw, rh) {
     if (!poseReady || !gray1 || !gray2 || !P1 || !P2) return { ok:false, msg:"Pose not ready yet." };
@@ -751,38 +796,29 @@
     maskROI.setTo(new cv.Scalar(255));
     maskROI.delete();
 
-    // Corners in ROI
     const p1 = new cv.Mat();
-    cv.goodFeaturesToTrack(gray1, p1, 400, 0.01, 6, mask);
+    cv.goodFeaturesToTrack(gray1, p1, 500, 0.01, 6, mask);
     mask.delete();
 
     if (p1.rows < 25) {
       p1.delete();
-      return { ok:false, msg:"Not enough texture in ROI. Try a tighter box or better lighting." };
+      return { ok:false, msg:"Not enough texture in ROI. Try tighter box / better lighting." };
     }
 
-    // Track to view2
     const p2 = new cv.Mat();
     const status = new cv.Mat();
     const err = new cv.Mat();
-    const winSize = new cv.Size(21,21);
-    const maxLevel = 3;
+    const winSize = new cv.Size(31,31);
+    const maxLevel = 4;
     const criteria = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
-
     cv.calcOpticalFlowPyrLK(gray1, gray2, p1, p2, status, err, winSize, maxLevel, criteria);
 
     const xs1 = [], ys1 = [], xs2 = [], ys2 = [];
     for (let i=0; i<status.rows; i++) {
-      const ok = status.ucharPtr(i,0)[0];
-      if (!ok) continue;
-
-      const x1 = p1.data32F[i*2];
-      const y1 = p1.data32F[i*2 + 1];
-      const x2 = p2.data32F[i*2];
-      const y2 = p2.data32F[i*2 + 1];
-
+      if (!status.ucharPtr(i,0)[0]) continue;
+      const x1 = p1.data32F[i*2], y1 = p1.data32F[i*2+1];
+      const x2 = p2.data32F[i*2], y2 = p2.data32F[i*2+1];
       if (x2 < 0 || x2 >= gray2.cols || y2 < 0 || y2 >= gray2.rows) continue;
-
       xs1.push(x1); ys1.push(y1);
       xs2.push(x2); ys2.push(y2);
     }
@@ -790,9 +826,8 @@
     p1.delete(); p2.delete(); status.delete(); err.delete();
 
     const N = xs1.length;
-    if (N < 20) return { ok:false, msg:"Too few tracked points in ROI. Try again." };
+    if (N < 25) return { ok:false, msg:`Too few tracked points in ROI (${N}).` };
 
-    // Build 2xN for triangulatePoints
     const m1 = new cv.Mat(2, N, cv.CV_64F);
     const m2 = new cv.Mat(2, N, cv.CV_64F);
     for (let i=0;i<N;i++){
@@ -806,30 +841,22 @@
     cv.triangulatePoints(P1, P2, m1, m2, X4);
     m1.delete(); m2.delete();
 
-    // Convert to point cloud (meters)
     const pts3 = [];
     for (let i=0;i<N;i++){
-      const X = X4.doubleAt(0,i);
-      const Y = X4.doubleAt(1,i);
-      const Z = X4.doubleAt(2,i);
-      const W = X4.doubleAt(3,i);
+      const X = X4.doubleAt(0,i), Y = X4.doubleAt(1,i), Z = X4.doubleAt(2,i), W = X4.doubleAt(3,i);
       if (Math.abs(W) < 1e-12) continue;
-
       const x = X/W, y = Y/W, z = Z/W;
-
       if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
-      if (Math.abs(z) > 10) continue; // reject crazy points
-
+      if (Math.abs(z) > 10) continue;
       pts3.push([x,y,z]);
     }
     X4.delete();
 
-    if (pts3.length < 15) return { ok:false, msg:"Triangulation unstable. Try bigger baseline / less blur." };
+    if (pts3.length < 15) return { ok:false, msg:`Triangulation unstable (kept ${pts3.length} pts).` };
 
     const ext = computeExtentsSVD(pts3);
     if (!ext) return { ok:false, msg:"SVD failed." };
 
-    // meters -> mm
     const e1 = ext.e1 * 1000;
     const e2 = ext.e2 * 1000;
     const e3 = ext.e3 * 1000;
@@ -840,19 +867,18 @@
     let measuredText = "";
     let primaryMm = e1;
 
-    // ball-ish: all extents similar
     if (r12 < 1.2 && r23 < 1.2) {
       const D = (e1 + e2 + e3) / 3.0;
       measuredText = `D≈${D.toFixed(1)} mm (ball-ish)`;
       primaryMm = D;
-    }
-    // spoon-ish: very elongated
-    else if (r12 > 2.2) {
+    } else if (r12 > 2.2) {
       measuredText = `Length≈${e1.toFixed(1)} mm (spoon-ish)`;
       primaryMm = e1;
-    }
-    // phone/box-ish
-    else {
+    } else if (r12 < 1.15) {
+      const side = 0.5*(e1+e2);
+      measuredText = `Side≈${side.toFixed(1)} mm (box-ish)`;
+      primaryMm = side;
+    } else {
       measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
       primaryMm = e1;
     }
@@ -861,7 +887,7 @@
   }
 
   /********************************************************************
-   * 9) ROI DRAG EVENTS (ONE DRAG SELECT)
+   * 9) ROI DRAG EVENTS
    ********************************************************************/
   canvas.addEventListener("mousedown", onDown);
   canvas.addEventListener("mousemove", onMove);
@@ -906,7 +932,6 @@
     const y = Math.min(roi.y0, roi.y1);
     const w = Math.abs(roi.x1 - roi.x0);
     const h = Math.abs(roi.y1 - roi.y0);
-
     if (w < 12 || h < 12) return;
 
     lastOverlay = { x,y,w,h };
@@ -971,7 +996,6 @@
     // Scale intrinsics from calibration resolution to runtime resolution
     const sx = W / CALIB.calW;
     const sy = H / CALIB.calH;
-
     const fx = CALIB.fx * sx;
     const fy = CALIB.fy * sy;
     const cx = CALIB.cx * sx;
@@ -1039,12 +1063,10 @@
     const N = pts3.length;
     if (N < 5) return null;
 
-    // mean
     let mx=0,my=0,mz=0;
     for (const p of pts3) { mx+=p[0]; my+=p[1]; mz+=p[2]; }
     mx/=N; my/=N; mz/=N;
 
-    // centered matrix A (N x 3)
     const A = new cv.Mat(N, 3, cv.CV_64F);
     for (let i=0;i<N;i++){
       A.doublePtr(i,0)[0] = pts3[i][0] - mx;
@@ -1052,7 +1074,6 @@
       A.doublePtr(i,2)[0] = pts3[i][2] - mz;
     }
 
-    // SVD
     const W = new cv.Mat();
     const U = new cv.Mat();
     const Vt = new cv.Mat();
@@ -1116,6 +1137,9 @@
     setOut("Reset ✅ Start over: Capture 1 → move baseline → Capture 2 → drag ROI.", false);
     imuGateEl.textContent = imuEnabled ? "IMU on" : "IMU off";
     imuGateEl.className = imuEnabled ? "ok" : "warn";
+
+    clearLog();
+    logLine("=== RESET ===");
   }
 
   // init
