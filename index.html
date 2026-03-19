@@ -49,7 +49,7 @@
       gap: 8px;
     }
 
-    button, input{
+    button, input, select{
       border: var(--border);
       border-radius: 12px;
       padding: 10px 12px;
@@ -216,7 +216,7 @@
       </summary>
       <div class="row">
         <button onclick="clearLog()">Clear log</button>
-        <span class="small">This version fixes undistort/display mismatch, uses forward-backward LK filtering, color-aware ROI masks, and robust trimmed 3D spans.</span>
+        <span class="small">Uses undistorted display alignment, forward-backward LK, color-aware ROI masks, and shape-dependent measurements.</span>
       </div>
       <pre id="log"></pre>
     </details>
@@ -244,7 +244,14 @@
         <span class="small" id="resCount">0</span>
       </summary>
       <div class="row">
-        <input id="objName" type="text" placeholder="object name (optional)" style="width: 200px;">
+        <input id="objName" type="text" placeholder="object name (optional)" style="width: 170px;">
+        <select id="objType" style="width: 150px;">
+          <option value="auto">auto detect</option>
+          <option value="ball">ball</option>
+          <option value="box">box</option>
+          <option value="phone">phone</option>
+          <option value="spoon">spoon</option>
+        </select>
         <input id="gtMm" type="number" step="0.1" placeholder="GT mm (optional)" style="width: 140px;">
         <button onclick="clearResults()">Clear</button>
       </div>
@@ -255,6 +262,7 @@
             <tr>
               <th>#</th>
               <th>Object</th>
+              <th>Type</th>
               <th>Measured</th>
               <th>GT</th>
               <th>Err%</th>
@@ -399,6 +407,7 @@
 
     const resultsBody = document.getElementById("resultsBody");
     const resCount = document.getElementById("resCount");
+    const objTypeSel = document.getElementById("objType");
 
     /********************************************************************
      * READY HOOK
@@ -552,7 +561,6 @@
         } else {
           cv.cvtColor(matIn, rgba, cv.COLOR_GRAY2RGBA);
         }
-
         const buf = new Uint8ClampedArray(rgba.data);
         return new ImageData(buf, rgba.cols, rgba.rows);
       } finally {
@@ -944,7 +952,7 @@
     }
 
     /********************************************************************
-     * OBJECT MEASUREMENT
+     * OBJECT EXTRACTION
      ********************************************************************/
     function measureWithTwoROIs(){
       if (!poseReady || !gray1 || !gray2 || !rgba1 || !rgba2 || !roi1Box || !roi2Box){
@@ -1250,6 +1258,9 @@
       };
     }
 
+    /********************************************************************
+     * SHAPE-DEPENDENT 3D MEASUREMENT
+     ********************************************************************/
     function reconstructObjectCloud(obj1, obj2){
       if (typeof cv.goodFeaturesToTrack !== "function") {
         return { ok:false, msg:"goodFeaturesToTrack missing." };
@@ -1360,51 +1371,104 @@
       const ext = computeExtentsPCA_covEigen(pts3);
       if (!ext) return { ok:false, msg:"3D extent PCA failed." };
 
-      const e1 = ext.e1 * 1000;
-      const e2 = ext.e2 * 1000;
-      const e3 = ext.e3 * 1000;
+      const dims = [ext.e1 * 1000, ext.e2 * 1000, ext.e3 * 1000].sort((a,b)=>b-a);
+      const dLongRaw = dims[0];
+      const dMid = dims[1];
+      const dShort = dims[2];
 
       const circularity = 0.5 * (obj1.circularity + obj2.circularity);
       const aspect2D = 0.5 * (obj1.aspect + obj2.aspect);
 
-      let mode = "length";
-      let primaryMm = e1;
-      let measuredText = "";
+      const largestLooksBad = dLongRaw > 2.5 * Math.max(dMid, 1e-9);
+      let stableLong = largestLooksBad ? dMid : dLongRaw;
+      let stableMid = largestLooksBad ? dShort : dMid;
+      let stableShort = dShort;
 
-      if (circularity > 0.78 && aspect2D < 1.20){
-        const D = 0.5 * (e1 + e2);
-        mode = "diameter";
-        primaryMm = D;
-        measuredText = `D≈${D.toFixed(1)} mm`;
-      } else if (aspect2D > 2.0 || (e1 / Math.max(e2,1e-9)) > 2.2){
-        mode = "length";
-        primaryMm = e1;
-        measuredText = `Length≈${e1.toFixed(1)} mm`;
-      } else {
-        mode = "length_width";
-        primaryMm = e1;
-        measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
+      if (largestLooksBad){
+        logLine(`[MEASURE] rejecting largest PCA axis as unstable: ${dLongRaw.toFixed(1)} mm`);
       }
 
+      const shapeInfo = determineObjectType(circularity, aspect2D, stableLong, stableMid);
       const reprojMed = median(reprojArr);
+
       logLine(
-        `[MEASURE] mode=${mode} e1=${e1.toFixed(1)} mm e2=${e2.toFixed(1)} mm e3=${e3.toFixed(1)} mm ` +
+        `[MEASURE] type=${shapeInfo.type} rawLargest=${dLongRaw.toFixed(1)} mm stableLong=${stableLong.toFixed(1)} mm stableMid=${stableMid.toFixed(1)} mm stableShort=${stableShort.toFixed(1)} mm ` +
         `circ=${circularity.toFixed(3)} aspect2D=${aspect2D.toFixed(3)} reprojMed=${reprojMed.toFixed(2)} px`
       );
 
+      return formatMeasurementByType(
+        shapeInfo.type,
+        stableLong,
+        stableMid,
+        stableShort,
+        circularity,
+        aspect2D,
+        reprojMed,
+        pts3.length
+      );
+    }
+
+    function determineObjectType(circularity, aspect2D, stableLong, stableMid){
+      const manual = objTypeSel.value;
+      if (manual && manual !== "auto"){
+        return { type: manual, source: "manual" };
+      }
+
+      const ratio = stableLong / Math.max(stableMid, 1e-9);
+
+      if (circularity > 0.78 && aspect2D < 1.20){
+        return { type: "ball", source: "auto" };
+      }
+      if (ratio > 2.2 || aspect2D > 2.0){
+        return { type: "spoon", source: "auto" };
+      }
+      if (ratio > 1.35){
+        return { type: "phone", source: "auto" };
+      }
+      return { type: "box", source: "auto" };
+    }
+
+    function formatMeasurementByType(type, L, W, T, circularity, aspect2D, reprojMed, n3d){
+      let measuredText = "";
+      let primaryMm = L;
+      let metaText = `pts=${n3d}, circ=${circularity.toFixed(3)}, ar=${aspect2D.toFixed(3)}`;
+      let mode = type;
+      let typeLabel = type;
+
+      if (type === "ball"){
+        const D = 0.5 * (L + W);
+        primaryMm = D;
+        measuredText = `Diameter≈${D.toFixed(1)} mm`;
+      } else if (type === "box"){
+        const side = Math.max(L, W);
+        primaryMm = side;
+        measuredText = `Side≈${side.toFixed(1)} mm`;
+      } else if (type === "phone"){
+        primaryMm = L;
+        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
+      } else if (type === "spoon"){
+        primaryMm = L;
+        measuredText = `Length≈${L.toFixed(1)} mm`;
+      } else {
+        primaryMm = L;
+        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
+        typeLabel = "unknown";
+      }
+
       return {
-        ok:true,
+        ok: true,
         primaryMm,
         measuredText,
+        typeLabel,
         mode,
         circularity,
         aspect2D,
-        lengthMm: e1,
-        widthMm: e2,
-        thicknessMm: e3,
+        lengthMm: L,
+        widthMm: W,
+        thicknessMm: T,
         reprojMedPx: reprojMed,
-        n3d: pts3.length,
-        metaText: `pts=${pts3.length}, circ=${circularity.toFixed(3)}, ar=${aspect2D.toFixed(3)}`
+        n3d,
+        metaText
       };
     }
 
@@ -1507,6 +1571,7 @@
 
       results.push({
         name,
+        type: res.typeLabel,
         measuredText: res.measuredText,
         gtMm,
         errPct,
@@ -1519,6 +1584,7 @@
       tr.innerHTML = `
         <td>${results.length}</td>
         <td>${escapeHtml(name)}</td>
+        <td>${escapeHtml(res.typeLabel)}</td>
         <td>${escapeHtml(res.measuredText)}</td>
         <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
         <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
