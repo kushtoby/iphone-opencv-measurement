@@ -779,7 +779,7 @@
       }
 
       const ransac = estimateE_RANSAC(x1n, x2n);
-      if (!ransac.ok) return { ok:false, reason:ransa c.reason };
+      if (!ransac.ok) return { ok:false, reason:ransac.reason };
 
       logLine(`E inliers=${ransac.inliersIdx.length}`);
 
