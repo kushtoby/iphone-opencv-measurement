@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Two-ROI Epipolar Measurement (Option A + Option B)</title>
+  <title>3D Object Measurement — Epipolar / Manual / Reference</title>
   <style>
     :root{
-      --maxw: 700px;
+      --maxw: 760px;
       --radius: 14px;
       --border: 1px solid #e8e8e8;
     }
@@ -37,7 +37,7 @@
       position: sticky;
       top: 0;
       z-index: 50;
-      background: rgba(255,255,255,0.92);
+      background: rgba(255,255,255,0.94);
       backdrop-filter: blur(10px);
       border: var(--border);
       border-radius: var(--radius);
@@ -77,6 +77,7 @@
       padding: 10px 12px;
       background:#fff;
       font-size: 14px;
+      flex-wrap: wrap;
     }
 
     .pill input[type="checkbox"]{ transform: scale(1.1); }
@@ -160,7 +161,7 @@
 </head>
 
 <body>
-  <h2>Epipolar Measurement — Option A + Fixed Reference Option B</h2>
+  <h2>3D Object Measurement — Epipolar / Manual / Reference</h2>
 
   <video id="video" autoplay playsinline style="display:none;"></video>
   <canvas id="canvas"></canvas>
@@ -173,9 +174,20 @@
 
     <div class="pill">
       <span>Mode</span>
-      <select id="modeSel" style="width:220px;">
-        <option value="epipolar" selected>Option A — Epipolar</option>
-        <option value="reference">Option B — Fixed reference</option>
+      <select id="modeSel" style="width:240px;">
+        <option value="epipolar_auto" selected>Mode A — Epipolar Auto</option>
+        <option value="epipolar_manual">Mode B — Epipolar Manual</option>
+        <option value="reference_manual">Mode C — Fixed Reference</option>
+      </select>
+    </div>
+
+    <div class="pill">
+      <span>Object type</span>
+      <select id="objType" style="width:180px;">
+        <option value="phone">phone</option>
+        <option value="box">box</option>
+        <option value="spoon">spoon</option>
+        <option value="ball">ball</option>
       </select>
     </div>
 
@@ -195,14 +207,17 @@
     </div>
 
     <div class="pill">
-      <span>Reference card width × height (mm)</span>
+      <span>Reference width × height (mm)</span>
       <div style="display:flex; gap:8px;">
         <input id="refWidthMm" type="number" value="85.60" step="0.01" style="width:100px;">
         <input id="refHeightMm" type="number" value="53.98" step="0.01" style="width:100px;">
       </div>
     </div>
 
-    <button onclick="resetAll()" style="grid-column: 1 / -1;">Reset</button>
+    <button onclick="clearROIs()">Clear ROIs</button>
+    <button onclick="clearLastMark()">Clear last mark</button>
+    <button onclick="clearAllMarks()">Clear all marks</button>
+    <button onclick="resetAll()">Reset all</button>
   </div>
 
   <div class="wrap">
@@ -232,7 +247,7 @@
       </summary>
       <div class="row">
         <button onclick="clearLog()">Clear log</button>
-        <span class="small">Option A uses epipolar geometry. Option B uses a fixed in-scene reference object.</span>
+        <span class="small">Manual mode: clear last mark lets you fix a mistaken click without restarting.</span>
       </div>
       <pre id="log"></pre>
     </details>
@@ -243,14 +258,13 @@
         <span class="small">tap to collapse</span>
       </summary>
       <ol class="small" style="margin-top:8px;">
-        <li>Mount phone rigidly and use preset baseline positions.</li>
         <li>Start camera.</li>
-        <li>Optional: enable Sensors.</li>
-        <li>Capture 1 at position A.</li>
-        <li>Move to position B. Keep IMU green if enabled.</li>
-        <li>Capture 2.</li>
-        <li>Option A: draw ROI on the object in View 1, then View 2.</li>
-        <li>Option B: draw ROI on the fixed credit card in View 1, then draw ROI on the object in View 1.</li>
+        <li>Optional: enable sensors.</li>
+        <li>Capture 1.</li>
+        <li>Move to position B and Capture 2.</li>
+        <li>Mode A: draw object ROI in View 1 and View 2.</li>
+        <li>Mode B: draw object ROI in View 1 and View 2, then click measurement points in both views.</li>
+        <li>Mode C: draw reference ROI and object ROI in View 1, then click reference and object measurement points.</li>
       </ol>
     </details>
 
@@ -261,13 +275,6 @@
       </summary>
       <div class="row">
         <input id="objName" type="text" placeholder="object name (optional)" style="width: 170px;">
-        <select id="objType" style="width: 150px;">
-          <option value="auto">auto detect</option>
-          <option value="ball">ball</option>
-          <option value="box">box</option>
-          <option value="phone">phone</option>
-          <option value="spoon">spoon</option>
-        </select>
         <input id="gtMm" type="number" step="0.1" placeholder="GT mm (optional)" style="width: 140px;">
         <button onclick="clearResults()">Clear</button>
       </div>
@@ -278,6 +285,7 @@
             <tr>
               <th>#</th>
               <th>Object</th>
+              <th>Mode</th>
               <th>Type</th>
               <th>Measured</th>
               <th>GT</th>
@@ -389,7 +397,12 @@
     let roi1Box = null;
     let roi2Box = null;
     let refRoiBox = null;
-    let refFrameChoice = "view1";
+
+    let pointState = "none";
+    let manualPtsV1 = [];
+    let manualPtsV2 = [];
+    let refScalePts = [];
+    let refObjPts = [];
 
     let results = [];
 
@@ -473,6 +486,47 @@
       }[c]));
     }
 
+    function requiredPointsForObject(type){
+      return (type === "phone" || type === "box") ? 4 : 2;
+    }
+
+    function instructionManualView1(){
+      const t = objTypeSel.value;
+      if (t === "phone" || t === "box"){
+        return `View 1: click 4 points in this order — length start, length end, width start, width end.`;
+      }
+      if (t === "spoon"){
+        return `View 1: click 2 points in this order — spoon length start, spoon length end.`;
+      }
+      return `View 1: click 2 points in this order — ball diameter endpoint 1, endpoint 2.`;
+    }
+
+    function instructionManualView2(){
+      const t = objTypeSel.value;
+      if (t === "phone" || t === "box"){
+        return `View 2: click the SAME 4 physical points in the SAME order — length start, length end, width start, width end.`;
+      }
+      if (t === "spoon"){
+        return `View 2: click the SAME 2 physical spoon endpoints in the SAME order.`;
+      }
+      return `View 2: click the SAME 2 physical ball diameter endpoints in the SAME order.`;
+    }
+
+    function instructionReferenceScale(){
+      return `Reference: click 4 points in View 1 — card width start, width end, height start, height end.`;
+    }
+
+    function instructionReferenceObject(){
+      const t = objTypeSel.value;
+      if (t === "phone" || t === "box"){
+        return `Object: click 4 points in View 1 — length start, length end, width start, width end.`;
+      }
+      if (t === "spoon"){
+        return `Object: click 2 points in View 1 — spoon length start, spoon length end.`;
+      }
+      return `Object: click 2 points in View 1 — ball diameter endpoint 1, endpoint 2.`;
+    }
+
     /********************************************************************
      * CAMERA
      ********************************************************************/
@@ -548,7 +602,7 @@
         ctx.putImageData(frame2ImageData, 0, 0);
       }
 
-      if (refRoiBox && displayMode === "view1" && modeSel.value === "reference") drawBox(refRoiBox, "cyan");
+      if (refRoiBox && displayMode === "view1") drawBox(refRoiBox, "cyan");
       if (roi1Box && displayMode === "view1") drawBox(roi1Box, "yellow");
       if (roi2Box && displayMode === "view2") drawBox(roi2Box, "yellow");
 
@@ -560,6 +614,20 @@
         drawBox({x,y,w,h}, "lime");
       }
 
+      if (displayMode === "view1"){
+        drawLabeledPoints(manualPtsV1, "#00ff66");
+        drawLabeledSegments(manualPtsV1, "#00ff66");
+        drawLabeledPoints(refScalePts, "#00e5ff");
+        drawLabeledSegments(refScalePts, "#00e5ff");
+        drawLabeledPoints(refObjPts, "#ff66ff");
+        drawLabeledSegments(refObjPts, "#ff66ff");
+      }
+
+      if (displayMode === "view2"){
+        drawLabeledPoints(manualPtsV2, "#ff9500");
+        drawLabeledSegments(manualPtsV2, "#ff9500");
+      }
+
       requestAnimationFrame(drawLoop);
     }
 
@@ -568,6 +636,38 @@
       ctx.strokeStyle = color;
       ctx.lineWidth = 4;
       ctx.strokeRect(b.x, b.y, b.w, b.h);
+      ctx.restore();
+    }
+
+    function drawLabeledPoints(arr, color){
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 2;
+      ctx.font = "16px system-ui, sans-serif";
+      for (let i=0; i<arr.length; i++){
+        const p = arr[i];
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6, 0, 2*Math.PI);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillText(String(i+1), p.x + 8, p.y - 8);
+      }
+      ctx.restore();
+    }
+
+    function drawLabeledSegments(arr, color){
+      if (arr.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      for (let i=0; i+1<arr.length; i+=2){
+        const p1 = arr[i], p2 = arr[i+1];
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -768,12 +868,12 @@
 
       const mode = modeSel.value;
 
-      if (mode === "reference"){
+      if (mode === "reference_manual"){
         poseReady = false;
         setStage("ref_roi");
         setDisplayMode("view1");
         roiState = "await1";
-        setOut("Option B active ✅ Draw ROI around the fixed credit card in View 1.", false);
+        setOut("Mode C ✅ Draw ROI around the fixed reference card in View 1.", false);
         cap2Btn.disabled = true;
         return;
       }
@@ -793,119 +893,22 @@
       setStage("ready");
 
       logLine(`POSE OK ✅ inliers=${res.inliers} / ${res.total}`);
-      logLine("=== ROI SEQUENCE ===");
-      setOut("Pose ready ✅ Now draw ROI on View 1.", false);
 
       roiState = "await1";
-      setStage("roi1");
       setDisplayMode("view1");
       cap2Btn.disabled = true;
+
+      if (mode === "epipolar_auto"){
+        setStage("roi1_auto");
+        setOut("Mode A ✅ Draw ROI around the object in View 1.", false);
+      } else {
+        setStage("roi1_manual");
+        setOut("Mode B ✅ Draw ROI around the object in View 1.", false);
+      }
     }
 
     /********************************************************************
-     * POSE
-     ********************************************************************/
-    function computePose_Epipolar_JS(){
-      if (!gray1 || !gray2 || !Kinv){
-        return { ok:false, reason:"Missing gray1/gray2/Kinv" };
-      }
-      if (typeof cv.goodFeaturesToTrack !== "function"){
-        return { ok:false, reason:"OpenCV missing goodFeaturesToTrack" };
-      }
-      if (typeof cv.calcOpticalFlowPyrLK !== "function"){
-        return { ok:false, reason:"OpenCV missing LK optical flow" };
-      }
-
-      const corners1 = new cv.Mat();
-      cv.goodFeaturesToTrack(gray1, corners1, 1800, 0.005, 8);
-      const nCorners = corners1.rows;
-      logLine(`corners1=${nCorners}`);
-
-      if (nCorners < 100){
-        corners1.delete();
-        return { ok:false, reason:`Not enough corners (${nCorners}). Add texture/lighting.` };
-      }
-
-      const win = new cv.Size(31,31);
-      const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
-
-      const corners2 = new cv.Mat();
-      const status12 = new cv.Mat();
-      const err12 = new cv.Mat();
-      cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status12, err12, win, 4, crit);
-
-      const back1 = new cv.Mat();
-      const status21 = new cv.Mat();
-      const err21 = new cv.Mat();
-      cv.calcOpticalFlowPyrLK(gray2, gray1, corners2, back1, status21, err21, win, 4, crit);
-
-      const x1n = [];
-      const x2n = [];
-
-      for (let i=0; i<status12.rows; i++){
-        if (!status12.ucharPtr(i,0)[0]) continue;
-        if (!status21.ucharPtr(i,0)[0]) continue;
-
-        const u1 = corners1.data32F[i*2];
-        const v1 = corners1.data32F[i*2 + 1];
-        const u2 = corners2.data32F[i*2];
-        const v2 = corners2.data32F[i*2 + 1];
-        const ub = back1.data32F[i*2];
-        const vb = back1.data32F[i*2 + 1];
-
-        const lkErr = err12.floatAt(i,0);
-        const fbErr = Math.hypot(ub - u1, vb - v1);
-
-        if (lkErr > MAX_LK_ERR_POSE) continue;
-        if (fbErr > FB_POSE_THRESH) continue;
-        if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
-
-        x1n.push(pixelToNorm(u1, v1));
-        x2n.push(pixelToNorm(u2, v2));
-      }
-
-      corners1.delete();
-      corners2.delete();
-      status12.delete();
-      err12.delete();
-      back1.delete();
-      status21.delete();
-      err21.delete();
-
-      logLine(`tracked_fb=${x1n.length}`);
-      if (x1n.length < MIN_TRACKED_POSE){
-        return { ok:false, reason:`Too few tracked points after FB check (${x1n.length}).` };
-      }
-
-      const ransac = estimateE_RANSAC(x1n, x2n);
-      if (!ransac.ok) return { ok:false, reason:ransac.reason };
-
-      logLine(`E inliers=${ransac.inliersIdx.length}`);
-
-      const best = recoverPoseFromE(ransac.E, x1n, x2n, ransac.inliersIdx);
-      if (!best.ok) return { ok:false, reason:best.reason };
-
-      const baselineCm = parseFloat(document.getElementById("baselineCm").value);
-      if (!(isFinite(baselineCm) && baselineCm > 0)){
-        return { ok:false, reason:"Baseline must be > 0 cm" };
-      }
-
-      const baselineM = baselineCm / 100.0;
-      const tn = Math.hypot(best.t[0], best.t[1], best.t[2]);
-      const s = baselineM / Math.max(tn, 1e-12);
-      const t_scaled = [best.t[0]*s, best.t[1]*s, best.t[2]*s];
-
-      return {
-        ok:true,
-        R:best.R,
-        t_scaled,
-        inliers:ransac.inliersIdx.length,
-        total:x1n.length
-      };
-    }
-
-    /********************************************************************
-     * ROI FLOW
+     * ROI + POINT EVENTS
      ********************************************************************/
     canvas.addEventListener("mousedown", onDown);
     canvas.addEventListener("mousemove", onMove);
@@ -915,11 +918,16 @@
     canvas.addEventListener("touchmove", onMove, { passive:false });
     canvas.addEventListener("touchend", onUp, { passive:false });
 
+    canvas.addEventListener("click", onCanvasClick);
+    canvas.addEventListener("touchend", onCanvasTap, { passive:false });
+
     function canvasPointFromEvent(e){
       const rect = canvas.getBoundingClientRect();
       const t0 = e.touches ? e.touches[0] : null;
-      const cx = t0 ? t0.clientX : e.clientX;
-      const cy = t0 ? t0.clientY : e.clientY;
+      const changed = e.changedTouches ? e.changedTouches[0] : null;
+      const src = t0 || changed || e;
+      const cx = src.clientX;
+      const cy = src.clientY;
       return {
         x: (cx - rect.left) * (canvas.width / rect.width),
         y: (cy - rect.top) * (canvas.height / rect.height)
@@ -958,13 +966,13 @@
 
       const mode = modeSel.value;
 
-      if (mode === "reference"){
+      if (mode === "reference_manual"){
         if (roiState === "await1"){
           refRoiBox = { x,y,w,h };
           logLine(`[REF ROI] x=${x.toFixed(1)} y=${y.toFixed(1)} w=${w.toFixed(1)} h=${h.toFixed(1)}`);
           roiState = "await2";
-          setStage("objRoi_ref");
-          setOut("Reference ROI saved ✅ Now draw ROI on the object in the same view.", false);
+          setStage("ref_obj_roi");
+          setOut("Reference ROI saved ✅ Now draw ROI around the object in View 1.", false);
           return;
         }
 
@@ -972,17 +980,10 @@
           roi1Box = { x,y,w,h };
           logLine(`[OBJ ROI] x=${x.toFixed(1)} y=${y.toFixed(1)} w=${w.toFixed(1)} h=${h.toFixed(1)}`);
           roiState = "none";
-
-          const frameRGBA = (refFrameChoice === "view1") ? rgba1 : rgba2;
-          const res = measureUsingFixedReference(frameRGBA, refRoiBox, roi1Box);
-          if (!res.ok){
-            setOut(res.msg, true);
-            return;
-          }
-
-          setStage("measured_ref");
-          setOut(`FINAL: ${res.measuredText}`, false);
-          logResult(res);
+          pointState = "ref_scale";
+          setStage("ref_scale_pts");
+          setDisplayMode("view1");
+          setOut(instructionReferenceScale(), false);
           return;
         }
       }
@@ -993,7 +994,7 @@
         roiState = "await2";
         setStage("roi2");
         setDisplayMode("view2");
-        setOut("ROI 1 saved ✅ Now draw ROI on View 2.", false);
+        setOut("ROI 1 saved ✅ Now draw ROI around the object in View 2.", false);
         return;
       }
 
@@ -1002,15 +1003,185 @@
         logLine(`[ROI2] x=${x.toFixed(1)} y=${y.toFixed(1)} w=${w.toFixed(1)} h=${h.toFixed(1)}`);
         roiState = "none";
 
-        const res = measureWithTwoROIs();
-        if (!res.ok){
-          setOut(res.msg, true);
+        if (mode === "epipolar_auto"){
+          const res = measureWithTwoROIs();
+          if (!res.ok){
+            setOut(res.msg, true);
+            return;
+          }
+          setStage("measured");
+          setOut(`FINAL: ${res.measuredText}`, false);
+          logResult(res);
           return;
         }
 
-        setStage("measured");
-        setOut(`FINAL: ${res.measuredText}`, false);
-        logResult(res);
+        pointState = "epi_v1";
+        setStage("manual_v1");
+        setDisplayMode("view1");
+        setOut(instructionManualView1(), false);
+      }
+    }
+
+    function onCanvasClick(e){
+      if (pointState === "none") return;
+      if (roi.active) return;
+      e.preventDefault();
+      addMark(canvasPointFromEvent(e));
+    }
+
+    function onCanvasTap(e){
+      if (pointState === "none") return;
+      if (roi.active) return;
+      e.preventDefault();
+      addMark(canvasPointFromEvent(e));
+    }
+
+    function addMark(p){
+      const nReq = requiredPointsForObject(objTypeSel.value);
+
+      if (pointState === "epi_v1"){
+        manualPtsV1.push(p);
+        logLine(`[V1 MARK ${manualPtsV1.length}] x=${p.x.toFixed(1)} y=${p.y.toFixed(1)}`);
+        if (manualPtsV1.length >= nReq){
+          pointState = "epi_v2";
+          setStage("manual_v2");
+          setDisplayMode("view2");
+          setOut(instructionManualView2(), false);
+        }
+        return;
+      }
+
+      if (pointState === "epi_v2"){
+        manualPtsV2.push(p);
+        logLine(`[V2 MARK ${manualPtsV2.length}] x=${p.x.toFixed(1)} y=${p.y.toFixed(1)}`);
+        if (manualPtsV2.length >= nReq){
+          pointState = "none";
+          const res = measureManualEpipolar();
+          if (!res.ok){
+            setOut(res.msg, true);
+            return;
+          }
+          setStage("measured_manual");
+          setOut(`FINAL: ${res.measuredText}`, false);
+          logResult(res);
+        }
+        return;
+      }
+
+      if (pointState === "ref_scale"){
+        refScalePts.push(p);
+        logLine(`[REF MARK ${refScalePts.length}] x=${p.x.toFixed(1)} y=${p.y.toFixed(1)}`);
+        if (refScalePts.length >= 4){
+          pointState = "ref_obj";
+          setStage("ref_obj_pts");
+          setDisplayMode("view1");
+          setOut(instructionReferenceObject(), false);
+        }
+        return;
+      }
+
+      if (pointState === "ref_obj"){
+        refObjPts.push(p);
+        logLine(`[OBJ MARK ${refObjPts.length}] x=${p.x.toFixed(1)} y=${p.y.toFixed(1)}`);
+        if (refObjPts.length >= nReq){
+          pointState = "none";
+          const res = measureReferenceManual();
+          if (!res.ok){
+            setOut(res.msg, true);
+            return;
+          }
+          setStage("measured_ref");
+          setOut(`FINAL: ${res.measuredText}`, false);
+          logResult(res);
+        }
+      }
+    }
+
+    /********************************************************************
+     * CLEAR HELPERS
+     ********************************************************************/
+    function clearROIs(){
+      roi1Box = null;
+      roi2Box = null;
+      refRoiBox = null;
+      if (modeSel.value === "reference_manual"){
+        if (streaming && frame1ImageData){
+          setDisplayMode("view1");
+          roiState = "await1";
+          pointState = "none";
+          refScalePts = [];
+          refObjPts = [];
+          setOut("Reference ROIs cleared. Draw the reference ROI again.", false);
+        }
+      } else {
+        if (streaming && frame1ImageData){
+          setDisplayMode("view1");
+          roiState = "await1";
+          pointState = "none";
+          manualPtsV1 = [];
+          manualPtsV2 = [];
+          setOut("Object ROIs cleared. Draw ROI in View 1 again.", false);
+        }
+      }
+      logLine("[clear] ROIs cleared");
+    }
+
+    function clearLastMark(){
+      if (pointState === "epi_v1" || (pointState === "none" && manualPtsV2.length === 0 && manualPtsV1.length > 0)){
+        if (manualPtsV1.length > 0){
+          manualPtsV1.pop();
+          setDisplayMode("view1");
+          logLine("[clear] removed last View 1 mark");
+        }
+        return;
+      }
+
+      if (pointState === "epi_v2" || (pointState === "none" && manualPtsV2.length > 0)){
+        if (manualPtsV2.length > 0){
+          manualPtsV2.pop();
+          setDisplayMode("view2");
+          logLine("[clear] removed last View 2 mark");
+        }
+        return;
+      }
+
+      if (pointState === "ref_scale" || (pointState === "none" && refObjPts.length === 0 && refScalePts.length > 0)){
+        if (refScalePts.length > 0){
+          refScalePts.pop();
+          setDisplayMode("view1");
+          logLine("[clear] removed last reference-scale mark");
+        }
+        return;
+      }
+
+      if (pointState === "ref_obj" || (pointState === "none" && refObjPts.length > 0)){
+        if (refObjPts.length > 0){
+          refObjPts.pop();
+          setDisplayMode("view1");
+          logLine("[clear] removed last reference-object mark");
+        }
+      }
+    }
+
+    function clearAllMarks(){
+      manualPtsV1 = [];
+      manualPtsV2 = [];
+      refScalePts = [];
+      refObjPts = [];
+      logLine("[clear] all marks cleared");
+
+      if (pointState === "epi_v2"){
+        setDisplayMode("view2");
+        setOut(instructionManualView2(), false);
+      } else if (pointState === "epi_v1"){
+        setDisplayMode("view1");
+        setOut(instructionManualView1(), false);
+      } else if (pointState === "ref_scale"){
+        setDisplayMode("view1");
+        setOut(instructionReferenceScale(), false);
+      } else if (pointState === "ref_obj"){
+        setDisplayMode("view1");
+        setOut(instructionReferenceObject(), false);
       }
     }
 
@@ -1038,120 +1209,6 @@
       );
 
       return reconstructObjectCloud(obj1, obj2);
-    }
-
-    function measureUsingFixedReference(frameRGBA, refBox, objBox){
-      if (!frameRGBA || !refBox || !objBox){
-        return { ok:false, msg:"Need a reference ROI and an object ROI first." };
-      }
-
-      const ref = extractObjectFromROI(frameRGBA, refBox, "reference");
-      if (!ref.ok) return { ok:false, msg:"Reference extraction failed." };
-
-      const obj = extractObjectFromROI(frameRGBA, objBox, "object");
-      if (!obj.ok){
-        ref.maskUp.delete();
-        ref.blurUp.delete();
-        return { ok:false, msg:"Object extraction failed." };
-      }
-
-      const refWidthMm = parseFloat(document.getElementById("refWidthMm").value);
-      const refHeightMm = parseFloat(document.getElementById("refHeightMm").value);
-
-      if (!(isFinite(refWidthMm) && refWidthMm > 0 && isFinite(refHeightMm) && refHeightMm > 0)){
-        ref.maskUp.delete();
-        ref.blurUp.delete();
-        obj.maskUp.delete();
-        obj.blurUp.delete();
-        return { ok:false, msg:"Reference width/height must be positive." };
-      }
-
-      const refPxLong = Math.max(ref.majorSpanUp, ref.minorSpanUp) / ref.ups;
-      const refPxShort = Math.min(ref.majorSpanUp, ref.minorSpanUp) / ref.ups;
-
-      const refMmLong = Math.max(refWidthMm, refHeightMm);
-      const refMmShort = Math.min(refWidthMm, refHeightMm);
-
-      const scaleLong = refMmLong / Math.max(refPxLong, 1e-9);
-      const scaleShort = refMmShort / Math.max(refPxShort, 1e-9);
-      const scaleAvg = 0.5 * (scaleLong + scaleShort);
-
-      const objPxLong = Math.max(obj.majorSpanUp, obj.minorSpanUp) / obj.ups;
-      const objPxShort = Math.min(obj.majorSpanUp, obj.minorSpanUp) / obj.ups;
-
-      let typeLabel = objTypeSel.value;
-      const circularity = obj.circularity;
-      const aspect2D = obj.aspect;
-
-      if (typeLabel === "auto"){
-        if (circularity > 0.78 && aspect2D < 1.20){
-          typeLabel = "ball";
-        } else if (objPxLong / Math.max(objPxShort,1e-9) > 2.2 || aspect2D > 2.0){
-          typeLabel = "spoon";
-        } else if (objPxLong / Math.max(objPxShort,1e-9) > 1.35){
-          typeLabel = "phone";
-        } else {
-          typeLabel = "box";
-        }
-      }
-
-      let measuredText = "";
-      let primaryMm = 0;
-      let lengthMm = null;
-      let widthMm = null;
-      let thicknessMm = null;
-
-      if (typeLabel === "ball"){
-        const D = 0.5 * (objPxLong + objPxShort) * scaleAvg;
-        primaryMm = D;
-        lengthMm = D;
-        widthMm = D;
-        measuredText = `Diameter≈${D.toFixed(1)} mm`;
-      } else if (typeLabel === "box"){
-        const side = objPxLong * scaleLong;
-        primaryMm = side;
-        lengthMm = side;
-        widthMm = objPxShort * scaleShort;
-        measuredText = `Side≈${side.toFixed(1)} mm`;
-      } else if (typeLabel === "phone"){
-        const L = objPxLong * scaleLong;
-        const W = objPxShort * scaleShort;
-        primaryMm = L;
-        lengthMm = L;
-        widthMm = W;
-        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
-      } else {
-        const L = objPxLong * scaleLong;
-        primaryMm = L;
-        lengthMm = L;
-        widthMm = objPxShort * scaleShort;
-        measuredText = `Length≈${L.toFixed(1)} mm`;
-        typeLabel = "spoon";
-      }
-
-      logLine(`[REF] pxLong=${refPxLong.toFixed(1)} pxShort=${refPxShort.toFixed(1)} scaleLong=${scaleLong.toFixed(4)} scaleShort=${scaleShort.toFixed(4)}`);
-      logLine(`[REF] objPxLong=${objPxLong.toFixed(1)} objPxShort=${objPxShort.toFixed(1)} type=${typeLabel}`);
-
-      ref.maskUp.delete();
-      ref.blurUp.delete();
-      obj.maskUp.delete();
-      obj.blurUp.delete();
-
-      return {
-        ok:true,
-        primaryMm,
-        measuredText,
-        typeLabel,
-        mode:"reference",
-        circularity,
-        aspect2D,
-        lengthMm,
-        widthMm,
-        thicknessMm,
-        reprojMedPx:null,
-        n3d:0,
-        metaText:`ref fixed | sx=${scaleLong.toFixed(3)} sy=${scaleShort.toFixed(3)} mm/px`
-      };
     }
 
     function meanStd1C(mat1c){
@@ -1436,7 +1493,7 @@
     }
 
     /********************************************************************
-     * OPTION A: SHAPE-DEPENDENT 3D MEASUREMENT
+     * MODE A: AUTO 3D MEASUREMENT
      ********************************************************************/
     function reconstructObjectCloud(obj1, obj2){
       if (typeof cv.goodFeaturesToTrack !== "function") {
@@ -1565,16 +1622,14 @@
         logLine(`[MEASURE] rejecting largest PCA axis as unstable: ${dLongRaw.toFixed(1)} mm`);
       }
 
-      const shapeInfo = determineObjectType(circularity, aspect2D, stableLong, stableMid);
       const reprojMed = median(reprojArr);
-
       logLine(
-        `[MEASURE] type=${shapeInfo.type} rawLargest=${dLongRaw.toFixed(1)} mm stableLong=${stableLong.toFixed(1)} mm stableMid=${stableMid.toFixed(1)} mm stableShort=${stableShort.toFixed(1)} mm ` +
+        `[MEASURE] rawLargest=${dLongRaw.toFixed(1)} mm stableLong=${stableLong.toFixed(1)} mm stableMid=${stableMid.toFixed(1)} mm stableShort=${stableShort.toFixed(1)} mm ` +
         `circ=${circularity.toFixed(3)} aspect2D=${aspect2D.toFixed(3)} reprojMed=${reprojMed.toFixed(2)} px`
       );
 
       return formatMeasurementByType(
-        shapeInfo.type,
+        objTypeSel.value,
         stableLong,
         stableMid,
         stableShort,
@@ -1582,35 +1637,182 @@
         aspect2D,
         reprojMed,
         pts3.length,
-        "epipolar"
+        "epipolar_auto"
       );
     }
 
-    function determineObjectType(circularity, aspect2D, stableLong, stableMid){
-      const manual = objTypeSel.value;
-      if (manual && manual !== "auto"){
-        return { type: manual, source: "manual" };
+    /********************************************************************
+     * MODE B: MANUAL EPIPOLAR
+     ********************************************************************/
+    function measureManualEpipolar(){
+      const nReq = requiredPointsForObject(objTypeSel.value);
+      if (!poseReady || manualPtsV1.length !== nReq || manualPtsV2.length !== nReq){
+        return { ok:false, msg:"Need all manual points in both views first." };
       }
 
-      const ratio = stableLong / Math.max(stableMid, 1e-9);
+      const pts3 = [];
+      const reprojArr = [];
 
-      if (circularity > 0.78 && aspect2D < 1.20){
-        return { type: "ball", source: "auto" };
+      for (let i=0; i<nReq; i++){
+        const p1 = manualPtsV1[i];
+        const p2 = manualPtsV2[i];
+        const X = triangulateDLT_smallestEigen(R, t, pixelToNorm(p1.x, p1.y), pixelToNorm(p2.x, p2.y));
+        if (!X || !isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])){
+          return { ok:false, msg:`Triangulation failed for manual point ${i+1}. Re-mark the points.` };
+        }
+        if (X[2] <= 0 || X[2] > MAX_DEPTH_M){
+          return { ok:false, msg:`Manual point ${i+1} produced invalid depth. Re-mark more carefully.` };
+        }
+
+        const X2cam = add3(mulMatVec3(R, X), t);
+        if (X2cam[2] <= 0){
+          return { ok:false, msg:`Manual point ${i+1} failed cheirality. Re-mark the corresponding point.` };
+        }
+
+        const reproj = reprojErrPx(X, p1.x, p1.y, p2.x, p2.y);
+        reprojArr.push(reproj);
+        pts3.push(X);
       }
-      if (ratio > 2.2 || aspect2D > 2.0){
-        return { type: "spoon", source: "auto" };
+
+      const type = objTypeSel.value;
+      let measuredText = "";
+      let primaryMm = 0;
+      let lengthMm = null;
+      let widthMm = null;
+      let thicknessMm = null;
+
+      if (type === "spoon"){
+        lengthMm = 1000 * dist3(pts3[0], pts3[1]);
+        primaryMm = lengthMm;
+        measuredText = `Length≈${lengthMm.toFixed(1)} mm`;
+      } else if (type === "ball"){
+        const D = 1000 * dist3(pts3[0], pts3[1]);
+        lengthMm = D;
+        widthMm = D;
+        primaryMm = D;
+        measuredText = `Diameter≈${D.toFixed(1)} mm`;
+      } else if (type === "phone"){
+        lengthMm = 1000 * dist3(pts3[0], pts3[1]);
+        widthMm = 1000 * dist3(pts3[2], pts3[3]);
+        primaryMm = lengthMm;
+        measuredText = `L≈${lengthMm.toFixed(1)} mm, W≈${widthMm.toFixed(1)} mm`;
+      } else {
+        const L = 1000 * dist3(pts3[0], pts3[1]);
+        const W = 1000 * dist3(pts3[2], pts3[3]);
+        lengthMm = L;
+        widthMm = W;
+        primaryMm = Math.max(L, W);
+        measuredText = `Side≈${primaryMm.toFixed(1)} mm`;
       }
-      if (ratio > 1.35){
-        return { type: "phone", source: "auto" };
-      }
-      return { type: "box", source: "auto" };
+
+      const reprojMed = median(reprojArr);
+      logLine(`[MANUAL EPI] type=${type} reprojMed=${reprojMed.toFixed(2)} px`);
+
+      return {
+        ok:true,
+        primaryMm,
+        measuredText,
+        typeLabel:type,
+        mode:"epipolar_manual",
+        circularity:null,
+        aspect2D:null,
+        lengthMm,
+        widthMm,
+        thicknessMm,
+        reprojMedPx:reprojMed,
+        n3d:pts3.length,
+        metaText:`manual epipolar | pts=${pts3.length} | reprojMed=${reprojMed.toFixed(2)} px`
+      };
     }
 
+    /********************************************************************
+     * MODE C: REFERENCE MANUAL
+     ********************************************************************/
+    function measureReferenceManual(){
+      if (refScalePts.length !== 4){
+        return { ok:false, msg:"Need 4 reference points first." };
+      }
+
+      const nReq = requiredPointsForObject(objTypeSel.value);
+      if (refObjPts.length !== nReq){
+        return { ok:false, msg:"Need all object points first." };
+      }
+
+      const refWidthMm = parseFloat(document.getElementById("refWidthMm").value);
+      const refHeightMm = parseFloat(document.getElementById("refHeightMm").value);
+
+      if (!(isFinite(refWidthMm) && refWidthMm > 0 && isFinite(refHeightMm) && refHeightMm > 0)){
+        return { ok:false, msg:"Reference width/height must be positive." };
+      }
+
+      const refWidthPx = dist2(refScalePts[0], refScalePts[1]);
+      const refHeightPx = dist2(refScalePts[2], refScalePts[3]);
+
+      if (refWidthPx < 2 || refHeightPx < 2){
+        return { ok:false, msg:"Reference points are too close. Re-mark the reference." };
+      }
+
+      const scaleW = refWidthMm / refWidthPx;
+      const scaleH = refHeightMm / refHeightPx;
+      const scaleAvg = 0.5 * (scaleW + scaleH);
+
+      const type = objTypeSel.value;
+      let measuredText = "";
+      let primaryMm = 0;
+      let lengthMm = null;
+      let widthMm = null;
+      let thicknessMm = null;
+
+      if (type === "spoon"){
+        lengthMm = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
+        primaryMm = lengthMm;
+        measuredText = `Length≈${lengthMm.toFixed(1)} mm`;
+      } else if (type === "ball"){
+        const D = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
+        lengthMm = D;
+        widthMm = D;
+        primaryMm = D;
+        measuredText = `Diameter≈${D.toFixed(1)} mm`;
+      } else if (type === "phone"){
+        lengthMm = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
+        widthMm = dist2(refObjPts[2], refObjPts[3]) * scaleAvg;
+        primaryMm = lengthMm;
+        measuredText = `L≈${lengthMm.toFixed(1)} mm, W≈${widthMm.toFixed(1)} mm`;
+      } else {
+        const L = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
+        const W = dist2(refObjPts[2], refObjPts[3]) * scaleAvg;
+        lengthMm = L;
+        widthMm = W;
+        primaryMm = Math.max(L, W);
+        measuredText = `Side≈${primaryMm.toFixed(1)} mm`;
+      }
+
+      logLine(`[REF MANUAL] scaleW=${scaleW.toFixed(4)} mm/px scaleH=${scaleH.toFixed(4)} mm/px`);
+
+      return {
+        ok:true,
+        primaryMm,
+        measuredText,
+        typeLabel:type,
+        mode:"reference_manual",
+        circularity:null,
+        aspect2D:null,
+        lengthMm,
+        widthMm,
+        thicknessMm,
+        reprojMedPx:null,
+        n3d:0,
+        metaText:`reference manual | sAvg=${scaleAvg.toFixed(4)} mm/px`
+      };
+    }
+
+    /********************************************************************
+     * COMMON MEASUREMENT FORMATTERS
+     ********************************************************************/
     function formatMeasurementByType(type, L, W, T, circularity, aspect2D, reprojMed, n3d, modeName){
       let measuredText = "";
       let primaryMm = L;
-      let metaText = `pts=${n3d}, circ=${circularity.toFixed(3)}, ar=${aspect2D.toFixed(3)}, mode=${modeName}`;
-      let mode = type;
+      let metaText = `pts=${n3d}, mode=${modeName}`;
       let typeLabel = type;
 
       if (type === "ball"){
@@ -1624,113 +1826,36 @@
       } else if (type === "phone"){
         primaryMm = L;
         measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
-      } else if (type === "spoon"){
-        primaryMm = L;
-        measuredText = `Length≈${L.toFixed(1)} mm`;
       } else {
         primaryMm = L;
-        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
-        typeLabel = "unknown";
+        measuredText = `Length≈${L.toFixed(1)} mm`;
+      }
+
+      if (reprojMed != null){
+        metaText += `, reprojMed=${reprojMed.toFixed(2)} px`;
+      }
+      if (circularity != null){
+        metaText += `, circ=${circularity.toFixed(3)}`;
+      }
+      if (aspect2D != null){
+        metaText += `, ar=${aspect2D.toFixed(3)}`;
       }
 
       return {
-        ok: true,
+        ok:true,
         primaryMm,
         measuredText,
         typeLabel,
-        mode,
+        mode:modeName,
         circularity,
         aspect2D,
-        lengthMm: L,
-        widthMm: W,
-        thicknessMm: T,
-        reprojMedPx: reprojMed,
+        lengthMm:L,
+        widthMm:W,
+        thicknessMm:T,
+        reprojMedPx:reprojMed,
         n3d,
         metaText
       };
-    }
-
-    function quantileSorted(s, q){
-      if (s.length === 0) return 0;
-      const pos = (s.length - 1) * q;
-      const i = Math.floor(pos);
-      const j = Math.min(i + 1, s.length - 1);
-      const t = pos - i;
-      return s[i] * (1 - t) + s[j] * t;
-    }
-
-    function robustSpan(vals, qLo=0.10, qHi=0.90){
-      const s = vals.slice().sort((a,b)=>a-b);
-      return quantileSorted(s, qHi) - quantileSorted(s, qLo);
-    }
-
-    function computeExtentsPCA_covEigen(pts3){
-      const N = pts3.length;
-      if (N < 5) return null;
-
-      let mx = 0, my = 0, mz = 0;
-      for (const p of pts3){
-        mx += p[0];
-        my += p[1];
-        mz += p[2];
-      }
-      mx /= N; my /= N; mz /= N;
-
-      let c00 = 0, c01 = 0, c02 = 0, c11 = 0, c12 = 0, c22 = 0;
-      for (const p of pts3){
-        const x = p[0] - mx;
-        const y = p[1] - my;
-        const z = p[2] - mz;
-        c00 += x*x;
-        c01 += x*y;
-        c02 += x*z;
-        c11 += y*y;
-        c12 += y*z;
-        c22 += z*z;
-      }
-      c00 /= N; c01 /= N; c02 /= N;
-      c11 /= N; c12 /= N; c22 /= N;
-
-      const C = [
-        [c00, c01, c02],
-        [c01, c11, c12],
-        [c02, c12, c22]
-      ];
-
-      const ev = jacobiEigenSym(C);
-      const order = [0,1,2].sort((a,b)=>ev.values[b]-ev.values[a]);
-
-      const V = [
-        [ev.vectors[0][order[0]], ev.vectors[0][order[1]], ev.vectors[0][order[2]]],
-        [ev.vectors[1][order[0]], ev.vectors[1][order[1]], ev.vectors[1][order[2]]],
-        [ev.vectors[2][order[0]], ev.vectors[2][order[1]], ev.vectors[2][order[2]]]
-      ];
-
-      const a0s = [];
-      const a1s = [];
-      const a2s = [];
-
-      for (const p of pts3){
-        const x = p[0] - mx;
-        const y = p[1] - my;
-        const z = p[2] - mz;
-
-        const a0 = V[0][0]*x + V[1][0]*y + V[2][0]*z;
-        const a1 = V[0][1]*x + V[1][1]*y + V[2][1]*z;
-        const a2 = V[0][2]*x + V[1][2]*y + V[2][2]*z;
-
-        a0s.push(a0);
-        a1s.push(a1);
-        a2s.push(a2);
-      }
-
-      const arr = [
-        robustSpan(a0s, 0.10, 0.90),
-        robustSpan(a1s, 0.10, 0.90),
-        robustSpan(a2s, 0.10, 0.90)
-      ].sort((a,b)=>b-a);
-
-      return { e1:arr[0], e2:arr[1], e3:arr[2] };
     }
 
     /********************************************************************
@@ -1749,6 +1874,7 @@
 
       results.push({
         name,
+        mode: res.mode || "",
         type: res.typeLabel || "",
         measuredText: res.measuredText,
         gtMm,
@@ -1762,13 +1888,12 @@
       tr.innerHTML = `
         <td>${results.length}</td>
         <td>${escapeHtml(name)}</td>
+        <td>${escapeHtml(res.mode || "")}</td>
         <td>${escapeHtml(res.typeLabel || "")}</td>
         <td>${escapeHtml(res.measuredText)}</td>
         <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
         <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
-        <td title="reprojMed=${res.reprojMedPx!=null ? res.reprojMedPx.toFixed(2) : ''} px">
-          ${escapeHtml(res.metaText)}
-        </td>
+        <td title="reprojMed=${res.reprojMedPx!=null ? res.reprojMedPx.toFixed(2) : ''} px">${escapeHtml(res.metaText)}</td>
       `;
       resultsBody.appendChild(tr);
     }
@@ -1785,9 +1910,14 @@
      ********************************************************************/
     function clearMeasurementState(){
       roiState = "none";
+      pointState = "none";
       roi1Box = null;
       roi2Box = null;
       refRoiBox = null;
+      manualPtsV1 = [];
+      manualPtsV2 = [];
+      refScalePts = [];
+      refObjPts = [];
     }
 
     function cleanupFrames(){
@@ -1823,8 +1953,196 @@
     updateResCount();
 
     /********************************************************************
-     * ESSENTIAL MATRIX / TRIANGULATION HELPERS
+     * POSE HELPERS
      ********************************************************************/
+    function computePose_Epipolar_JS(){
+      if (!gray1 || !gray2 || !Kinv){
+        return { ok:false, reason:"Missing gray1/gray2/Kinv" };
+      }
+      if (typeof cv.goodFeaturesToTrack !== "function"){
+        return { ok:false, reason:"OpenCV missing goodFeaturesToTrack" };
+      }
+      if (typeof cv.calcOpticalFlowPyrLK !== "function"){
+        return { ok:false, reason:"OpenCV missing LK optical flow" };
+      }
+
+      const corners1 = new cv.Mat();
+      cv.goodFeaturesToTrack(gray1, corners1, 1800, 0.005, 8);
+      const nCorners = corners1.rows;
+      logLine(`corners1=${nCorners}`);
+
+      if (nCorners < 100){
+        corners1.delete();
+        return { ok:false, reason:`Not enough corners (${nCorners}). Add texture/lighting.` };
+      }
+
+      const win = new cv.Size(31,31);
+      const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+
+      const corners2 = new cv.Mat();
+      const status12 = new cv.Mat();
+      const err12 = new cv.Mat();
+      cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status12, err12, win, 4, crit);
+
+      const back1 = new cv.Mat();
+      const status21 = new cv.Mat();
+      const err21 = new cv.Mat();
+      cv.calcOpticalFlowPyrLK(gray2, gray1, corners2, back1, status21, err21, win, 4, crit);
+
+      const x1n = [];
+      const x2n = [];
+
+      for (let i=0; i<status12.rows; i++){
+        if (!status12.ucharPtr(i,0)[0]) continue;
+        if (!status21.ucharPtr(i,0)[0]) continue;
+
+        const u1 = corners1.data32F[i*2];
+        const v1 = corners1.data32F[i*2 + 1];
+        const u2 = corners2.data32F[i*2];
+        const v2 = corners2.data32F[i*2 + 1];
+        const ub = back1.data32F[i*2];
+        const vb = back1.data32F[i*2 + 1];
+
+        const lkErr = err12.floatAt(i,0);
+        const fbErr = Math.hypot(ub - u1, vb - v1);
+
+        if (lkErr > MAX_LK_ERR_POSE) continue;
+        if (fbErr > FB_POSE_THRESH) continue;
+        if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
+
+        x1n.push(pixelToNorm(u1, v1));
+        x2n.push(pixelToNorm(u2, v2));
+      }
+
+      corners1.delete();
+      corners2.delete();
+      status12.delete();
+      err12.delete();
+      back1.delete();
+      status21.delete();
+      err21.delete();
+
+      logLine(`tracked_fb=${x1n.length}`);
+      if (x1n.length < MIN_TRACKED_POSE){
+        return { ok:false, reason:`Too few tracked points after FB check (${x1n.length}).` };
+      }
+
+      const ransac = estimateE_RANSAC(x1n, x2n);
+      if (!ransac.ok) return { ok:false, reason:ransac.reason };
+
+      logLine(`E inliers=${ransac.inliersIdx.length}`);
+
+      const best = recoverPoseFromE(ransac.E, x1n, x2n, ransac.inliersIdx);
+      if (!best.ok) return { ok:false, reason:best.reason };
+
+      const baselineCm = parseFloat(document.getElementById("baselineCm").value);
+      if (!(isFinite(baselineCm) && baselineCm > 0)){
+        return { ok:false, reason:"Baseline must be > 0 cm" };
+      }
+
+      const baselineM = baselineCm / 100.0;
+      const tn = Math.hypot(best.t[0], best.t[1], best.t[2]);
+      const s = baselineM / Math.max(tn, 1e-12);
+      const t_scaled = [best.t[0]*s, best.t[1]*s, best.t[2]*s];
+
+      return {
+        ok:true,
+        R:best.R,
+        t_scaled,
+        inliers:ransac.inliersIdx.length,
+        total:x1n.length
+      };
+    }
+
+    /********************************************************************
+     * GENERIC MATH HELPERS
+     ********************************************************************/
+    function buildScaledIntrinsics(W,H){
+      const sx = W / CALIB.calW;
+      const sy = H / CALIB.calH;
+
+      const fx = CALIB.fx * sx;
+      const fy = CALIB.fy * sy;
+      const cx = CALIB.cx * sx;
+      const cy = CALIB.cy * sy;
+
+      K = [
+        [fx,0,cx],
+        [0,fy,cy],
+        [0,0,1]
+      ];
+
+      Kinv = inv3(K);
+
+      if (Kcv) Kcv.delete();
+      if (DISTcv) DISTcv.delete();
+
+      Kcv = cv.matFromArray(3,3,cv.CV_64F, [
+        fx,0,cx,
+        0,fy,cy,
+        0,0,1
+      ]);
+      DISTcv = cv.matFromArray(1,5,cv.CV_64F, CALIB.dist);
+    }
+
+    function clamp(v, lo, hi){
+      return Math.max(lo, Math.min(hi, v));
+    }
+
+    function pixelToNorm(u,v){
+      const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2];
+      const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2];
+      const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2];
+      return [x/z, y/z, 1.0];
+    }
+
+    function pointInSafeCenterRegion(x, y, W, H){
+      const bx = SAFE_BORDER_FRAC * W;
+      const by = SAFE_BORDER_FRAC * H;
+      return (x >= bx && x <= (W - bx) && y >= by && y <= (H - by));
+    }
+
+    function dist2(p1, p2){
+      return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    }
+
+    function dist3(a,b){
+      return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]);
+    }
+
+    function projectCam1(X){
+      if (X[2] <= 1e-9) return null;
+      return {
+        u: K[0][0]*(X[0]/X[2]) + K[0][2],
+        v: K[1][1]*(X[1]/X[2]) + K[1][2]
+      };
+    }
+
+    function projectCam2(X){
+      const X2 = add3(mulMatVec3(R, X), t);
+      if (X2[2] <= 1e-9) return null;
+      return {
+        u: K[0][0]*(X2[0]/X2[2]) + K[0][2],
+        v: K[1][1]*(X2[1]/X2[2]) + K[1][2]
+      };
+    }
+
+    function reprojErrPx(X, u1, v1, u2, v2){
+      const p1 = projectCam1(X);
+      const p2 = projectCam2(X);
+      if (!p1 || !p2) return Infinity;
+      const e1 = Math.hypot(p1.u - u1, p1.v - v1);
+      const e2 = Math.hypot(p2.u - u2, p2.v - v2);
+      return 0.5*(e1 + e2);
+    }
+
+    function median(arr){
+      if (!arr || arr.length === 0) return null;
+      const s = arr.slice().sort((a,b)=>a-b);
+      const m = Math.floor(s.length/2);
+      return (s.length % 2) ? s[m] : 0.5*(s[m-1] + s[m]);
+    }
+
     function estimateE_RANSAC(x1, x2){
       const N = x1.length;
       if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
@@ -1833,7 +2151,6 @@
       const TH = 1e-4;
       let bestInliers = [];
       let bestE = null;
-
       const idx = [...Array(N).keys()];
 
       for (let it=0; it<ITER; it++){
@@ -2058,127 +2375,6 @@
 
       if (Math.abs(vh[3]) < 1e-12) return null;
       return [vh[0]/vh[3], vh[1]/vh[3], vh[2]/vh[3]];
-    }
-
-    /********************************************************************
-     * GENERIC HELPERS
-     ********************************************************************/
-    function buildScaledIntrinsics(W,H){
-      const sx = W / CALIB.calW;
-      const sy = H / CALIB.calH;
-
-      const fx = CALIB.fx * sx;
-      const fy = CALIB.fy * sy;
-      const cx = CALIB.cx * sx;
-      const cy = CALIB.cy * sy;
-
-      K = [
-        [fx,0,cx],
-        [0,fy,cy],
-        [0,0,1]
-      ];
-
-      Kinv = inv3(K);
-
-      if (Kcv) Kcv.delete();
-      if (DISTcv) DISTcv.delete();
-
-      Kcv = cv.matFromArray(3,3,cv.CV_64F, [
-        fx,0,cx,
-        0,fy,cy,
-        0,0,1
-      ]);
-      DISTcv = cv.matFromArray(1,5,cv.CV_64F, CALIB.dist);
-    }
-
-    function clamp(v, lo, hi){
-      return Math.max(lo, Math.min(hi, v));
-    }
-
-    function pixelToNorm(u,v){
-      const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2];
-      const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2];
-      const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2];
-      return [x/z, y/z, 1.0];
-    }
-
-    function pointInSafeCenterRegion(x, y, W, H){
-      const bx = SAFE_BORDER_FRAC * W;
-      const by = SAFE_BORDER_FRAC * H;
-      return (x >= bx && x <= (W - bx) && y >= by && y <= (H - by));
-    }
-
-    function contourCentroid(cnt){
-      const M = cv.moments(cnt, false);
-      if (!M || Math.abs(M.m00) < 1e-9) return null;
-      return { x: M.m10 / M.m00, y: M.m01 / M.m00 };
-    }
-
-    function contourDescriptors(cnt){
-      const area = Math.abs(cv.contourArea(cnt));
-      const per = cv.arcLength(cnt, true);
-
-      let circularity = 0;
-      if (per > 1e-9){
-        circularity = 4 * Math.PI * area / (per * per);
-      }
-
-      const rect = cv.boundingRect(cnt);
-      const aspect = rect.width / Math.max(rect.height, 1e-9);
-
-      const hull = new cv.Mat();
-      cv.convexHull(cnt, hull, false, true);
-      const hullArea = Math.abs(cv.contourArea(hull));
-      hull.delete();
-
-      const solidity = hullArea > 1e-9 ? area / hullArea : 0;
-
-      return {
-        area,
-        perimeter: per,
-        circularity,
-        aspect,
-        solidity,
-        bbox: rect
-      };
-    }
-
-    function contourScore(desc, ctr, roiCenter){
-      const d = Math.hypot(ctr.x - roiCenter.x, ctr.y - roiCenter.y);
-      return 0.45*desc.area + 1200*desc.solidity + 800*desc.circularity - 8*d;
-    }
-
-    function projectCam1(X){
-      if (X[2] <= 1e-9) return null;
-      return {
-        u: K[0][0]*(X[0]/X[2]) + K[0][2],
-        v: K[1][1]*(X[1]/X[2]) + K[1][2]
-      };
-    }
-
-    function projectCam2(X){
-      const X2 = add3(mulMatVec3(R, X), t);
-      if (X2[2] <= 1e-9) return null;
-      return {
-        u: K[0][0]*(X2[0]/X2[2]) + K[0][2],
-        v: K[1][1]*(X2[1]/X2[2]) + K[1][2]
-      };
-    }
-
-    function reprojErrPx(X, u1, v1, u2, v2){
-      const p1 = projectCam1(X);
-      const p2 = projectCam2(X);
-      if (!p1 || !p2) return Infinity;
-      const e1 = Math.hypot(p1.u - u1, p1.v - v1);
-      const e2 = Math.hypot(p2.u - u2, p2.v - v2);
-      return 0.5*(e1 + e2);
-    }
-
-    function median(arr){
-      if (!arr || arr.length === 0) return null;
-      const s = arr.slice().sort((a,b)=>a-b);
-      const m = Math.floor(s.length/2);
-      return (s.length % 2) ? s[m] : 0.5*(s[m-1] + s[m]);
     }
 
     function jacobiEigenSym(A){
