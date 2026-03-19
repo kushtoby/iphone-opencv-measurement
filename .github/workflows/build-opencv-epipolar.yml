@@ -77,9 +77,8 @@ jobs:
 
       - name: Build OpenCV.js (wasm, separate .wasm file)
         run: |
-          # Reduce parallelism to avoid runner flakiness
           export MAKEFLAGS="-j2"
-
+      
           cd opencv
           emcmake python3 ./platforms/js/build_js.py ../build_epipolar \
             --build_wasm \
@@ -87,9 +86,14 @@ jobs:
             --clean_build_dir \
             --cmake_option="-DCMAKE_BUILD_TYPE=Release" \
             --cmake_option="-DCMAKE_CXX_STANDARD=17" \
-            --cmake_option="-DBUILD_LIST=core,imgproc,features2d,video,calib3d" \
+            --cmake_option="-DBUILD_LIST=core,imgproc,features2d,video,calib3d,js" \
             --cmake_option="-DWITH_PTHREADS=OFF"
 
+      - name: Confirm opencv.js target exists
+        run: |
+          ls -lah build_epipolar/bin || true
+          test -f build_epipolar/bin/opencv.js || (echo "opencv.js missing in build output" && exit 1)
+            
       - name: Package artifacts into repo folder structure
         run: |
           mkdir -p assets/opencv
