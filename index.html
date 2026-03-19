@@ -216,7 +216,7 @@
       </summary>
       <div class="row">
         <button onclick="clearLog()">Clear log</button>
-        <span class="small">This version uses object masks + tracked correspondences instead of fragile axis endpoint matching.</span>
+        <span class="small">This version fixes undistort/display mismatch, uses forward-backward LK filtering, color-aware ROI masks, and robust trimmed 3D spans.</span>
       </div>
       <pre id="log"></pre>
     </details>
@@ -231,7 +231,7 @@
         <li>Start camera.</li>
         <li>Optional: enable Sensors.</li>
         <li>Capture 1 at position A.</li>
-        <li>Move to position B. Keep IMU green if you enabled it.</li>
+        <li>Move to position B. Keep IMU green if enabled.</li>
         <li>Capture 2.</li>
         <li>Draw ROI around the target object in view 1.</li>
         <li>Draw ROI around the same target object in view 2.</li>
@@ -308,13 +308,13 @@
      * CALIBRATION
      ********************************************************************/
     const CALIB = {
-      calW: 1920,
-      calH: 2560,
-      fx: 1977.60619,
-      fy: 1981.57064,
-      cx: 962.418592,
-      cy: 1247.75805,
-      dist: [0.247937836, -0.915690663, -0.00215712011, -0.000132342062, 0.550086004]
+      calW: 2560,
+      calH: 1920,
+      fx: 1939.22217,
+      fy: 1944.80422,
+      cx: 1250.09825,
+      cy: 947.957973,
+      dist: [0.196139581, -0.79214993, 0.000251525214, -0.00647283132, 0.486071831]
     };
 
     /********************************************************************
@@ -326,6 +326,8 @@
 
     let gray1 = null;
     let gray2 = null;
+    let rgba1 = null;
+    let rgba2 = null;
     let frame1ImageData = null;
     let frame2ImageData = null;
 
@@ -349,11 +351,14 @@
     const ROT_THRESH_DEG = { yaw: 3, pitch: 2, roll: 2 };
 
     const MAX_DEPTH_M = 8.0;
-    const MAX_REPROJ_ERR_PX = 5.5;
+    const MAX_REPROJ_ERR_PX = 3.5;
     const MIN_TRACKED_POSE = 120;
-    const MAX_LK_ERR = 45.0;
-    const MIN_OBJ_FEATURES = 10;
-    const MIN_VALID_3D_POINTS = 6;
+    const MAX_LK_ERR_POSE = 20.0;
+    const MAX_LK_ERR_OBJ = 30.0;
+    const FB_POSE_THRESH = 1.5;
+    const FB_OBJ_THRESH = 1.5;
+    const MIN_OBJ_FEATURES = 12;
+    const MIN_VALID_3D_POINTS = 8;
 
     let roiState = "none";
     const roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
@@ -409,6 +414,7 @@
       logLine("[boot] Canny: " + typeof cv.Canny);
       logLine("[boot] findContours: " + typeof cv.findContours);
       logLine("[boot] undistort: " + typeof cv.undistort);
+      logLine("[boot] page script started");
     };
 
     /********************************************************************
@@ -483,6 +489,7 @@
           logLine("=== START CAMERA ===");
           logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
           logLine(`K fx=${K[0][0].toFixed(2)} fy=${K[1][1].toFixed(2)} cx=${K[0][2].toFixed(2)} cy=${K[1][2].toFixed(2)}`);
+          logLine(`[calib] reference size=${CALIB.calW}x${CALIB.calH}`);
 
           setOut("Start ✅ Capture 1 at position A.", false);
           requestAnimationFrame(drawLoop);
@@ -533,6 +540,51 @@
       ctx.lineWidth = 4;
       ctx.strokeRect(b.x, b.y, b.w, b.h);
       ctx.restore();
+    }
+
+    function matToImageDataRGBA(matIn){
+      let rgba = new cv.Mat();
+      try{
+        if (matIn.type() === cv.CV_8UC4){
+          matIn.copyTo(rgba);
+        } else if (matIn.type() === cv.CV_8UC3){
+          cv.cvtColor(matIn, rgba, cv.COLOR_RGB2RGBA);
+        } else {
+          cv.cvtColor(matIn, rgba, cv.COLOR_GRAY2RGBA);
+        }
+
+        const buf = new Uint8ClampedArray(rgba.data);
+        return new ImageData(buf, rgba.cols, rgba.rows);
+      } finally {
+        rgba.delete();
+      }
+    }
+
+    function grabFramePack(){
+      const srcRGBA = cv.imread(rawCanvas);
+      let procRGBA = new cv.Mat();
+      let gray = new cv.Mat();
+
+      try{
+        if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
+          cv.undistort(srcRGBA, procRGBA, Kcv, DISTcv);
+        } else {
+          srcRGBA.copyTo(procRGBA);
+        }
+
+        cv.cvtColor(procRGBA, gray, cv.COLOR_RGBA2GRAY);
+        const imageData = matToImageDataRGBA(procRGBA);
+
+        return {
+          gray: gray.clone(),
+          rgba: procRGBA.clone(),
+          imageData
+        };
+      } finally {
+        srcRGBA.delete();
+        procRGBA.delete();
+        gray.delete();
+      }
     }
 
     /********************************************************************
@@ -631,36 +683,6 @@
     /********************************************************************
      * CAPTURE
      ********************************************************************/
-    function grayMatToImageData(grayMat){
-      const rgba = new cv.Mat();
-      cv.cvtColor(grayMat, rgba, cv.COLOR_GRAY2RGBA);
-      const imgData = new ImageData(
-        new Uint8ClampedArray(rgba.data),
-        rgba.cols,
-        rgba.rows
-      );
-      rgba.delete();
-      return imgData;
-    }
-
-    function grabGrayFrameAndDisplayCopy(){
-      const src = cv.imread(rawCanvas);
-      const gray = new cv.Mat();
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      src.delete();
-
-      let outGray = gray;
-      if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
-        const und = new cv.Mat();
-        cv.undistort(gray, und, Kcv, DISTcv);
-        gray.delete();
-        outGray = und;
-      }
-
-      const imageData = grayMatToImageData(outGray);
-      return { gray: outGray, imageData };
-    }
-
     function captureView1(){
       if (!streaming) return;
 
@@ -668,9 +690,10 @@
       clearMeasurementState();
 
       drawCurrentFrameToRaw();
-      const cap = grabGrayFrameAndDisplayCopy();
+      const cap = grabFramePack();
 
       gray1 = cap.gray;
+      rgba1 = cap.rgba;
       frame1ImageData = cap.imageData;
       imuAtV1 = sensorsEnabled ? { ...imuNow } : null;
 
@@ -701,9 +724,10 @@
       if (!streaming || !gray1) return;
 
       drawCurrentFrameToRaw();
-      const cap = grabGrayFrameAndDisplayCopy();
+      const cap = grabFramePack();
 
       gray2 = cap.gray;
+      rgba2 = cap.rgba;
       frame2ImageData = cap.imageData;
 
       setDisplayMode("view2");
@@ -753,33 +777,47 @@
       }
 
       const corners1 = new cv.Mat();
-      cv.goodFeaturesToTrack(gray1, corners1, 1500, 0.005, 8);
+      cv.goodFeaturesToTrack(gray1, corners1, 1800, 0.005, 8);
       const nCorners = corners1.rows;
       logLine(`corners1=${nCorners}`);
 
-      if (nCorners < 80){
+      if (nCorners < 100){
         corners1.delete();
         return { ok:false, reason:`Not enough corners (${nCorners}). Add texture/lighting.` };
       }
 
-      const corners2 = new cv.Mat();
-      const status = new cv.Mat();
-      const err = new cv.Mat();
       const win = new cv.Size(31,31);
       const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
 
-      cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, win, 4, crit);
+      const corners2 = new cv.Mat();
+      const status12 = new cv.Mat();
+      const err12 = new cv.Mat();
+      cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status12, err12, win, 4, crit);
+
+      const back1 = new cv.Mat();
+      const status21 = new cv.Mat();
+      const err21 = new cv.Mat();
+      cv.calcOpticalFlowPyrLK(gray2, gray1, corners2, back1, status21, err21, win, 4, crit);
 
       const x1n = [];
       const x2n = [];
-      for (let i=0; i<status.rows; i++){
-        if (!status.ucharPtr(i,0)[0]) continue;
+
+      for (let i=0; i<status12.rows; i++){
+        if (!status12.ucharPtr(i,0)[0]) continue;
+        if (!status21.ucharPtr(i,0)[0]) continue;
 
         const u1 = corners1.data32F[i*2];
         const v1 = corners1.data32F[i*2 + 1];
         const u2 = corners2.data32F[i*2];
         const v2 = corners2.data32F[i*2 + 1];
+        const ub = back1.data32F[i*2];
+        const vb = back1.data32F[i*2 + 1];
 
+        const lkErr = err12.floatAt(i,0);
+        const fbErr = Math.hypot(ub - u1, vb - v1);
+
+        if (lkErr > MAX_LK_ERR_POSE) continue;
+        if (fbErr > FB_POSE_THRESH) continue;
         if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
 
         x1n.push(pixelToNorm(u1, v1));
@@ -788,12 +826,15 @@
 
       corners1.delete();
       corners2.delete();
-      status.delete();
-      err.delete();
+      status12.delete();
+      err12.delete();
+      back1.delete();
+      status21.delete();
+      err21.delete();
 
-      logLine(`tracked=${x1n.length}`);
+      logLine(`tracked_fb=${x1n.length}`);
       if (x1n.length < MIN_TRACKED_POSE){
-        return { ok:false, reason:`Too few tracked points (${x1n.length}).` };
+        return { ok:false, reason:`Too few tracked points after FB check (${x1n.length}).` };
       }
 
       const ransac = estimateE_RANSAC(x1n, x2n);
@@ -903,25 +944,17 @@
     }
 
     /********************************************************************
-     * ROBUST OBJECT MEASUREMENT
+     * OBJECT MEASUREMENT
      ********************************************************************/
-    function dilateBinaryMask(srcMask, ksize=5, iters=1){
-      const dst = new cv.Mat();
-      const k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ksize, ksize));
-      cv.dilate(srcMask, dst, k, new cv.Point(-1,-1), iters);
-      k.delete();
-      return dst;
-    }
-
     function measureWithTwoROIs(){
-      if (!poseReady || !gray1 || !gray2 || !roi1Box || !roi2Box){
+      if (!poseReady || !gray1 || !gray2 || !rgba1 || !rgba2 || !roi1Box || !roi2Box){
         return { ok:false, msg:"Need pose + two ROIs first." };
       }
 
-      const obj1 = extractObjectFromROI(gray1, roi1Box, "view1");
+      const obj1 = extractObjectFromROI(rgba1, roi1Box, "view1");
       if (!obj1.ok) return obj1;
 
-      const obj2 = extractObjectFromROI(gray2, roi2Box, "view2");
+      const obj2 = extractObjectFromROI(rgba2, roi2Box, "view2");
       if (!obj2.ok) return obj2;
 
       logLine(
@@ -936,71 +969,54 @@
       return reconstructObjectCloud(obj1, obj2);
     }
 
-    function extractObjectFromROI(gray, box, tag){
-      let roiMat = null;
-      let roiUp = null;
-      let blur = null;
-      let thresh = null;
-      let edges = null;
-      let combo = null;
-      let morph = null;
-      let contours = null;
-      let hierarchy = null;
-      let maskObj = null;
-      let maskTol = null;
+    function meanStd1C(mat1c){
+      const mean = new cv.Mat();
+      const std = new cv.Mat();
+      try{
+        cv.meanStdDev(mat1c, mean, std);
+        return {
+          mean: mean.data64F ? mean.data64F[0] : 0,
+          std: std.data64F ? std.data64F[0] : 0
+        };
+      } finally {
+        mean.delete();
+        std.delete();
+      }
+    }
+
+    function morphCleanBinary(mask){
+      const kOpen = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
+      const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
+      cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kOpen);
+      cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kClose);
+      kOpen.delete();
+      kClose.delete();
+    }
+
+    function thresholdCandidate(src1c, invert=false){
+      const blur = new cv.Mat();
+      const bw = new cv.Mat();
+      cv.GaussianBlur(src1c, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
+      cv.threshold(
+        blur,
+        bw,
+        0,
+        255,
+        (invert ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY) + cv.THRESH_OTSU
+      );
+      morphCleanBinary(bw);
+      blur.delete();
+      return bw;
+    }
+
+    function pickBestContourFromMask(mask, roiCtrUp){
+      const contours = new cv.MatVector();
+      const hierarchy = new cv.Mat();
 
       try{
-        const rx = clamp(Math.round(box.x), 0, gray.cols - 1);
-        const ry = clamp(Math.round(box.y), 0, gray.rows - 1);
-        const rw = clamp(Math.round(box.w), 1, gray.cols - rx);
-        const rh = clamp(Math.round(box.h), 1, gray.rows - ry);
+        cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+        if (contours.size() === 0) return null;
 
-        const roiCenter = { x: rx + 0.5*rw, y: ry + 0.5*rh };
-        if (!pointInSafeCenterRegion(roiCenter.x, roiCenter.y, gray.cols, gray.rows)){
-          logLine(`[${tag}] Warning: ROI center near image edge.`);
-        }
-
-        roiMat = gray.roi(new cv.Rect(rx, ry, rw, rh));
-
-        const UPS = 2;
-        roiUp = new cv.Mat();
-        cv.resize(roiMat, roiUp, new cv.Size(roiMat.cols * UPS, roiMat.rows * UPS), 0, 0, cv.INTER_LINEAR);
-
-        blur = new cv.Mat();
-        cv.GaussianBlur(roiUp, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
-
-        thresh = new cv.Mat();
-        cv.threshold(blur, thresh, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
-
-        const whiteFrac = cv.countNonZero(thresh) / Math.max(1, thresh.rows * thresh.cols);
-        if (whiteFrac > 0.80 || whiteFrac < 0.05){
-          cv.threshold(blur, thresh, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
-        }
-
-        edges = new cv.Mat();
-        cv.Canny(blur, edges, 40, 120);
-
-        combo = new cv.Mat();
-        cv.bitwise_or(thresh, edges, combo);
-
-        morph = new cv.Mat();
-        const kOpen = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
-        const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
-        cv.morphologyEx(combo, morph, cv.MORPH_OPEN, kOpen);
-        cv.morphologyEx(morph, morph, cv.MORPH_CLOSE, kClose);
-        kOpen.delete();
-        kClose.delete();
-
-        contours = new cv.MatVector();
-        hierarchy = new cv.Mat();
-        cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
-        logLine(`[${tag}] contours=${contours.size()}`);
-
-        if (contours.size() === 0){
-          return { ok:false, msg:`${tag}: no object contour found. Tighten ROI.` };
-        }
-
-        const roiCtrUp = { x: 0.5*morph.cols, y: 0.5*morph.rows };
         let bestIdx = -1;
         let bestDesc = null;
         let bestScore = -Infinity;
@@ -1010,7 +1026,7 @@
           const desc = contourDescriptors(cnt);
           const ctr = contourCentroid(cnt);
 
-          if (!ctr || desc.area < 80){
+          if (!ctr || desc.area < 100){
             cnt.delete();
             continue;
           }
@@ -1019,55 +1035,165 @@
           if (score > bestScore){
             bestScore = score;
             bestIdx = i;
-            bestDesc = desc;
+            bestDesc = {
+              area: desc.area,
+              perimeter: desc.perimeter,
+              circularity: desc.circularity,
+              aspect: desc.aspect,
+              solidity: desc.solidity
+            };
           }
           cnt.delete();
         }
 
-        if (bestIdx < 0){
+        if (bestIdx < 0) return null;
+
+        const outMask = new cv.Mat(mask.rows, mask.cols, cv.CV_8U);
+        outMask.setTo(new cv.Scalar(0));
+        cv.drawContours(outMask, contours, bestIdx, new cv.Scalar(255), -1);
+
+        return {
+          mask: outMask,
+          desc: bestDesc,
+          score: bestScore
+        };
+      } finally {
+        contours.delete();
+        hierarchy.delete();
+      }
+    }
+
+    function extractObjectFromROI(frameRGBA, box, tag){
+      let roiRGBA = null;
+      let roiUp = null;
+      let rgb = null;
+      let gray = null;
+      let lab = null;
+      let hsv = null;
+      let labCh = null;
+      let hsvCh = null;
+      let edges = null;
+
+      try{
+        const rx = clamp(Math.round(box.x), 0, frameRGBA.cols - 1);
+        const ry = clamp(Math.round(box.y), 0, frameRGBA.rows - 1);
+        const rw = clamp(Math.round(box.w), 1, frameRGBA.cols - rx);
+        const rh = clamp(Math.round(box.h), 1, frameRGBA.rows - ry);
+
+        const roiCenter = { x: rx + 0.5*rw, y: ry + 0.5*rh };
+        if (!pointInSafeCenterRegion(roiCenter.x, roiCenter.y, frameRGBA.cols, frameRGBA.rows)){
+          logLine(`[${tag}] Warning: ROI center near image edge.`);
+        }
+
+        roiRGBA = frameRGBA.roi(new cv.Rect(rx, ry, rw, rh));
+
+        const UPS = 2;
+        roiUp = new cv.Mat();
+        cv.resize(roiRGBA, roiUp, new cv.Size(rw * UPS, rh * UPS), 0, 0, cv.INTER_LINEAR);
+
+        rgb = new cv.Mat();
+        gray = new cv.Mat();
+        lab = new cv.Mat();
+        hsv = new cv.Mat();
+
+        cv.cvtColor(roiUp, rgb, cv.COLOR_RGBA2RGB);
+        cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
+        cv.cvtColor(rgb, lab, cv.COLOR_RGB2Lab);
+        cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
+
+        labCh = new cv.MatVector();
+        hsvCh = new cv.MatVector();
+        cv.split(lab, labCh);
+        cv.split(hsv, hsvCh);
+
+        const a = labCh.get(1);
+        const b = labCh.get(2);
+        const s = hsvCh.get(1);
+
+        const aStat = meanStd1C(a);
+        const bStat = meanStd1C(b);
+        const useA = aStat.std >= bStat.std;
+        const chroma = useA ? a : b;
+
+        logLine(`[${tag}] using ${useA ? "Lab-a" : "Lab-b"} for color segmentation`);
+
+        const cand1 = thresholdCandidate(chroma, false);
+        const cand2 = thresholdCandidate(chroma, true);
+        const cand3 = thresholdCandidate(gray, false);
+        const cand4 = thresholdCandidate(gray, true);
+        const cand5 = thresholdCandidate(s, false);
+
+        edges = new cv.Mat();
+        cv.Canny(gray, edges, 40, 120);
+        morphCleanBinary(edges);
+
+        const roiCtrUp = { x: 0.5 * roiUp.cols, y: 0.5 * roiUp.rows };
+        const candidates = [cand1, cand2, cand3, cand4, cand5, edges];
+
+        let best = null;
+        let bestIdx = -1;
+
+        for (let i=0; i<candidates.length; i++){
+          const pick = pickBestContourFromMask(candidates[i], roiCtrUp);
+          if (!pick) continue;
+
+          if (!best || pick.score > best.score){
+            if (best && best.mask) best.mask.delete();
+            best = pick;
+            bestIdx = i;
+          } else {
+            pick.mask.delete();
+          }
+        }
+
+        cand1.delete();
+        cand2.delete();
+        cand3.delete();
+        cand4.delete();
+        cand5.delete();
+
+        a.delete();
+        b.delete();
+        s.delete();
+
+        if (!best){
           return { ok:false, msg:`${tag}: no confident contour. Tighten ROI.` };
         }
 
-        maskObj = new cv.Mat(morph.rows, morph.cols, cv.CV_8U);
-        maskObj.setTo(new cv.Scalar(0));
-        cv.drawContours(maskObj, contours, bestIdx, new cv.Scalar(255), -1);
+        logLine(`[${tag}] maskCandidate=${bestIdx}`);
 
-        maskTol = dilateBinaryMask(maskObj, 7, 2);
-
-        const pca2 = contourPCAFromMask(maskObj);
+        const pca2 = contourPCAFromMask(best.mask);
         if (!pca2.ok){
+          best.mask.delete();
           return { ok:false, msg:`${tag}: contour PCA failed.` };
         }
 
         return {
           ok:true,
-          area: bestDesc.area,
-          perimeter: bestDesc.perimeter,
-          circularity: bestDesc.circularity,
-          aspect: bestDesc.aspect,
-          solidity: bestDesc.solidity,
+          area: best.desc.area,
+          perimeter: best.desc.perimeter,
+          circularity: best.desc.circularity,
+          aspect: best.desc.aspect,
+          solidity: best.desc.solidity,
           rx, ry, rw, rh,
-          ups: 2,
-          maskUp: maskObj.clone(),
-          maskTolUp: maskTol.clone(),
-          blurUp: blur.clone(),
+          ups: UPS,
+          maskUp: best.mask.clone(),
+          blurUp: gray.clone(),
           center: roiCenter,
           majorSpanUp: pca2.majorSpan,
           minorSpanUp: pca2.minorSpan
         };
 
       } finally {
-        if (roiMat) roiMat.delete();
+        if (roiRGBA) roiRGBA.delete();
         if (roiUp) roiUp.delete();
-        if (blur) blur.delete();
-        if (thresh) thresh.delete();
+        if (rgb) rgb.delete();
+        if (gray) gray.delete();
+        if (lab) lab.delete();
+        if (hsv) hsv.delete();
+        if (labCh) labCh.delete();
+        if (hsvCh) hsvCh.delete();
         if (edges) edges.delete();
-        if (combo) combo.delete();
-        if (morph) morph.delete();
-        if (contours) contours.delete();
-        if (hierarchy) hierarchy.delete();
-        if (maskObj) maskObj.delete();
-        if (maskTol) maskTol.delete();
       }
     }
 
@@ -1139,10 +1265,8 @@
       if (p1local.rows < MIN_OBJ_FEATURES){
         p1local.delete();
         obj1.maskUp.delete();
-        obj1.maskTolUp.delete();
         obj1.blurUp.delete();
         obj2.maskUp.delete();
-        obj2.maskTolUp.delete();
         obj2.blurUp.delete();
         return { ok:false, msg:`Too few object features (${p1local.rows}). Improve lighting/texture or tighten ROI.` };
       }
@@ -1164,32 +1288,38 @@
 
       cv.calcOpticalFlowPyrLK(gray1, gray2, p1full, p2full, status, err, win, 4, crit);
 
+      const p1back = new cv.Mat();
+      const statusBack = new cv.Mat();
+      const errBack = new cv.Mat();
+      cv.calcOpticalFlowPyrLK(gray2, gray1, p2full, p1back, statusBack, errBack, win, 4, crit);
+
       const pts3 = [];
       const reprojArr = [];
-      let surviveLK = 0;
-      let surviveMask2 = 0;
-      let surviveDepth = 0;
 
       for (let i=0; i<status.rows; i++){
         if (!status.ucharPtr(i,0)[0]) continue;
+        if (!statusBack.ucharPtr(i,0)[0]) continue;
 
         const lkErr = err.floatAt(i,0);
-        if (lkErr > MAX_LK_ERR) continue;
-        surviveLK++;
+        if (lkErr > MAX_LK_ERR_OBJ) continue;
 
         const u1 = p1full.data32F[i*2];
         const v1 = p1full.data32F[i*2 + 1];
         const u2 = p2full.data32F[i*2];
         const v2 = p2full.data32F[i*2 + 1];
 
+        const ub = p1back.data32F[i*2];
+        const vb = p1back.data32F[i*2 + 1];
+        const fbErr = Math.hypot(ub - u1, vb - v1);
+        if (fbErr > FB_OBJ_THRESH) continue;
+
         if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
 
         const x2up = Math.round((u2 - obj2.rx) * obj2.ups);
         const y2up = Math.round((v2 - obj2.ry) * obj2.ups);
 
-        if (x2up < 0 || x2up >= obj2.maskTolUp.cols || y2up < 0 || y2up >= obj2.maskTolUp.rows) continue;
-        if (obj2.maskTolUp.ucharPtr(y2up, x2up)[0] === 0) continue;
-        surviveMask2++;
+        if (x2up < 0 || x2up >= obj2.maskUp.cols || y2up < 0 || y2up >= obj2.maskUp.rows) continue;
+        if (obj2.maskUp.ucharPtr(y2up, x2up)[0] === 0) continue;
 
         const x1n = pixelToNorm(u1, v1);
         const x2n = pixelToNorm(u2, v2);
@@ -1201,7 +1331,6 @@
 
         const X2cam = add3(mulMatVec3(R, X), t);
         if (X2cam[2] <= 0) continue;
-        surviveDepth++;
 
         const reproj = reprojErrPx(X, u1, v1, u2, v2);
         if (!isFinite(reproj) || reproj > MAX_REPROJ_ERR_PX) continue;
@@ -1214,16 +1343,14 @@
       p2full.delete();
       status.delete();
       err.delete();
+      p1back.delete();
+      statusBack.delete();
+      errBack.delete();
       obj1.maskUp.delete();
-      obj1.maskTolUp.delete();
       obj1.blurUp.delete();
       obj2.maskUp.delete();
-      obj2.maskTolUp.delete();
       obj2.blurUp.delete();
 
-      logLine(`[TRACK] survive LK=${surviveLK}`);
-      logLine(`[TRACK] survive mask2=${surviveMask2}`);
-      logLine(`[TRACK] survive depth=${surviveDepth}`);
       logLine(`[TRACK] valid 3D pts=${pts3.length}`);
 
       if (pts3.length < MIN_VALID_3D_POINTS){
@@ -1281,6 +1408,20 @@
       };
     }
 
+    function quantileSorted(s, q){
+      if (s.length === 0) return 0;
+      const pos = (s.length - 1) * q;
+      const i = Math.floor(pos);
+      const j = Math.min(i + 1, s.length - 1);
+      const t = pos - i;
+      return s[i] * (1 - t) + s[j] * t;
+    }
+
+    function robustSpan(vals, qLo=0.10, qHi=0.90){
+      const s = vals.slice().sort((a,b)=>a-b);
+      return quantileSorted(s, qHi) - quantileSorted(s, qLo);
+    }
+
     function computeExtentsPCA_covEigen(pts3){
       const N = pts3.length;
       if (N < 5) return null;
@@ -1323,9 +1464,9 @@
         [ev.vectors[2][order[0]], ev.vectors[2][order[1]], ev.vectors[2][order[2]]]
       ];
 
-      let min0=Infinity, max0=-Infinity;
-      let min1=Infinity, max1=-Infinity;
-      let min2=Infinity, max2=-Infinity;
+      const a0s = [];
+      const a1s = [];
+      const a2s = [];
 
       for (const p of pts3){
         const x = p[0] - mx;
@@ -1336,15 +1477,17 @@
         const a1 = V[0][1]*x + V[1][1]*y + V[2][1]*z;
         const a2 = V[0][2]*x + V[1][2]*y + V[2][2]*z;
 
-        if (a0 < min0) min0 = a0;
-        if (a0 > max0) max0 = a0;
-        if (a1 < min1) min1 = a1;
-        if (a1 > max1) max1 = a1;
-        if (a2 < min2) min2 = a2;
-        if (a2 > max2) max2 = a2;
+        a0s.push(a0);
+        a1s.push(a1);
+        a2s.push(a2);
       }
 
-      const arr = [max0-min0, max1-min1, max2-min2].sort((a,b)=>b-a);
+      const arr = [
+        robustSpan(a0s, 0.10, 0.90),
+        robustSpan(a1s, 0.10, 0.90),
+        robustSpan(a2s, 0.10, 0.90)
+      ].sort((a,b)=>b-a);
+
       return { e1:arr[0], e2:arr[1], e3:arr[2] };
     }
 
@@ -1405,6 +1548,8 @@
     function cleanupFrames(){
       if (gray1){ gray1.delete(); gray1 = null; }
       if (gray2){ gray2.delete(); gray2 = null; }
+      if (rgba1){ rgba1.delete(); rgba1 = null; }
+      if (rgba2){ rgba2.delete(); rgba2 = null; }
       frame1ImageData = null;
       frame2ImageData = null;
     }
@@ -1888,7 +2033,6 @@
     }
 
     function dot3(a,b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    function dist3(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]); }
     function add3(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
     function sub3(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
     function scale3(v,s){ return [v[0]*s, v[1]*s, v[2]*s]; }
@@ -1911,7 +2055,6 @@
       ];
     }
 
-    function dot2(a,b){ return a.x*b.x + a.y*b.y; }
     function normalize2(v){
       const n = Math.hypot(v.x, v.y);
       if (n < 1e-12) return { x:1, y:0 };
@@ -1979,8 +2122,6 @@
         [c0[2], c1[2], c2[2]]
       ];
     }
-
-    logLine("[boot] page script started");
   </script>
 </body>
 </html>
