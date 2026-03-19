@@ -622,6 +622,8 @@
     const corners1 = new cv.Mat();
     cv.goodFeaturesToTrack(gray1, corners1, 900, 0.01, 10);
 
+    setOut(`corners1=${corners1.rows}`, false);
+
     if (corners1.rows < 60) {
       corners1.delete();
       setOut("Not enough features. Use better lighting / more texture background.", true);
@@ -664,6 +666,8 @@
       return false;
     }
 
+    setOut(`tracked=${pts1.length}`, false);
+
     // 4) F with RANSAC
     const pts1Mat = pointsToMat(pts1);
     const pts2Mat = pointsToMat(pts2);
@@ -680,6 +684,7 @@
       setOut(`F failed / too few inliers (${inliers}). Increase baseline or reduce blur.`, true);
       return false;
     }
+    setOut(`tracked=${pts1.length}, inliers=${inliers}`, false);
 
     // 5) E = K^T F K
     const E = computeEfromF(F, K);
