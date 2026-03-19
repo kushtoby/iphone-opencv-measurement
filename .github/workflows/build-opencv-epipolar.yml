@@ -24,6 +24,20 @@ jobs:
         run: |
           git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv.git opencv
 
+      - name: Patch out deprecated Emscripten flag (DEMANGLE_SUPPORT)
+        run: |
+          # DEMANGLE_SUPPORT is no longer supported by recent Emscripten.
+          # Remove it anywhere OpenCV passes it to the linker.
+          grep -R --line-number "DEMANGLE_SUPPORT" opencv | head -n 50 || true
+      
+          # Remove "-s DEMANGLE_SUPPORT=1" (and variants) from files
+          # This is safe: it just deletes that flag from command strings.
+          find opencv -type f \( -name "*.cmake" -o -name "*.txt" -o -name "*.py" -o -name "*.in" -o -name "CMakeLists.txt" \) \
+            -print0 | xargs -0 sed -i 's/-s[ ]*DEMANGLE_SUPPORT=1//g; s/-sDEMANGLE_SUPPORT=1//g; s/DEMANGLE_SUPPORT=1//g'
+      
+          echo "After patch:"
+          grep -R --line-number "DEMANGLE_SUPPORT" opencv | head -n 50 || true
+
       - name: Patch OpenCV.js whitelist to include epipolar functions
         run: |
           python3 - <<'PY'
