@@ -373,10 +373,15 @@
     if (!cvReady){ setOut("Wait for OpenCV first.", true); return; }
 
     try{
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false
-      });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width:  { ideal: 1280 },   // try 1280 or 1920
+            height: { ideal: 720 },    // try 720 or 1080
+            frameRate: { ideal: 30, max: 30 }
+          },
+          audio: false
+        });
 
       video.srcObject = stream;
       await video.play();
@@ -720,105 +725,116 @@
       }
     }
 
-    // =====================================================
-    // B) ROBUST PATH: contour boundary sampling fallback
-    // =====================================================
-    let roi1 = null;
-    let blur = null;
-    let edges = null;
-    let edgesClean = null;
-    let contours = null;
-    let hierarchy = null;
-
-    try{
-      const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
-      roi1 = gray1.roi(rect);
-
-      // 1) Smooth a little so Canny doesn't explode
-      blur = new cv.Mat();
-      cv.GaussianBlur(roi1, blur, new cv.Size(5,5), 1.0, 1.0, cv.BORDER_DEFAULT);
-
-      // 2) Canny edges (tune these if needed)
-      edges = new cv.Mat();
-      cv.Canny(blur, edges, 60, 140);
-
-      // 3) Morph close to connect broken edge segments
-      edgesClean = new cv.Mat();
-      const k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5));
-      cv.morphologyEx(edges, edgesClean, cv.MORPH_CLOSE, k);
-      k.delete();
-
-      // 4) Contours from the edges
-      contours = new cv.MatVector();
-      hierarchy = new cv.Mat();
-      cv.findContours(edgesClean, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
-
-      const nC = contours.size();
-      logLine(`[ROI] Contour path: contours=${nC}`);
-      if (nC === 0){
-        return { ok:false, msg:"Contour path: no contours. Tighten ROI / increase contrast / better lighting." };
-      }
-
-      // 5) Pick the biggest contour (by perimeter) and ignore tiny junk
-      let bestIdx = -1;
-      let bestPer = -1;
-
-      for (let i=0; i<nC; i++){
-        const cnt = contours.get(i);
-        const per = cv.arcLength(cnt, true);
-        cnt.delete();
-
-        if (per > bestPer && per > 60) { // 60 px perimeter cutoff
-          bestPer = per;
-          bestIdx = i;
-        }
-      }
-
-      if (bestIdx < 0){
-        return { ok:false, msg:"Contour path: only tiny/noisy contours. Make ROI tighter around the object." };
-      }
-
-      const bestCnt = contours.get(bestIdx);
-
-      // 6) Sample boundary points evenly along the contour
-      const sampleN = 160;   // how many boundary points we want (tuneable)
-      const minSpacing = 4;  // avoid points that are basically on top of each other
-      const ptsROI = sampleContourPointsEven(bestCnt, sampleN, minSpacing);
-      bestCnt.delete();
-
-      logLine(`[ROI] Contour path: sampled boundary pts=${ptsROI.length}`);
-      if (ptsROI.length < 25){
-        return { ok:false, msg:`Contour path: too few boundary points (${ptsROI.length}). Tighten ROI / increase contrast.` };
-      }
-
-      // 7) Convert ROI coords -> full image pixel coords and store into p1 Mat for LK
-      const p1 = new cv.Mat(ptsROI.length, 1, cv.CV_32FC2);
-      for (let i=0; i<ptsROI.length; i++){
-        const u = rx + ptsROI[i].x;
-        const v = ry + ptsROI[i].y;
-        p1.data32F[i*2] = u;
-        p1.data32F[i*2+1] = v;
-      }
-
-      // 8) Same tracking+triangulation pipeline as corners
-      const res = trackAndTriangulateFromPointMat(p1);
-      p1.delete();
-
-      if (!res.ok) return res;
-
-      res.measuredText += " (contour)";
-      return res;
-
-    } finally {
-      if (roi1) roi1.delete();
-      if (blur) blur.delete();
-      if (edges) edges.delete();
-      if (edgesClean) edgesClean.delete();
-      if (contours) contours.delete();
-      if (hierarchy) hierarchy.delete();
+  // ======================================
+  // B) ROBUST PATH: silhouette -> boundary points
+  // ======================================
+  let roi1 = null;
+  let roiUp = null;
+  let blur = null;
+  let edges = null;
+  let morph = null;
+  let contours = null;
+  let hierarchy = null;
+  
+  try {
+    const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
+    roi1 = gray1.roi(rect);
+  
+    // --- (1) Upsample ROI to get more boundary detail (helps at low res) ---
+    const UPS = 2; // 2x upsample
+    roiUp = new cv.Mat();
+    cv.resize(roi1, roiUp, new cv.Size(roi1.cols * UPS, roi1.rows * UPS), 0, 0, cv.INTER_LINEAR);
+  
+    // --- (2) Smooth then Canny ---
+    blur = new cv.Mat();
+    cv.GaussianBlur(roiUp, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
+  
+    edges = new cv.Mat();
+    // These thresholds usually work better on upsampled ROI
+    cv.Canny(blur, edges, 40, 120);
+  
+    // --- (3) Morphology to connect edges + thicken them ---
+    morph = new cv.Mat();
+    const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
+    cv.morphologyEx(edges, morph, cv.MORPH_CLOSE, kClose);
+    kClose.delete();
+  
+    const kDil = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
+    cv.dilate(morph, morph, kDil, new cv.Point(-1,-1), 1);
+    kDil.delete();
+  
+    // --- (4) Find contours on the thicker edges ---
+    contours = new cv.MatVector();
+    hierarchy = new cv.Mat();
+    cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+  
+    logLine(`[ROI] Contour path: contours=${contours.size()}`);
+    if (contours.size() === 0) {
+      return { ok:false, msg:"Contour path: no contours found. Tighten ROI and increase contrast." };
     }
+  
+    // --- (5) Pick best contour by perimeter (arcLength) ---
+    let bestIdx = -1;
+    let bestPer = -1;
+    for (let i=0; i<contours.size(); i++){
+      const cnt = contours.get(i);
+      const per = cv.arcLength(cnt, true);
+      cnt.delete();
+      if (per > bestPer) { bestPer = per; bestIdx = i; }
+    }
+  
+    if (bestIdx < 0 || bestPer < 120) { // 120 px perimeter cutoff (in UPS-scaled pixels)
+      return { ok:false, msg:"Contour path: contour too small. Use bigger ROI / higher resolution." };
+    }
+  
+    // Re-run findContours to safely re-grab best contour (MatVector refs are annoying in JS)
+    contours.delete(); hierarchy.delete();
+    contours = new cv.MatVector();
+    hierarchy = new cv.Mat();
+    cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+  
+    const bestCnt = contours.get(bestIdx);
+  
+    // --- (6) Sample boundary points UNIFORMLY by arc-length ---
+    const wantN = 120;        // aim for 120 points
+    const minSpacing = 2;     // in UPS pixels
+    const ptsUp = sampleContourByArcLength(bestCnt, wantN, minSpacing);
+  
+    bestCnt.delete();
+  
+    logLine(`[ROI] Contour path: bestPer=${bestPer.toFixed(1)} ptsSampled=${ptsUp.length}`);
+  
+    if (ptsUp.length < 30) {
+      return { ok:false, msg:`Contour path: too few boundary pts (${ptsUp.length}). Increase ROI or resolution.` };
+    }
+  
+    // --- (7) Convert back to FULL image pixel coords ---
+    // ptsUp are in UPS-scaled ROI coords → divide by UPS, then add ROI offset
+    const p1 = new cv.Mat(ptsUp.length, 1, cv.CV_32FC2);
+    for (let i=0; i<ptsUp.length; i++){
+      const u = rx + (ptsUp[i].x / UPS);
+      const v = ry + (ptsUp[i].y / UPS);
+      p1.data32F[i*2]   = u;
+      p1.data32F[i*2+1] = v;
+    }
+  
+    const res = trackAndTriangulateFromPointMat(p1);
+    p1.delete();
+  
+    if (!res.ok) return res;
+  
+    res.measuredText += " (contour)";
+    return res;
+  
+  } finally {
+    if (roi1) roi1.delete();
+    if (roiUp) roiUp.delete();
+    if (blur) blur.delete();
+    if (edges) edges.delete();
+    if (morph) morph.delete();
+    if (contours) contours.delete();
+    if (hierarchy) hierarchy.delete();
   }
-
   /********************************************************************
    * trackAndTriangulateFromPointMat(p1)
    * Input:
