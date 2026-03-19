@@ -236,8 +236,8 @@
     </details>
   </div>
 
-  <!-- OpenCV.js CDN (only for LK + corners + optional undistort).
-       We DO NOT use cv.SVDecomp because your build doesn't export it. -->
+  <!-- OpenCV.js CDN: we use it ONLY for image ops (Canny, contours, LK, corners, undistort).
+       All epipolar math + eigen stuff is pure JS (because builds may miss calib3d/SVDecomp exports). -->
   <script src="https://docs.opencv.org/4.13.0/opencv.js"></script>
 
   <script>
@@ -256,7 +256,7 @@
   });
 
   /********************************************************************
-   * 0) YOUR iPHONE CALIBRATION RESULTS (HARD-CODED)
+   * 0) iPHONE INTRINSICS (from your checkerboard calibration)
    ********************************************************************/
   const CALIB = {
     calW: 1920,
@@ -360,7 +360,8 @@
         logLine("[boot] OpenCV ready ✅");
         logLine("[boot] goodFeaturesToTrack: " + typeof cv.goodFeaturesToTrack);
         logLine("[boot] LK: " + typeof cv.calcOpticalFlowPyrLK);
-        logLine("[boot] SVDecomp (we don't need it): " + typeof cv.SVDecomp);
+        logLine("[boot] Canny: " + typeof cv.Canny);
+        logLine("[boot] findContours: " + typeof cv.findContours);
       };
     }, 50);
   })();
@@ -585,15 +586,9 @@
   }
 
   /********************************************************************
-   * 6) Epipolar geometry in JS (NO cv.SVDecomp)
-   * ---------------------------------------------------------------
-   * We estimate Essential matrix E from normalized points:
-   *    x2^T E x1 = 0
-   *
-   * Implementation details:
-   * - corners + LK tracking come from OpenCV.js
-   * - RANSAC + 8-point + essential enforcement happen in pure JS
-   * - E decomposition (U,S,V) is done by eigen tricks for 3x3
+   * 6) Epipolar pose (pure JS)
+   * - corners + LK tracking from OpenCV.js
+   * - RANSAC + essential enforcement + pose from E in JS
    ********************************************************************/
   function computePose_Epipolar_JS(){
     if (!gray1 || !gray2 || !Kinv) return { ok:false, reason:"Missing gray1/gray2/Kinv" };
@@ -666,45 +661,184 @@
   }
 
   /********************************************************************
-   * 7) ROI measurement
+   * 7) NEW measureROI(): corners first, then contour sampling fallback
+   * ---------------------------------------------------------------
+   * This directly fixes: "not enough texture in ROI"
+   *
+   * What I’m doing:
+   *  A) Try corners inside ROI (fast)
+   *  B) If corners are too few OR triangulation fails:
+   *     ROI crop -> blur -> Canny -> morph close -> findContours
+   *     -> pick biggest contour -> sample boundary points
+   *     -> LK track those points -> triangulate -> PCA extents
    ********************************************************************/
   function measureROI(rx, ry, rw, rh){
     if (!poseReady || !gray1 || !gray2 || !R || !t) return { ok:false, msg:"Pose not ready." };
+
+    // I need these OpenCV pieces for the fallback
     if (typeof cv.goodFeaturesToTrack !== "function") return { ok:false, msg:"Missing goodFeaturesToTrack." };
     if (typeof cv.calcOpticalFlowPyrLK !== "function") return { ok:false, msg:"Missing LK flow." };
+    if (typeof cv.Canny !== "function") return { ok:false, msg:"Missing Canny." };
+    if (typeof cv.findContours !== "function") return { ok:false, msg:"Missing findContours." };
 
-    // clamp ROI
+    // ---- Clamp ROI to image bounds ----
     rx = Math.max(0, Math.min(rx, gray1.cols-1));
     ry = Math.max(0, Math.min(ry, gray1.rows-1));
     rw = Math.max(1, Math.min(rw, gray1.cols - rx));
     rh = Math.max(1, Math.min(rh, gray1.rows - ry));
 
-    // mask ROI
-    const mask = new cv.Mat(gray1.rows, gray1.cols, cv.CV_8U);
-    mask.setTo(new cv.Scalar(0));
-    const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
-    const maskROI = mask.roi(rect);
-    maskROI.setTo(new cv.Scalar(255));
-    maskROI.delete();
+    // =====================================================
+    // A) FAST PATH: corners inside ROI (your old approach)
+    // =====================================================
+    {
+      const mask = new cv.Mat(gray1.rows, gray1.cols, cv.CV_8U);
+      mask.setTo(new cv.Scalar(0));
+      const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
+      const maskROI = mask.roi(rect);
+      maskROI.setTo(new cv.Scalar(255));
+      maskROI.delete();
 
-    const p1 = new cv.Mat();
-    cv.goodFeaturesToTrack(gray1, p1, 600, 0.01, 6, mask);
-    mask.delete();
+      const p1 = new cv.Mat();
+      cv.goodFeaturesToTrack(gray1, p1, 600, 0.01, 6, mask);
+      mask.delete();
 
-    if (p1.rows < 25){
-      p1.delete();
-      return { ok:false, msg:"Not enough texture in ROI. Use tighter box / better lighting." };
+      const nCorners = p1.rows; // store BEFORE delete (I learned this the hard way)
+      if (nCorners >= 25) {
+        const res = trackAndTriangulateFromPointMat(p1);
+        p1.delete();
+
+        if (res.ok) {
+          res.measuredText += " (corners)";
+          return res;
+        }
+
+        // corners existed but tracking/triangulation failed (rare, but happens)
+        logLine(`[ROI] Corners path failed -> ${res.msg} | switching to contour`);
+      } else {
+        p1.delete();
+        logLine(`[ROI] Corners path: not enough corners (${nCorners}) | switching to contour`);
+      }
     }
 
+    // =====================================================
+    // B) ROBUST PATH: contour boundary sampling fallback
+    // =====================================================
+    let roi1 = null;
+    let blur = null;
+    let edges = null;
+    let edgesClean = null;
+    let contours = null;
+    let hierarchy = null;
+
+    try{
+      const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
+      roi1 = gray1.roi(rect);
+
+      // 1) Smooth a little so Canny doesn't explode
+      blur = new cv.Mat();
+      cv.GaussianBlur(roi1, blur, new cv.Size(5,5), 1.0, 1.0, cv.BORDER_DEFAULT);
+
+      // 2) Canny edges (tune these if needed)
+      edges = new cv.Mat();
+      cv.Canny(blur, edges, 60, 140);
+
+      // 3) Morph close to connect broken edge segments
+      edgesClean = new cv.Mat();
+      const k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5));
+      cv.morphologyEx(edges, edgesClean, cv.MORPH_CLOSE, k);
+      k.delete();
+
+      // 4) Contours from the edges
+      contours = new cv.MatVector();
+      hierarchy = new cv.Mat();
+      cv.findContours(edgesClean, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+
+      const nC = contours.size();
+      logLine(`[ROI] Contour path: contours=${nC}`);
+      if (nC === 0){
+        return { ok:false, msg:"Contour path: no contours. Tighten ROI / increase contrast / better lighting." };
+      }
+
+      // 5) Pick the biggest contour (by perimeter) and ignore tiny junk
+      let bestIdx = -1;
+      let bestPer = -1;
+
+      for (let i=0; i<nC; i++){
+        const cnt = contours.get(i);
+        const per = cv.arcLength(cnt, true);
+        cnt.delete();
+
+        if (per > bestPer && per > 60) { // 60 px perimeter cutoff
+          bestPer = per;
+          bestIdx = i;
+        }
+      }
+
+      if (bestIdx < 0){
+        return { ok:false, msg:"Contour path: only tiny/noisy contours. Make ROI tighter around the object." };
+      }
+
+      const bestCnt = contours.get(bestIdx);
+
+      // 6) Sample boundary points evenly along the contour
+      const sampleN = 160;   // how many boundary points we want (tuneable)
+      const minSpacing = 4;  // avoid points that are basically on top of each other
+      const ptsROI = sampleContourPointsEven(bestCnt, sampleN, minSpacing);
+      bestCnt.delete();
+
+      logLine(`[ROI] Contour path: sampled boundary pts=${ptsROI.length}`);
+      if (ptsROI.length < 25){
+        return { ok:false, msg:`Contour path: too few boundary points (${ptsROI.length}). Tighten ROI / increase contrast.` };
+      }
+
+      // 7) Convert ROI coords -> full image pixel coords and store into p1 Mat for LK
+      const p1 = new cv.Mat(ptsROI.length, 1, cv.CV_32FC2);
+      for (let i=0; i<ptsROI.length; i++){
+        const u = rx + ptsROI[i].x;
+        const v = ry + ptsROI[i].y;
+        p1.data32F[i*2] = u;
+        p1.data32F[i*2+1] = v;
+      }
+
+      // 8) Same tracking+triangulation pipeline as corners
+      const res = trackAndTriangulateFromPointMat(p1);
+      p1.delete();
+
+      if (!res.ok) return res;
+
+      res.measuredText += " (contour)";
+      return res;
+
+    } finally {
+      if (roi1) roi1.delete();
+      if (blur) blur.delete();
+      if (edges) edges.delete();
+      if (edgesClean) edgesClean.delete();
+      if (contours) contours.delete();
+      if (hierarchy) hierarchy.delete();
+    }
+  }
+
+  /********************************************************************
+   * trackAndTriangulateFromPointMat(p1)
+   * Input:
+   *   p1: Nx1 CV_32FC2 points in VIEW1 (full image pixel coords)
+   * Output:
+   *   same shape of result your UI expects
+   ********************************************************************/
+  function trackAndTriangulateFromPointMat(p1){
     const p2 = new cv.Mat();
     const status = new cv.Mat();
     const err = new cv.Mat();
+
     const win = new cv.Size(31,31);
     const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+
     cv.calcOpticalFlowPyrLK(gray1, gray2, p1, p2, status, err, win, 4, crit);
 
     const x1 = [];
     const x2 = [];
+
     for (let i=0; i<status.rows; i++){
       if (!status.ucharPtr(i,0)[0]) continue;
 
@@ -713,20 +847,22 @@
       const u2 = p2.data32F[i*2];
       const v2 = p2.data32F[i*2 + 1];
 
-      if (u2<0 || u2>=gray2.cols || v2<0 || v2>=gray2.rows) continue;
+      if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
 
-      x1.push(pixelToNorm(u1,v1));
-      x2.push(pixelToNorm(u2,v2));
+      x1.push(pixelToNorm(u1, v1));
+      x2.push(pixelToNorm(u2, v2));
     }
 
-    p1.delete(); p2.delete(); status.delete(); err.delete();
+    p2.delete(); status.delete(); err.delete();
 
-    if (x1.length < 25) return { ok:false, msg:`Too few tracked points in ROI (${x1.length}).` };
+    if (x1.length < 25) {
+      return { ok:false, msg:`Tracking failed: kept only ${x1.length} tracked points.` };
+    }
 
-    // triangulate
+    // Triangulate + filter garbage
     const pts3 = [];
     for (let i=0; i<x1.length; i++){
-      const X = triangulateDLT_smallestEigen(R, t, x1[i], x2[i]); // meters in cam1 coords
+      const X = triangulateDLT_smallestEigen(R, t, x1[i], x2[i]);
       if (!X) continue;
 
       if (!isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])) continue;
@@ -735,9 +871,11 @@
       pts3.push(X);
     }
 
-    if (pts3.length < 15) return { ok:false, msg:`Triangulation unstable (kept ${pts3.length}). Try bigger baseline / less rotation.` };
+    if (pts3.length < 15) {
+      return { ok:false, msg:`Triangulation unstable: only ${pts3.length} 3D points survived.` };
+    }
 
-    // PCA extents (pure JS eigen on 3x3 covariance)
+    // PCA extents (pure JS covariance eigen)
     const ext = computeExtentsPCA_covEigen(pts3);
     if (!ext) return { ok:false, msg:"Extent PCA failed." };
 
@@ -746,6 +884,11 @@
     const e2 = ext.e2 * 1000;
     const e3 = ext.e3 * 1000;
 
+    // simple auto decision for your assignment objects:
+    // ball => diameter
+    // spoon => length
+    // phone => L/W
+    // box => side (if L≈W)
     const r12 = e1 / Math.max(e2, 1e-9);
     const r23 = e2 / Math.max(e3, 1e-9);
 
@@ -769,6 +912,38 @@
     }
 
     return { ok:true, primaryMm, measuredText, Npts: pts3.length };
+  }
+
+  /********************************************************************
+   * sampleContourPointsEven(cnt, N, minSpacing)
+   * - cnt is CHAIN_APPROX_NONE contour
+   * - returns array of {x,y} in ROI coordinates
+   ********************************************************************/
+  function sampleContourPointsEven(cnt, N, minSpacing){
+    const out = [];
+    const data = cnt.data32S;          // [x0,y0,x1,y1,...]
+    const nPts = data.length / 2;
+    if (nPts < 10) return out;
+
+    const step = Math.max(1, Math.floor(nPts / N));
+    let last = null;
+
+    for (let i=0; i<nPts; i+=step){
+      const x = data[2*i];
+      const y = data[2*i+1];
+
+      if (last){
+        const dx = x - last.x;
+        const dy = y - last.y;
+        if (dx*dx + dy*dy < minSpacing*minSpacing) continue;
+      }
+
+      out.push({x,y});
+      last = {x,y};
+
+      if (out.length >= N) break;
+    }
+    return out;
   }
 
   /********************************************************************
@@ -835,7 +1010,7 @@
   }
 
   /********************************************************************
-   * 9) Results
+   * 9) Results table
    ********************************************************************/
   function logResult(res){
     const nameIn = (document.getElementById("objName").value || "").trim();
@@ -950,8 +1125,8 @@
     const N = x1.length;
     if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
 
-    const ITER = 1500;      // increase if needed
-    const TH = 1e-4;        // Sampson threshold in normalized coords
+    const ITER = 1500;
+    const TH = 1e-4; // Sampson threshold (normalized coords)
     let bestInliers = [];
     let bestE = null;
 
@@ -964,7 +1139,6 @@
       let E = eightPointE_pureJS(x1, x2, s);
       if (!E) continue;
 
-      // enforce essential constraint (rank-2, equal top singulars) using eigen tricks
       E = enforceEssential_3x3(E);
 
       const inl = [];
@@ -1025,18 +1199,12 @@
 
   function enforceEssential_3x3(E){
     // Essential constraint: singular values become (s,s,0)
-    // We'll compute a "pseudo SVD" using eigen decomposition of (E^T E).
-    // 1) V from eigenvectors of E^T E
-    // 2) singular values = sqrt(eigenvalues)
-    // 3) U = E V Σ^{-1}
-    // 4) rebuild E = U diag(s,s,0) V^T
-
     const Et = transpose3(E);
     const EtE = mul3(Et, E); // 3x3 symmetric
 
-    const ev = jacobiEigenSym(EtE);      // eigenvalues + eigenvectors
+    const ev = jacobiEigenSym(EtE);
     const vals = ev.values.slice();
-    const V = ev.vectors;                // columns are eigenvectors
+    const V = ev.vectors;
 
     // sort eigenpairs by descending eigenvalue
     const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
@@ -1049,17 +1217,14 @@
 
     const s1 = Math.sqrt(lam[0]);
     const s2 = Math.sqrt(lam[1]);
-    // target s = average of top two
     const s = 0.5*(s1+s2);
 
-    // Σ^{-1} for computing U: [1/s1, 1/s2, 0] (avoid divide by zero)
     const inv = [
       1/Math.max(s1,1e-12),
       1/Math.max(s2,1e-12),
       0
     ];
 
-    // U = E * V * Σ^{-1}  (columns)
     const EV = mul3(E, Vsorted);
     let U = [
       [EV[0][0]*inv[0], EV[0][1]*inv[1], EV[0][2]*inv[2]],
@@ -1067,10 +1232,8 @@
       [EV[2][0]*inv[0], EV[2][1]*inv[1], EV[2][2]*inv[2]],
     ];
 
-    // Orthonormalize U (Gram-Schmidt)
     U = ortho3(U);
 
-    // Rebuild E2 = U * diag(s,s,0) * V^T
     const S = [
       [s,0,0],
       [0,s,0],
@@ -1078,8 +1241,7 @@
     ];
     const US = mul3(U, S);
     const Vt = transpose3(Vsorted);
-    const E2 = mul3(US, Vt);
-    return E2;
+    return mul3(US, Vt);
   }
 
   function sampsonDistance(E, x1, x2){
@@ -1094,25 +1256,21 @@
    * 13) Recover pose from E (pure JS decomposition + cheirality)
    ********************************************************************/
   function recoverPoseFromE(E, x1, x2, inliersIdx){
-    // Use "pseudo SVD" again to get U,V
     const svd = svd3_from_EtE(E);
     if (!svd) return { ok:false, reason:"SVD(ish) failed" };
 
     const U = svd.U;
     const V = svd.V;
 
-    // W matrix
     const W = [
       [0,-1,0],
       [1, 0,0],
       [0, 0,1]
     ];
 
-    // Candidate rotations
     const R1 = mul3(mul3(U, W), transpose3(V));
     const R2 = mul3(mul3(U, transpose3(W)), transpose3(V));
 
-    // Candidate translations (3rd column of U)
     const tdir = [U[0][2], U[1][2], U[2][2]];
     const tdirNeg = [-tdir[0], -tdir[1], -tdir[2]];
 
@@ -1123,7 +1281,6 @@
       {R:R2, t:tdirNeg},
     ];
 
-    // Cheirality test
     let best = null;
     let bestCount = -1;
     const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
@@ -1154,7 +1311,6 @@
   }
 
   function svd3_from_EtE(E){
-    // 1) V from eigen(E^T E)
     const Et = transpose3(E);
     const EtE = mul3(Et, E);
 
@@ -1162,7 +1318,6 @@
     const vals = ev.values.slice();
     const Vraw = ev.vectors;
 
-    // sort descending
     const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
     const lam = order.map(i=>Math.max(vals[i], 0));
     const V = [
@@ -1171,10 +1326,8 @@
       [Vraw[2][order[0]], Vraw[2][order[1]], Vraw[2][order[2]]],
     ];
 
-    // singular values
     const s = lam.map(x=>Math.sqrt(x));
 
-    // 2) U = E V Σ^{-1}
     const EV = mul3(E, V);
     const inv0 = 1/Math.max(s[0],1e-12);
     const inv1 = 1/Math.max(s[1],1e-12);
@@ -1188,7 +1341,6 @@
 
     U = ortho3(U);
 
-    // fix det sign if needed (make it a proper rotation basis)
     if (det3(U) < 0){
       U[0][2] *= -1; U[1][2] *= -1; U[2][2] *= -1;
     }
@@ -1200,9 +1352,7 @@
   }
 
   /********************************************************************
-   * 14) Triangulation (DLT) using smallest eigenvector of (A^T A)
-   * ---------------------------------------------------------------
-   * This avoids cv.SVDecomp completely.
+   * 14) Triangulation (DLT) via smallest eigenvector of A^T A (4x4)
    ********************************************************************/
   function triangulateDLT_smallestEigen(R, t, x1, x2){
     const x = x1[0], y = x1[1];
@@ -1210,7 +1360,6 @@
 
     const r1 = R[0], r2 = R[1], r3 = R[2];
 
-    // Build 4x4 A (same as classic DLT)
     const A = [
       [-1, 0,  x, 0],
       [ 0,-1,  y, 0],
@@ -1218,12 +1367,11 @@
       [yp*r3[0]-r2[0], yp*r3[1]-r2[1], yp*r3[2]-r2[2], yp*t[2]-t[1]],
     ];
 
-    // Solve smallest eigenvector of A^T A (4x4)
     const AT = matT(A);
     const ATA = matMul(AT, A);
     const ev = jacobiEigenSym(ATA);
     const k = argMin(ev.values);
-    const vh = ev.vectors.map(row => row[k]); // homogeneous [X,Y,Z,W]
+    const vh = ev.vectors.map(row => row[k]);
 
     if (Math.abs(vh[3]) < 1e-12) return null;
     return [vh[0]/vh[3], vh[1]/vh[3], vh[2]/vh[3]];
@@ -1236,12 +1384,10 @@
     const N = pts3.length;
     if (N < 5) return null;
 
-    // mean
     let mx=0,my=0,mz=0;
     for (const p of pts3){ mx+=p[0]; my+=p[1]; mz+=p[2]; }
     mx/=N; my/=N; mz/=N;
 
-    // covariance C = (1/N) sum (p-m)(p-m)^T
     let c00=0,c01=0,c02=0,c11=0,c12=0,c22=0;
     for (const p of pts3){
       const x=p[0]-mx, y=p[1]-my, z=p[2]-mz;
@@ -1257,10 +1403,7 @@
       [c02,c12,c22]
     ];
 
-    // eigen(C): columns are principal axes
     const ev = jacobiEigenSym(C);
-
-    // sort by descending eigenvalue (principal first)
     const order = [0,1,2].sort((a,b)=>ev.values[b]-ev.values[a]);
     const V = [
       [ev.vectors[0][order[0]], ev.vectors[0][order[1]], ev.vectors[0][order[2]]],
@@ -1268,7 +1411,6 @@
       [ev.vectors[2][order[0]], ev.vectors[2][order[1]], ev.vectors[2][order[2]]],
     ];
 
-    // project points onto axes and take min/max
     let min0=1e9,max0=-1e9,min1=1e9,max1=-1e9,min2=1e9,max2=-1e9;
     for (const p of pts3){
       const x=p[0]-mx, y=p[1]-my, z=p[2]-mz;
@@ -1286,26 +1428,16 @@
   }
 
   /********************************************************************
-   * 16) PURE JS NUMERICAL TOOLS
+   * 16) PURE JS NUMERICAL TOOLS (eigen + matrices)
    ********************************************************************/
-
-  // ---- Jacobi eigen solver for symmetric matrix (n x n) ----
-  // Returns:
-  //   values: eigenvalues
-  //   vectors: matrix V where columns are eigenvectors
   function jacobiEigenSym(A){
     const n = A.length;
-
-    // copy A
     const M = Array.from({length:n}, (_,i)=>A[i].slice());
-
-    // V = I
     const V = Array.from({length:n}, (_,i)=>Array.from({length:n}, (_,j)=> (i===j?1:0)));
 
     const MAX_IT = 60 * n * n;
 
     for (let it=0; it<MAX_IT; it++){
-      // find largest off-diagonal element
       let p=0,q=1;
       let max = 0;
       for (let i=0;i<n;i++){
@@ -1316,20 +1448,16 @@
           }
         }
       }
-
-      // converged
       if (max < 1e-12) break;
 
       const app = M[p][p];
       const aqq = M[q][q];
       const apq = M[p][q];
 
-      // rotation angle
       const phi = 0.5 * Math.atan2(2*apq, (aqq - app));
       const c = Math.cos(phi);
       const s = Math.sin(phi);
 
-      // update M = J^T M J
       for (let k=0;k<n;k++){
         const mkp = M[k][p];
         const mkq = M[k][q];
@@ -1343,13 +1471,11 @@
         M[q][k] = s*mpk + c*mqk;
       }
 
-      // fix diagonals explicitly (numerical stability)
       M[p][p] = c*c*app - 2*s*c*apq + s*s*aqq;
       M[q][q] = s*s*app + 2*s*c*apq + c*c*aqq;
       M[p][q] = 0;
       M[q][p] = 0;
 
-      // update eigenvectors V = V J
       for (let k=0;k<n;k++){
         const vkp = V[k][p];
         const vkq = V[k][q];
@@ -1360,7 +1486,6 @@
 
     const values = Array.from({length:n}, (_,i)=>M[i][i]);
 
-    // normalize columns
     for (let j=0;j<n;j++){
       let nn=0;
       for (let i=0;i<n;i++) nn += V[i][j]*V[i][j];
@@ -1405,7 +1530,6 @@
     }
   }
 
-  // ---- 3x3 ops ----
   function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
   function add3(a,b){ return [a[0]+b[0],a[1]+b[1],a[2]+b[2]]; }
 
@@ -1446,7 +1570,7 @@
   function inv3(M){
     const d = det3(M);
     if (Math.abs(d) < 1e-12) throw new Error("K is singular? inv3 failed");
-    const inv = [
+    return [
       [
         (M[1][1]*M[2][2]-M[1][2]*M[2][1])/d,
         (M[0][2]*M[2][1]-M[0][1]*M[2][2])/d,
@@ -1463,12 +1587,9 @@
         (M[0][0]*M[1][1]-M[0][1]*M[1][0])/d,
       ],
     ];
-    return inv;
   }
 
-  // Gram-Schmidt to make columns orthonormal
   function ortho3(M){
-    // columns: c0,c1,c2
     let c0 = [M[0][0], M[1][0], M[2][0]];
     let c1 = [M[0][1], M[1][1], M[2][1]];
     let c2 = [M[0][2], M[1][2], M[2][2]];
@@ -1478,7 +1599,6 @@
     c1 = sub3(c1, scale3(c0, dot3(c0,c1)));
     c1 = normalize3(c1);
 
-    // c2 = c0 x c1 (more stable)
     c2 = cross3(c0,c1);
     c2 = normalize3(c2);
 
