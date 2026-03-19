@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>iPhone Epipolar Measure (OpenCV.js + IMU) — No Reference</title> 
+  <title>iPhone Epipolar Measure (OpenCV.js + IMU) — No Reference</title>
 
   <style>
     :root{
@@ -11,22 +11,35 @@
       --radius: 14px;
       --border: 1px solid #e8e8e8;
     }
+
     body{
       margin: 10px;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       text-align: center;
-      color:#111;
+      color: #111;
+      background: #fafafa;
     }
-    h2{ margin: 6px 0 10px; font-size: 18px; }
-    .wrap{ max-width: var(--maxw); margin: 0 auto; text-align:left; }
+
+    h2{
+      margin: 6px 0 10px;
+      font-size: 18px;
+    }
+
+    .wrap{
+      max-width: var(--maxw);
+      margin: 0 auto;
+      text-align: left;
+    }
 
     canvas{
-      width:100%;
+      width: 100%;
       max-width: var(--maxw);
       border-radius: var(--radius);
       border: var(--border);
-      touch-action:none;
-      background:#000;
+      touch-action: none;
+      background: #000;
+      display: block;
+      margin: 0 auto;
     }
 
     .toolbar{
@@ -44,64 +57,91 @@
       grid-template-columns: repeat(4, 1fr);
       gap: 8px;
     }
+
     button, input{
       border: var(--border);
       border-radius: 12px;
       padding: 10px 12px;
       font-size: 15px;
       background: #fff;
+      box-sizing: border-box;
     }
+
     button.primary{
-      background:#111;
-      color:#fff;
-      border-color:#111;
+      background: #111;
+      color: #fff;
+      border-color: #111;
     }
-    button:disabled{ opacity: 0.55; }
+
+    button:disabled{
+      opacity: 0.55;
+    }
 
     .pill{
       grid-column: 1 / -1;
-      display:flex; align-items:center; justify-content:space-between;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       border: var(--border);
       border-radius: 12px;
       padding: 10px 12px;
-      background:#fff;
+      background: #fff;
       font-size: 14px;
       gap: 10px;
     }
-    .pill input{ transform: scale(1.15); }
+
+    .pill input{
+      transform: scale(1.1);
+    }
 
     details{
       border: var(--border);
       border-radius: var(--radius);
       padding: 8px 10px;
       margin: 8px 0;
-      background:#fff;
+      background: #fff;
     }
+
     summary{
       cursor: pointer;
       font-weight: 700;
       list-style: none;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
-    summary::-webkit-details-marker{ display:none; }
+
+    summary::-webkit-details-marker{
+      display: none;
+    }
 
     .row{
-      display:flex;
+      display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      align-items:center;
-      justify-content:flex-start;
+      align-items: center;
+      justify-content: flex-start;
       margin-top: 8px;
     }
-    .small{ font-size: 12px; color:#444; }
-    .ok{ color:#0a7a2f; font-weight: 900; }
-    .warn{ color:#b00020; font-weight: 900; }
+
+    .small{
+      font-size: 12px;
+      color: #444;
+    }
+
+    .ok{
+      color: #0a7a2f;
+      font-weight: 900;
+    }
+
+    .warn{
+      color: #b00020;
+      font-weight: 900;
+    }
 
     #out{
       margin: 8px 0 0;
-      text-align:center;
+      text-align: center;
       font-weight: 900;
       font-size: 16px;
       min-height: 22px;
@@ -109,23 +149,30 @@
 
     .resultsBox{
       max-height: 220px;
-      overflow:auto;
+      overflow: auto;
       border: var(--border);
       border-radius: 12px;
       margin-top: 8px;
     }
+
     table{
-      width:100%;
+      width: 100%;
       border-collapse: collapse;
       font-size: 13px;
     }
+
     th, td{
       border-bottom: 1px solid #eee;
       padding: 8px 8px;
-      text-align:left;
+      text-align: left;
       white-space: nowrap;
     }
-    th{ position: sticky; top:0; background:#fff; }
+
+    th{
+      position: sticky;
+      top: 0;
+      background: #fff;
+    }
 
     pre{
       margin: 8px 0 0;
@@ -227,7 +274,12 @@
         <table>
           <thead>
             <tr>
-              <th>#</th><th>Object</th><th>Measured</th><th>GT</th><th>Err%</th><th>Pts</th>
+              <th>#</th>
+              <th>Object</th>
+              <th>Measured</th>
+              <th>GT</th>
+              <th>Err%</th>
+              <th>Pts</th>
             </tr>
           </thead>
           <tbody id="resultsBody"></tbody>
@@ -236,265 +288,311 @@
     </details>
   </div>
 
-  <!-- OpenCV.js CDN: we use it ONLY for image ops (Canny, contours, LK, corners, undistort).
-       All epipolar math + eigen stuff is pure JS (because builds may miss calib3d/SVDecomp exports). -->
-  <script src="https://docs.opencv.org/4.13.0/opencv.js"></script>
+  <script>
+    function onOpenCvScriptLoaded() {
+      console.log("[boot] opencv.js script loaded");
+      if (typeof cv === "undefined") {
+        const el = document.getElementById("cvStatus");
+        if (el) {
+          el.textContent = "load failed";
+          el.className = "warn";
+        }
+        return;
+      }
+
+      cv.onRuntimeInitialized = () => {
+        window.__cvReadyHook && window.__cvReadyHook();
+      };
+    }
+  </script>
+
+  <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvScriptLoaded()"></script>
 
   <script>
-  /********************************************************************
-   * HARD DEBUG (I never want silent failures)
-   ********************************************************************/
-  const logEl = document.getElementById("log");
-  function logLine(s){ console.log(s); logEl.textContent += s + "\n"; }
-  function clearLog(){ logEl.textContent = ""; }
+    /********************************************************************
+     * HARD DEBUG
+     ********************************************************************/
+    const logEl = document.getElementById("log");
 
-  window.addEventListener("error", (e) => {
-    logLine(`[window.onerror] ${e.message} @ ${e.filename}:${e.lineno}`);
-  });
-  window.addEventListener("unhandledrejection", (e) => {
-    logLine(`[promise.reject] ${e.reason}`);
-  });
+    function logLine(s){
+      console.log(s);
+      logEl.textContent += s + "\n";
+    }
 
-  /********************************************************************
-   * 0) iPHONE INTRINSICS (from your checkerboard calibration)
-   ********************************************************************/
-  const CALIB = {
-    calW: 1920,
-    calH: 2560,
-    fx: 1977.60619,
-    fy: 1981.57064,
-    cx: 962.418592,
-    cy: 1247.75805,
-    dist: [0.247937836, -0.915690663, -0.00215712011, -0.000132342062, 0.550086004]
-  };
+    function clearLog(){
+      logEl.textContent = "";
+    }
 
-  /********************************************************************
-   * 1) GLOBAL STATE
-   ********************************************************************/
-  let cvReady = false;
-  let streaming = false;
+    window.addEventListener("error", (e) => {
+      logLine(`[window.onerror] ${e.message} @ ${e.filename}:${e.lineno}`);
+    });
 
-  const video = document.getElementById("video");
-  const canvas = document.getElementById("canvas");
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    window.addEventListener("unhandledrejection", (e) => {
+      logLine(`[promise.reject] ${e.reason}`);
+    });
 
-  const rawCanvas = document.createElement("canvas");
-  const rawCtx = rawCanvas.getContext("2d", { willReadFrequently: true });
+    logLine("[boot] page script started");
 
-  const cvStatus = document.getElementById("cvStatus");
-  const stageStatus = document.getElementById("stageStatus");
-  const outEl = document.getElementById("out");
-  const freezeToggle = document.getElementById("freezeToggle");
-  const undToggle = document.getElementById("undToggle");
-  const streamInfoEl = document.getElementById("streamInfo");
+    /********************************************************************
+     * CALIBRATION
+     ********************************************************************/
+    const CALIB = {
+      calW: 1920,
+      calH: 2560,
+      fx: 1977.60619,
+      fy: 1981.57064,
+      cx: 962.418592,
+      cy: 1247.75805,
+      dist: [0.247937836, -0.915690663, -0.00215712011, -0.000132342062, 0.550086004]
+    };
 
-  const startBtn = document.getElementById("startBtn");
-  const imuBtn   = document.getElementById("imuBtn");
-  const cap1Btn  = document.getElementById("cap1Btn");
-  const cap2Btn  = document.getElementById("cap2Btn");
+    /********************************************************************
+     * GLOBAL STATE
+     ********************************************************************/
+    let cvReady = false;
+    let streaming = false;
+    let frozenDisplay = false;
+    let imuEnabled = false;
+    let poseReady = false;
 
-  const dyawEl   = document.getElementById("dyaw");
-  const dpitchEl = document.getElementById("dpitch");
-  const drollEl  = document.getElementById("droll");
-  const imuGateEl= document.getElementById("imuGate");
+    let imuNow = { yaw:0, pitch:0, roll:0 };
+    let imuAtV1 = null;
 
-  const resultsBody = document.getElementById("resultsBody");
-  const resCount = document.getElementById("resCount");
+    let K = null;
+    let Kinv = null;
+    let Kcv = null;
+    let DISTcv = null;
 
-  // Stage machine: idle | live | v1 | ready
-  let stage = "idle";
-  function setStage(s){ stage = s; stageStatus.textContent = s; }
+    let gray1 = null;
+    let gray2 = null;
 
-  function setOut(msg, isWarn=false){
-    outEl.textContent = msg;
-    outEl.className = isWarn ? "warn" : "";
-  }
+    let R = null;
+    let t = null;
 
-  function updateResCount(){ resCount.textContent = String(results.length); }
+    let results = [];
+    let stage = "idle";
 
-  let frozenDisplay = false;
+    const ROT_THRESH_DEG = { yaw: 6, pitch: 4, roll: 4 };
 
-  // IMU
-  let imuEnabled = false;
-  let imuNow = { yaw:0, pitch:0, roll:0 };
-  let imuAtV1 = null;
-  const ROT_THRESH_DEG = { yaw: 6, pitch: 4, roll: 4 };
+    const roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
+    let lastOverlay = null;
 
-  // Intrinsics scaled to current stream
-  let K = null;     // 3x3 JS array
-  let Kinv = null;  // 3x3 JS array
-  let Kcv = null;   // cv.Mat 3x3 (for undistort)
-  let DISTcv = null;// cv.Mat 1x5
+    /********************************************************************
+     * DOM
+     ********************************************************************/
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-  // Captured grayscale frames
-  let gray1 = null;
-  let gray2 = null;
+    const rawCanvas = document.createElement("canvas");
+    const rawCtx = rawCanvas.getContext("2d", { willReadFrequently: true });
 
-  // Pose
-  let R = null; // 3x3
-  let t = null; // 3-vector (meters)
-  let poseReady = false;
+    const cvStatus = document.getElementById("cvStatus");
+    const stageStatus = document.getElementById("stageStatus");
+    const outEl = document.getElementById("out");
+    const freezeToggle = document.getElementById("freezeToggle");
+    const undToggle = document.getElementById("undToggle");
+    const streamInfoEl = document.getElementById("streamInfo");
 
-  // ROI selection
-  let roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
-  let lastOverlay = null;
+    const startBtn = document.getElementById("startBtn");
+    const imuBtn = document.getElementById("imuBtn");
+    const cap1Btn = document.getElementById("cap1Btn");
+    const cap2Btn = document.getElementById("cap2Btn");
 
-  // Results
-  let results = [];
+    const dyawEl = document.getElementById("dyaw");
+    const dpitchEl = document.getElementById("dpitch");
+    const drollEl = document.getElementById("droll");
+    const imuGateEl = document.getElementById("imuGate");
 
-  /********************************************************************
-   * 2) OpenCV ready gate
-   ********************************************************************/
-  (function waitForCv(){
-    const timer = setInterval(() => {
-      if (typeof cv === "undefined") return;
-      if (typeof cv.onRuntimeInitialized === "undefined") return;
+    const resultsBody = document.getElementById("resultsBody");
+    const resCount = document.getElementById("resCount");
 
-      clearInterval(timer);
-      cv.onRuntimeInitialized = () => {
-        cvReady = true;
-        cvStatus.textContent = "ready ✅";
-        cvStatus.className = "ok";
-        startBtn.disabled = false;
+    /********************************************************************
+     * READY HOOK
+     ********************************************************************/
+    window.__cvReadyHook = function(){
+      cvReady = true;
+      cvStatus.textContent = "ready ✅";
+      cvStatus.className = "ok";
+      startBtn.disabled = false;
 
-        logLine("[boot] OpenCV ready ✅");
-        logLine("[boot] goodFeaturesToTrack: " + typeof cv.goodFeaturesToTrack);
-        logLine("[boot] LK: " + typeof cv.calcOpticalFlowPyrLK);
-        logLine("[boot] Canny: " + typeof cv.Canny);
-        logLine("[boot] findContours: " + typeof cv.findContours);
-      };
-    }, 50);
-  })();
+      logLine("[boot] OpenCV ready ✅");
+      logLine("[boot] goodFeaturesToTrack: " + typeof cv.goodFeaturesToTrack);
+      logLine("[boot] LK: " + typeof cv.calcOpticalFlowPyrLK);
+      logLine("[boot] Canny: " + typeof cv.Canny);
+      logLine("[boot] findContours: " + typeof cv.findContours);
+      logLine("[boot] undistort: " + typeof cv.undistort);
+    };
 
-  /********************************************************************
-   * 3) Camera start + draw loop
-   ********************************************************************/
-  async function startCamera(){
-    if (!cvReady){ setOut("Wait for OpenCV first.", true); return; }
+    /********************************************************************
+     * UI HELPERS
+     ********************************************************************/
+    function setStage(s){
+      stage = s;
+      stageStatus.textContent = s;
+    }
 
-    try{
+    function setOut(msg, isWarn=false){
+      outEl.textContent = msg;
+      outEl.className = isWarn ? "warn" : "";
+    }
+
+    function updateResCount(){
+      resCount.textContent = String(results.length);
+    }
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, c => ({
+        "&":"&amp;",
+        "<":"&lt;",
+        ">":"&gt;",
+        "\"":"&quot;",
+        "'":"&#39;"
+      }[c]));
+    }
+
+    /********************************************************************
+     * CAMERA
+     ********************************************************************/
+    async function startCamera(){
+      if (!cvReady){
+        setOut("Wait for OpenCV first.", true);
+        return;
+      }
+
+      try{
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { ideal: "environment" },
-            width:  { ideal: 1280 },   // try 1280 or 1920
-            height: { ideal: 720 },    // try 720 or 1080
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
             frameRate: { ideal: 30, max: 30 }
           },
           audio: false
         });
 
-      video.srcObject = stream;
-      await video.play();
+        video.srcObject = stream;
+        await video.play();
 
-      video.onloadedmetadata = () => {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        rawCanvas.width = video.videoWidth;
-        rawCanvas.height = video.videoHeight;
+        const finishSetup = () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          rawCanvas.width = video.videoWidth;
+          rawCanvas.height = video.videoHeight;
 
-        streamInfoEl.textContent = `${video.videoWidth}×${video.videoHeight}`;
+          streamInfoEl.textContent = `${video.videoWidth}×${video.videoHeight}`;
 
-        buildScaledIntrinsics(video.videoWidth, video.videoHeight);
+          buildScaledIntrinsics(video.videoWidth, video.videoHeight);
 
-        streaming = true;
-        imuBtn.disabled = false;
-        cap1Btn.disabled = false;
-        cap2Btn.disabled = true;
-        setStage("live");
+          streaming = true;
+          imuBtn.disabled = false;
+          cap1Btn.disabled = false;
+          cap2Btn.disabled = true;
 
-        clearLog();
-        logLine("=== START CAMERA ===");
-        logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
-        logLine(`K fx=${K[0][0].toFixed(2)} fy=${K[1][1].toFixed(2)} cx=${K[0][2].toFixed(2)} cy=${K[1][2].toFixed(2)}`);
+          setStage("live");
 
-        setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
-        requestAnimationFrame(drawLoop);
-      };
-    }catch(e){
-      logLine("[camera] failed: " + e);
-      setOut("Camera failed (HTTPS + permission required).", true);
-    }
-  }
+          clearLog();
+          logLine("=== START CAMERA ===");
+          logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
+          logLine(`K fx=${K[0][0].toFixed(2)} fy=${K[1][1].toFixed(2)} cx=${K[0][2].toFixed(2)} cy=${K[1][2].toFixed(2)}`);
 
-  function drawLoop(){
-    if (!streaming) return;
+          setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
+          requestAnimationFrame(drawLoop);
+        };
 
-    if (!frozenDisplay){
-      rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
-    }
-    ctx.drawImage(rawCanvas, 0, 0, canvas.width, canvas.height);
+        if (video.readyState >= 1 && video.videoWidth > 0) {
+          finishSetup();
+        } else {
+          video.onloadedmetadata = finishSetup;
+        }
 
-    // ROI overlay while dragging
-    if (roi.active || (roi.x0!==roi.x1 && roi.y0!==roi.y1)) {
-      const x = Math.min(roi.x0, roi.x1);
-      const y = Math.min(roi.y0, roi.y1);
-      const w = Math.abs(roi.x1 - roi.x0);
-      const h = Math.abs(roi.y1 - roi.y0);
-
-      ctx.save();
-      ctx.strokeStyle = "lime";
-      ctx.lineWidth = 4;
-      ctx.strokeRect(x,y,w,h);
-      ctx.restore();
+      }catch(e){
+        logLine("[camera] failed: " + e);
+        setOut("Camera failed (HTTPS + permission required).", true);
+      }
     }
 
-    // last measured ROI
-    if (lastOverlay){
-      ctx.save();
-      ctx.strokeStyle = "yellow";
-      ctx.lineWidth = 4;
-      ctx.strokeRect(lastOverlay.x, lastOverlay.y, lastOverlay.w, lastOverlay.h);
-      ctx.restore();
-    }
+    function drawLoop(){
+      if (!streaming) return;
 
-    requestAnimationFrame(drawLoop);
-  }
-
-  /********************************************************************
-   * 4) IMU
-   ********************************************************************/
-  async function toggleIMU(){
-    if (imuEnabled){
-      imuEnabled = false;
-      imuGateEl.textContent = "IMU off";
-      imuGateEl.className = "warn";
-      window.removeEventListener("deviceorientation", onOrientation);
-      cap2Btn.disabled = true;
-      return;
-    }
-
-    try{
-      if (typeof DeviceOrientationEvent !== "undefined" &&
-          typeof DeviceOrientationEvent.requestPermission === "function"){
-        const p = await DeviceOrientationEvent.requestPermission();
-        if (p !== "granted") throw new Error("Orientation denied");
+      if (!frozenDisplay){
+        rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
       }
 
-      imuEnabled = true;
-      imuGateEl.textContent = "IMU on (waiting for Capture 1)";
-      imuGateEl.className = "ok";
-      window.addEventListener("deviceorientation", onOrientation);
-    }catch(e){
-      imuEnabled = false;
-      imuGateEl.textContent = "IMU permission denied";
-      imuGateEl.className = "warn";
-      setOut("IMU permission denied.", true);
+      ctx.drawImage(rawCanvas, 0, 0, canvas.width, canvas.height);
+
+      if (roi.active || (roi.x0 !== roi.x1 && roi.y0 !== roi.y1)) {
+        const x = Math.min(roi.x0, roi.x1);
+        const y = Math.min(roi.y0, roi.y1);
+        const w = Math.abs(roi.x1 - roi.x0);
+        const h = Math.abs(roi.y1 - roi.y0);
+
+        ctx.save();
+        ctx.strokeStyle = "lime";
+        ctx.lineWidth = 4;
+        ctx.strokeRect(x, y, w, h);
+        ctx.restore();
+      }
+
+      if (lastOverlay){
+        ctx.save();
+        ctx.strokeStyle = "yellow";
+        ctx.lineWidth = 4;
+        ctx.strokeRect(lastOverlay.x, lastOverlay.y, lastOverlay.w, lastOverlay.h);
+        ctx.restore();
+      }
+
+      requestAnimationFrame(drawLoop);
     }
-  }
 
-  function angleDiffDeg(a,b){
-    let d=a-b;
-    while (d>180) d-=360;
-    while (d<-180) d+=360;
-    return d;
-  }
+    /********************************************************************
+     * IMU
+     ********************************************************************/
+    async function toggleIMU(){
+      if (imuEnabled){
+        imuEnabled = false;
+        window.removeEventListener("deviceorientation", onOrientation);
+        imuGateEl.textContent = "IMU off";
+        imuGateEl.className = "warn";
+        cap2Btn.disabled = true;
+        return;
+      }
 
-  function onOrientation(e){
-    imuNow.yaw = (e.alpha ?? 0);
-    imuNow.pitch = (e.beta ?? 0);
-    imuNow.roll = (e.gamma ?? 0);
+      try{
+        if (typeof DeviceOrientationEvent !== "undefined" &&
+            typeof DeviceOrientationEvent.requestPermission === "function"){
+          const p = await DeviceOrientationEvent.requestPermission();
+          if (p !== "granted") throw new Error("Orientation denied");
+        }
 
-    if (imuAtV1){
+        imuEnabled = true;
+        window.addEventListener("deviceorientation", onOrientation);
+        imuGateEl.textContent = "IMU on (waiting for Capture 1)";
+        imuGateEl.className = "ok";
+        setOut("IMU enabled.", false);
+
+      }catch(e){
+        imuEnabled = false;
+        imuGateEl.textContent = "IMU permission denied";
+        imuGateEl.className = "warn";
+        setOut("IMU permission denied.", true);
+      }
+    }
+
+    function angleDiffDeg(a, b){
+      let d = a - b;
+      while (d > 180) d -= 360;
+      while (d < -180) d += 360;
+      return d;
+    }
+
+    function onOrientation(e){
+      imuNow.yaw = (e.alpha ?? 0);
+      imuNow.pitch = (e.beta ?? 0);
+      imuNow.roll = (e.gamma ?? 0);
+
+      if (!imuAtV1) return;
+
       const dy = angleDiffDeg(imuNow.yaw, imuAtV1.yaw);
       const dp = angleDiffDeg(imuNow.pitch, imuAtV1.pitch);
       const dr = angleDiffDeg(imuNow.roll, imuAtV1.roll);
@@ -503,1141 +601,1182 @@
       dpitchEl.textContent = dp.toFixed(1);
       drollEl.textContent = dr.toFixed(1);
 
-      const ok = (Math.abs(dy)<ROT_THRESH_DEG.yaw &&
-                  Math.abs(dp)<ROT_THRESH_DEG.pitch &&
-                  Math.abs(dr)<ROT_THRESH_DEG.roll);
+      const ok = (
+        Math.abs(dy) < ROT_THRESH_DEG.yaw &&
+        Math.abs(dp) < ROT_THRESH_DEG.pitch &&
+        Math.abs(dr) < ROT_THRESH_DEG.roll
+      );
 
       if (stage === "v1"){
-        imuGateEl.textContent = ok ? "OK for Capture 2 ✅ (rotation small)" : "Move mostly sideways (reduce rotation)";
+        imuGateEl.textContent = ok
+          ? "OK for Capture 2 ✅ (rotation small)"
+          : "Move mostly sideways (reduce rotation)";
         imuGateEl.className = ok ? "ok" : "warn";
         cap2Btn.disabled = !ok;
       }
     }
-  }
 
-  /********************************************************************
-   * 5) Capture frames
-   ********************************************************************/
-  function grabGrayFrame(){
-    const src = cv.imread(rawCanvas);
-    const gray = new cv.Mat();
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    src.delete();
+    /********************************************************************
+     * CAPTURE
+     ********************************************************************/
+    function grabGrayFrame(){
+      const src = cv.imread(rawCanvas);
+      const gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      src.delete();
 
-    // Optional undistort
-    if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
-      const und = new cv.Mat();
-      cv.undistort(gray, und, Kcv, DISTcv);
-      gray.delete();
-      return und;
+      if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
+        const und = new cv.Mat();
+        cv.undistort(gray, und, Kcv, DISTcv);
+        gray.delete();
+        return und;
+      }
+
+      return gray;
     }
-    return gray;
-  }
 
-  function captureView1(){
-    if (!streaming) return;
+    function captureView1(){
+      if (!streaming) return;
 
-    cleanupFrames();
-    poseReady = false;
+      cleanupFrames();
+      poseReady = false;
+      R = null;
+      t = null;
 
-    gray1 = grabGrayFrame();
-    imuAtV1 = imuEnabled ? { ...imuNow } : null;
+      gray1 = grabGrayFrame();
+      imuAtV1 = imuEnabled ? { ...imuNow } : null;
 
-    dyawEl.textContent = "0";
-    dpitchEl.textContent = "0";
-    drollEl.textContent = "0";
+      dyawEl.textContent = "0";
+      dpitchEl.textContent = "0";
+      drollEl.textContent = "0";
 
-    cap2Btn.disabled = !imuEnabled;
-    setStage("v1");
-
-    clearLog();
-    logLine("=== CAPTURE 1 ===");
-    logLine(`undistort=${undToggle.checked}`);
-    logLine(`gray1=${gray1.cols}x${gray1.rows}`);
-    logLine(`baseline cm=${document.getElementById("baselineCm").value}`);
-
-    setOut("Captured View 1 ✅ Move sideways by baseline, keep rotation low, then Capture 2.", false);
-    imuGateEl.textContent = "Move sideways; wait for green gate";
-    imuGateEl.className = "warn";
-  }
-
-  function captureView2(){
-    if (!streaming || !gray1) return;
-
-    gray2 = grabGrayFrame();
-    frozenDisplay = freezeToggle.checked;
-
-    logLine("=== CAPTURE 2 ===");
-    logLine(`gray2=${gray2.cols}x${gray2.rows}`);
-
-    const res = computePose_Epipolar_JS();
-    if (!res.ok){
-      logLine("POSE FAIL: " + res.reason);
-      setOut("Pose failed: " + res.reason, true);
       setStage("v1");
-      cap2Btn.disabled = false;
-      return;
+      cap2Btn.disabled = !imuEnabled;
+
+      clearLog();
+      logLine("=== CAPTURE 1 ===");
+      logLine(`undistort=${undToggle.checked}`);
+      logLine(`gray1=${gray1.cols}x${gray1.rows}`);
+      logLine(`baseline cm=${document.getElementById("baselineCm").value}`);
+
+      imuGateEl.textContent = "Move sideways; wait for green gate";
+      imuGateEl.className = "warn";
+      setOut("Captured View 1 ✅ Move sideways by baseline, keep rotation low, then Capture 2.", false);
     }
 
-    R = res.R;
-    t = res.t_scaled;
+    function captureView2(){
+      if (!streaming || !gray1) return;
 
-    poseReady = true;
-    setStage("ready");
-    cap2Btn.disabled = true;
+      gray2 = grabGrayFrame();
+      frozenDisplay = freezeToggle.checked;
 
-    logLine(`POSE OK ✅ inliers=${res.inliers} / ${res.total}`);
-    setOut("Pose ready ✅ Drag ROI around objects to measure (repeat for multiple objects).", false);
-  }
+      logLine("=== CAPTURE 2 ===");
+      logLine(`gray2=${gray2.cols}x${gray2.rows}`);
 
-  /********************************************************************
-   * 6) Epipolar pose (pure JS)
-   * - corners + LK tracking from OpenCV.js
-   * - RANSAC + essential enforcement + pose from E in JS
-   ********************************************************************/
-  function computePose_Epipolar_JS(){
-    if (!gray1 || !gray2 || !Kinv) return { ok:false, reason:"Missing gray1/gray2/Kinv" };
-    if (typeof cv.goodFeaturesToTrack !== "function") return { ok:false, reason:"OpenCV missing goodFeaturesToTrack" };
-    if (typeof cv.calcOpticalFlowPyrLK !== "function") return { ok:false, reason:"OpenCV missing LK optical flow" };
+      const res = computePose_Epipolar_JS();
+      if (!res.ok){
+        logLine("POSE FAIL: " + res.reason);
+        setOut("Pose failed: " + res.reason, true);
+        setStage("v1");
+        cap2Btn.disabled = false;
+        return;
+      }
 
-    // 1) detect corners
-    const corners1 = new cv.Mat();
-    cv.goodFeaturesToTrack(gray1, corners1, 1500, 0.005, 8);
-    logLine(`corners1=${corners1.rows}`);
-    if (corners1.rows < 80){
+      R = res.R;
+      t = res.t_scaled;
+      poseReady = true;
+
+      setStage("ready");
+      cap2Btn.disabled = true;
+
+      logLine(`POSE OK ✅ inliers=${res.inliers} / ${res.total}`);
+      setOut("Pose ready ✅ Drag ROI around objects to measure.", false);
+    }
+
+    /********************************************************************
+     * POSE ESTIMATION
+     ********************************************************************/
+    function computePose_Epipolar_JS(){
+      if (!gray1 || !gray2 || !Kinv){
+        return { ok:false, reason:"Missing gray1/gray2/Kinv" };
+      }
+      if (typeof cv.goodFeaturesToTrack !== "function"){
+        return { ok:false, reason:"OpenCV missing goodFeaturesToTrack" };
+      }
+      if (typeof cv.calcOpticalFlowPyrLK !== "function"){
+        return { ok:false, reason:"OpenCV missing LK optical flow" };
+      }
+
+      const corners1 = new cv.Mat();
+      cv.goodFeaturesToTrack(gray1, corners1, 1500, 0.005, 8);
+
+      const nCorners = corners1.rows;
+      logLine(`corners1=${nCorners}`);
+
+      if (nCorners < 80){
+        corners1.delete();
+        return { ok:false, reason:`Not enough corners (${nCorners}). Add texture/lighting.` };
+      }
+
+      const corners2 = new cv.Mat();
+      const status = new cv.Mat();
+      const err = new cv.Mat();
+      const win = new cv.Size(31,31);
+      const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+
+      cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, win, 4, crit);
+
+      const x1n = [];
+      const x2n = [];
+
+      for (let i = 0; i < status.rows; i++){
+        if (!status.ucharPtr(i,0)[0]) continue;
+
+        const u1 = corners1.data32F[i*2];
+        const v1 = corners1.data32F[i*2 + 1];
+        const u2 = corners2.data32F[i*2];
+        const v2 = corners2.data32F[i*2 + 1];
+
+        if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
+
+        x1n.push(pixelToNorm(u1, v1));
+        x2n.push(pixelToNorm(u2, v2));
+      }
+
       corners1.delete();
-      return { ok:false, reason:`Not enough corners (${corners1.rows}). Add texture/lighting.` };
+      corners2.delete();
+      status.delete();
+      err.delete();
+
+      logLine(`tracked=${x1n.length}`);
+
+      if (x1n.length < 120){
+        return { ok:false, reason:`Too few tracked points (${x1n.length}). Less blur/rotation; more texture.` };
+      }
+
+      const ransac = estimateE_RANSAC(x1n, x2n);
+      if (!ransac.ok) return { ok:false, reason: ransac.reason };
+
+      const best = recoverPoseFromE(ransac.E, x1n, x2n, ransac.inliersIdx);
+      if (!best.ok) return { ok:false, reason: best.reason };
+
+      const baselineCm = parseFloat(document.getElementById("baselineCm").value);
+      if (!(isFinite(baselineCm) && baselineCm > 0)){
+        return { ok:false, reason:"Baseline must be > 0 cm" };
+      }
+
+      const baselineM = baselineCm / 100.0;
+      const tn = Math.hypot(best.t[0], best.t[1], best.t[2]);
+      const s = baselineM / Math.max(tn, 1e-12);
+      const t_scaled = [best.t[0]*s, best.t[1]*s, best.t[2]*s];
+
+      logLine(`E inliers=${ransac.inliersIdx.length}`);
+
+      return {
+        ok: true,
+        R: best.R,
+        t_scaled,
+        inliers: ransac.inliersIdx.length,
+        total: x1n.length
+      };
     }
 
-    // 2) track corners
-    const corners2 = new cv.Mat();
-    const status = new cv.Mat();
-    const err = new cv.Mat();
-    const win = new cv.Size(31,31);
-    const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+    /********************************************************************
+     * ROI MEASUREMENT
+     ********************************************************************/
+    function measureROI(rx, ry, rw, rh){
+      if (!poseReady || !gray1 || !gray2 || !R || !t){
+        return { ok:false, msg:"Pose not ready." };
+      }
 
-    cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, win, 4, crit);
+      if (typeof cv.goodFeaturesToTrack !== "function") return { ok:false, msg:"Missing goodFeaturesToTrack." };
+      if (typeof cv.calcOpticalFlowPyrLK !== "function") return { ok:false, msg:"Missing LK flow." };
+      if (typeof cv.Canny !== "function") return { ok:false, msg:"Missing Canny." };
+      if (typeof cv.findContours !== "function") return { ok:false, msg:"Missing findContours." };
 
-    const x1n = [];
-    const x2n = [];
-    for (let i=0; i<status.rows; i++){
-      if (!status.ucharPtr(i,0)[0]) continue;
+      rx = Math.max(0, Math.min(Math.round(rx), gray1.cols - 1));
+      ry = Math.max(0, Math.min(Math.round(ry), gray1.rows - 1));
+      rw = Math.max(1, Math.min(Math.round(rw), gray1.cols - rx));
+      rh = Math.max(1, Math.min(Math.round(rh), gray1.rows - ry));
 
-      const u1 = corners1.data32F[i*2];
-      const v1 = corners1.data32F[i*2 + 1];
-      const u2 = corners2.data32F[i*2];
-      const v2 = corners2.data32F[i*2 + 1];
+      // First try corners within ROI
+      {
+        const mask = new cv.Mat(gray1.rows, gray1.cols, cv.CV_8U);
+        mask.setTo(new cv.Scalar(0));
 
-      if (u2<0 || u2>=gray2.cols || v2<0 || v2>=gray2.rows) continue;
+        const rect = new cv.Rect(rx, ry, rw, rh);
+        const maskROI = mask.roi(rect);
+        maskROI.setTo(new cv.Scalar(255));
+        maskROI.delete();
 
-      x1n.push(pixelToNorm(u1,v1));
-      x2n.push(pixelToNorm(u2,v2));
-    }
+        const p1 = new cv.Mat();
+        cv.goodFeaturesToTrack(gray1, p1, 600, 0.01, 6, mask);
+        mask.delete();
 
-    corners1.delete(); corners2.delete(); status.delete(); err.delete();
+        const nCorners = p1.rows;
 
-    logLine(`tracked=${x1n.length}`);
-    if (x1n.length < 120){
-      return { ok:false, reason:`Too few tracked points (${x1n.length}). Less blur/rotation; more texture.` };
-    }
+        if (nCorners >= 25){
+          const res = trackAndTriangulateFromPointMat(p1);
+          p1.delete();
 
-    // 3) RANSAC + 8-point => E
-    const ransac = estimateE_RANSAC(x1n, x2n);
-    if (!ransac.ok) return { ok:false, reason: ransac.reason };
+          if (res.ok){
+            res.measuredText += " (corners)";
+            return res;
+          }
 
-    const E = ransac.E;
-    const inliersIdx = ransac.inliersIdx;
-    logLine(`E inliers=${inliersIdx.length}`);
+          logLine(`[ROI] Corners path failed -> ${res.msg} | switching to contour`);
+        } else {
+          p1.delete();
+          logLine(`[ROI] Corners path: not enough corners (${nCorners}) | switching to contour`);
+        }
+      }
 
-    // 4) recover pose from E (decompose + cheirality)
-    const best = recoverPoseFromE(E, x1n, x2n, inliersIdx);
-    if (!best.ok) return { ok:false, reason: best.reason };
+      // Fallback: contour-based boundary points
+      let roi1 = null;
+      let roiUp = null;
+      let blur = null;
+      let edges = null;
+      let morph = null;
+      let contours = null;
+      let hierarchy = null;
 
-    // 5) scale translation by baseline
-    const baselineCm = parseFloat(document.getElementById("baselineCm").value);
-    if (!(isFinite(baselineCm) && baselineCm > 0)) return { ok:false, reason:"Baseline must be > 0 cm" };
-    const baselineM = baselineCm / 100.0;
+      try{
+        const rect = new cv.Rect(rx, ry, rw, rh);
+        roi1 = gray1.roi(rect);
 
-    const tn = Math.hypot(best.t[0], best.t[1], best.t[2]);
-    const s = baselineM / Math.max(tn, 1e-12);
-    const t_scaled = [best.t[0]*s, best.t[1]*s, best.t[2]*s];
+        const UPS = 2;
+        roiUp = new cv.Mat();
+        cv.resize(roi1, roiUp, new cv.Size(roi1.cols * UPS, roi1.rows * UPS), 0, 0, cv.INTER_LINEAR);
 
-    return { ok:true, R: best.R, t_scaled, inliers: inliersIdx.length, total: x1n.length };
-  }
+        blur = new cv.Mat();
+        cv.GaussianBlur(roiUp, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
 
-  /********************************************************************
-   * 7) NEW measureROI(): corners first, then contour sampling fallback
-   * ---------------------------------------------------------------
-   * This directly fixes: "not enough texture in ROI"
-   *
-   * What I’m doing:
-   *  A) Try corners inside ROI (fast)
-   *  B) If corners are too few OR triangulation fails:
-   *     ROI crop -> blur -> Canny -> morph close -> findContours
-   *     -> pick biggest contour -> sample boundary points
-   *     -> LK track those points -> triangulate -> PCA extents
-   ********************************************************************/
-  function measureROI(rx, ry, rw, rh){
-    if (!poseReady || !gray1 || !gray2 || !R || !t) return { ok:false, msg:"Pose not ready." };
+        edges = new cv.Mat();
+        cv.Canny(blur, edges, 40, 120);
 
-    // I need these OpenCV pieces for the fallback
-    if (typeof cv.goodFeaturesToTrack !== "function") return { ok:false, msg:"Missing goodFeaturesToTrack." };
-    if (typeof cv.calcOpticalFlowPyrLK !== "function") return { ok:false, msg:"Missing LK flow." };
-    if (typeof cv.Canny !== "function") return { ok:false, msg:"Missing Canny." };
-    if (typeof cv.findContours !== "function") return { ok:false, msg:"Missing findContours." };
+        morph = new cv.Mat();
+        const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
+        cv.morphologyEx(edges, morph, cv.MORPH_CLOSE, kClose);
+        kClose.delete();
 
-    // ---- Clamp ROI to image bounds ----
-    rx = Math.max(0, Math.min(rx, gray1.cols-1));
-    ry = Math.max(0, Math.min(ry, gray1.rows-1));
-    rw = Math.max(1, Math.min(rw, gray1.cols - rx));
-    rh = Math.max(1, Math.min(rh, gray1.rows - ry));
+        const kDil = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
+        cv.dilate(morph, morph, kDil, new cv.Point(-1,-1), 1);
+        kDil.delete();
 
-    // =====================================================
-    // A) FAST PATH: corners inside ROI (your old approach)
-    // =====================================================
-    {
-      const mask = new cv.Mat(gray1.rows, gray1.cols, cv.CV_8U);
-      mask.setTo(new cv.Scalar(0));
-      const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
-      const maskROI = mask.roi(rect);
-      maskROI.setTo(new cv.Scalar(255));
-      maskROI.delete();
+        contours = new cv.MatVector();
+        hierarchy = new cv.Mat();
+        cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
 
-      const p1 = new cv.Mat();
-      cv.goodFeaturesToTrack(gray1, p1, 600, 0.01, 6, mask);
-      mask.delete();
+        logLine(`[ROI] Contour path: contours=${contours.size()}`);
 
-      const nCorners = p1.rows; // store BEFORE delete (I learned this the hard way)
-      if (nCorners >= 25) {
+        if (contours.size() === 0){
+          return { ok:false, msg:"Contour path: no contours found. Tighten ROI and increase contrast." };
+        }
+
+        let bestIdx = -1;
+        let bestPer = -1;
+
+        for (let i = 0; i < contours.size(); i++){
+          const cnt = contours.get(i);
+          const per = cv.arcLength(cnt, true);
+          cnt.delete();
+
+          if (per > bestPer){
+            bestPer = per;
+            bestIdx = i;
+          }
+        }
+
+        if (bestIdx < 0 || bestPer < 120){
+          return { ok:false, msg:"Contour path: contour too small. Use bigger ROI / higher resolution." };
+        }
+
+        contours.delete();
+        hierarchy.delete();
+
+        contours = new cv.MatVector();
+        hierarchy = new cv.Mat();
+        cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+
+        const bestCnt = contours.get(bestIdx);
+        const wantN = 120;
+        const minSpacing = 2;
+
+        const ptsUp = sampleContourPointsEven(bestCnt, wantN, minSpacing);
+        bestCnt.delete();
+
+        logLine(`[ROI] Contour path: bestPer=${bestPer.toFixed(1)} ptsSampled=${ptsUp.length}`);
+
+        if (ptsUp.length < 30){
+          return { ok:false, msg:`Contour path: too few boundary pts (${ptsUp.length}). Increase ROI or resolution.` };
+        }
+
+        const p1 = new cv.Mat(ptsUp.length, 1, cv.CV_32FC2);
+        for (let i = 0; i < ptsUp.length; i++){
+          const u = rx + (ptsUp[i].x / UPS);
+          const v = ry + (ptsUp[i].y / UPS);
+          p1.data32F[i*2] = u;
+          p1.data32F[i*2 + 1] = v;
+        }
+
         const res = trackAndTriangulateFromPointMat(p1);
         p1.delete();
 
-        if (res.ok) {
-          res.measuredText += " (corners)";
-          return res;
+        if (!res.ok) return res;
+
+        res.measuredText += " (contour)";
+        return res;
+
+      } finally {
+        if (roi1) roi1.delete();
+        if (roiUp) roiUp.delete();
+        if (blur) blur.delete();
+        if (edges) edges.delete();
+        if (morph) morph.delete();
+        if (contours) contours.delete();
+        if (hierarchy) hierarchy.delete();
+      }
+    }
+
+    function trackAndTriangulateFromPointMat(p1){
+      const p2 = new cv.Mat();
+      const status = new cv.Mat();
+      const err = new cv.Mat();
+
+      const win = new cv.Size(31,31);
+      const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+
+      cv.calcOpticalFlowPyrLK(gray1, gray2, p1, p2, status, err, win, 4, crit);
+
+      const x1 = [];
+      const x2 = [];
+
+      for (let i = 0; i < status.rows; i++){
+        if (!status.ucharPtr(i,0)[0]) continue;
+
+        const u1 = p1.data32F[i*2];
+        const v1 = p1.data32F[i*2 + 1];
+        const u2 = p2.data32F[i*2];
+        const v2 = p2.data32F[i*2 + 1];
+
+        if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
+
+        x1.push(pixelToNorm(u1, v1));
+        x2.push(pixelToNorm(u2, v2));
+      }
+
+      p2.delete();
+      status.delete();
+      err.delete();
+
+      if (x1.length < 25){
+        return { ok:false, msg:`Tracking failed: kept only ${x1.length} tracked points.` };
+      }
+
+      const pts3 = [];
+      for (let i = 0; i < x1.length; i++){
+        const X = triangulateDLT_smallestEigen(R, t, x1[i], x2[i]);
+        if (!X) continue;
+        if (!isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])) continue;
+        if (X[2] <= 0) continue;
+        if (X[2] > 10) continue;
+        pts3.push(X);
+      }
+
+      if (pts3.length < 15){
+        return { ok:false, msg:`Triangulation unstable: only ${pts3.length} 3D points survived.` };
+      }
+
+      const ext = computeExtentsPCA_covEigen(pts3);
+      if (!ext) return { ok:false, msg:"Extent PCA failed." };
+
+      const e1 = ext.e1 * 1000;
+      const e2 = ext.e2 * 1000;
+      const e3 = ext.e3 * 1000;
+
+      const r12 = e1 / Math.max(e2, 1e-9);
+      const r23 = e2 / Math.max(e3, 1e-9);
+
+      let measuredText = "";
+      let primaryMm = e1;
+
+      if (r12 < 1.2 && r23 < 1.2){
+        const D = (e1 + e2 + e3) / 3.0;
+        measuredText = `D≈${D.toFixed(1)} mm (ball-ish)`;
+        primaryMm = D;
+      } else if (r12 > 2.2){
+        measuredText = `Length≈${e1.toFixed(1)} mm (spoon-ish)`;
+        primaryMm = e1;
+      } else if (r12 < 1.15){
+        const side = 0.5 * (e1 + e2);
+        measuredText = `Side≈${side.toFixed(1)} mm (box-ish)`;
+        primaryMm = side;
+      } else {
+        measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
+        primaryMm = e1;
+      }
+
+      return { ok:true, primaryMm, measuredText, Npts: pts3.length };
+    }
+
+    function sampleContourPointsEven(cnt, N, minSpacing){
+      const out = [];
+      const data = cnt.data32S;
+      const nPts = data.length / 2;
+      if (nPts < 10) return out;
+
+      const step = Math.max(1, Math.floor(nPts / N));
+      let last = null;
+
+      for (let i = 0; i < nPts; i += step){
+        const x = data[2*i];
+        const y = data[2*i + 1];
+
+        if (last){
+          const dx = x - last.x;
+          const dy = y - last.y;
+          if (dx*dx + dy*dy < minSpacing*minSpacing) continue;
         }
 
-        // corners existed but tracking/triangulation failed (rare, but happens)
-        logLine(`[ROI] Corners path failed -> ${res.msg} | switching to contour`);
-      } else {
-        p1.delete();
-        logLine(`[ROI] Corners path: not enough corners (${nCorners}) | switching to contour`);
-      }
-    }
+        out.push({ x, y });
+        last = { x, y };
 
-  // ======================================
-  // B) ROBUST PATH: silhouette -> boundary points
-  // ======================================
-  let roi1 = null;
-  let roiUp = null;
-  let blur = null;
-  let edges = null;
-  let morph = null;
-  let contours = null;
-  let hierarchy = null;
-  
-  try {
-    const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
-    roi1 = gray1.roi(rect);
-  
-    // --- (1) Upsample ROI to get more boundary detail (helps at low res) ---
-    const UPS = 2; // 2x upsample
-    roiUp = new cv.Mat();
-    cv.resize(roi1, roiUp, new cv.Size(roi1.cols * UPS, roi1.rows * UPS), 0, 0, cv.INTER_LINEAR);
-  
-    // --- (2) Smooth then Canny ---
-    blur = new cv.Mat();
-    cv.GaussianBlur(roiUp, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
-  
-    edges = new cv.Mat();
-    // These thresholds usually work better on upsampled ROI
-    cv.Canny(blur, edges, 40, 120);
-  
-    // --- (3) Morphology to connect edges + thicken them ---
-    morph = new cv.Mat();
-    const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
-    cv.morphologyEx(edges, morph, cv.MORPH_CLOSE, kClose);
-    kClose.delete();
-  
-    const kDil = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
-    cv.dilate(morph, morph, kDil, new cv.Point(-1,-1), 1);
-    kDil.delete();
-  
-    // --- (4) Find contours on the thicker edges ---
-    contours = new cv.MatVector();
-    hierarchy = new cv.Mat();
-    cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
-  
-    logLine(`[ROI] Contour path: contours=${contours.size()}`);
-    if (contours.size() === 0) {
-      return { ok:false, msg:"Contour path: no contours found. Tighten ROI and increase contrast." };
-    }
-  
-    // --- (5) Pick best contour by perimeter (arcLength) ---
-    let bestIdx = -1;
-    let bestPer = -1;
-    for (let i=0; i<contours.size(); i++){
-      const cnt = contours.get(i);
-      const per = cv.arcLength(cnt, true);
-      cnt.delete();
-      if (per > bestPer) { bestPer = per; bestIdx = i; }
-    }
-  
-    if (bestIdx < 0 || bestPer < 120) { // 120 px perimeter cutoff (in UPS-scaled pixels)
-      return { ok:false, msg:"Contour path: contour too small. Use bigger ROI / higher resolution." };
-    }
-  
-    // Re-run findContours to safely re-grab best contour (MatVector refs are annoying in JS)
-    contours.delete(); hierarchy.delete();
-    contours = new cv.MatVector();
-    hierarchy = new cv.Mat();
-    cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
-  
-    const bestCnt = contours.get(bestIdx);
-  
-    // --- (6) Sample boundary points UNIFORMLY by arc-length ---
-    const wantN = 120;        // aim for 120 points
-    const minSpacing = 2;     // in UPS pixels
-    const ptsUp = sampleContourByArcLength(bestCnt, wantN, minSpacing);
-  
-    bestCnt.delete();
-  
-    logLine(`[ROI] Contour path: bestPer=${bestPer.toFixed(1)} ptsSampled=${ptsUp.length}`);
-  
-    if (ptsUp.length < 30) {
-      return { ok:false, msg:`Contour path: too few boundary pts (${ptsUp.length}). Increase ROI or resolution.` };
-    }
-  
-    // --- (7) Convert back to FULL image pixel coords ---
-    // ptsUp are in UPS-scaled ROI coords → divide by UPS, then add ROI offset
-    const p1 = new cv.Mat(ptsUp.length, 1, cv.CV_32FC2);
-    for (let i=0; i<ptsUp.length; i++){
-      const u = rx + (ptsUp[i].x / UPS);
-      const v = ry + (ptsUp[i].y / UPS);
-      p1.data32F[i*2]   = u;
-      p1.data32F[i*2+1] = v;
-    }
-  
-    const res = trackAndTriangulateFromPointMat(p1);
-    p1.delete();
-  
-    if (!res.ok) return res;
-  
-    res.measuredText += " (contour)";
-    return res;
-  
-  } finally {
-    if (roi1) roi1.delete();
-    if (roiUp) roiUp.delete();
-    if (blur) blur.delete();
-    if (edges) edges.delete();
-    if (morph) morph.delete();
-    if (contours) contours.delete();
-    if (hierarchy) hierarchy.delete();
-  }
-  /********************************************************************
-   * trackAndTriangulateFromPointMat(p1)
-   * Input:
-   *   p1: Nx1 CV_32FC2 points in VIEW1 (full image pixel coords)
-   * Output:
-   *   same shape of result your UI expects
-   ********************************************************************/
-  function trackAndTriangulateFromPointMat(p1){
-    const p2 = new cv.Mat();
-    const status = new cv.Mat();
-    const err = new cv.Mat();
-
-    const win = new cv.Size(31,31);
-    const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
-
-    cv.calcOpticalFlowPyrLK(gray1, gray2, p1, p2, status, err, win, 4, crit);
-
-    const x1 = [];
-    const x2 = [];
-
-    for (let i=0; i<status.rows; i++){
-      if (!status.ucharPtr(i,0)[0]) continue;
-
-      const u1 = p1.data32F[i*2];
-      const v1 = p1.data32F[i*2 + 1];
-      const u2 = p2.data32F[i*2];
-      const v2 = p2.data32F[i*2 + 1];
-
-      if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
-
-      x1.push(pixelToNorm(u1, v1));
-      x2.push(pixelToNorm(u2, v2));
-    }
-
-    p2.delete(); status.delete(); err.delete();
-
-    if (x1.length < 25) {
-      return { ok:false, msg:`Tracking failed: kept only ${x1.length} tracked points.` };
-    }
-
-    // Triangulate + filter garbage
-    const pts3 = [];
-    for (let i=0; i<x1.length; i++){
-      const X = triangulateDLT_smallestEigen(R, t, x1[i], x2[i]);
-      if (!X) continue;
-
-      if (!isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])) continue;
-      if (X[2] <= 0) continue;
-      if (X[2] > 10) continue;
-      pts3.push(X);
-    }
-
-    if (pts3.length < 15) {
-      return { ok:false, msg:`Triangulation unstable: only ${pts3.length} 3D points survived.` };
-    }
-
-    // PCA extents (pure JS covariance eigen)
-    const ext = computeExtentsPCA_covEigen(pts3);
-    if (!ext) return { ok:false, msg:"Extent PCA failed." };
-
-    // meters -> mm
-    const e1 = ext.e1 * 1000;
-    const e2 = ext.e2 * 1000;
-    const e3 = ext.e3 * 1000;
-
-    // simple auto decision for your assignment objects:
-    // ball => diameter
-    // spoon => length
-    // phone => L/W
-    // box => side (if L≈W)
-    const r12 = e1 / Math.max(e2, 1e-9);
-    const r23 = e2 / Math.max(e3, 1e-9);
-
-    let measuredText = "";
-    let primaryMm = e1;
-
-    if (r12 < 1.2 && r23 < 1.2) {
-      const D = (e1 + e2 + e3) / 3.0;
-      measuredText = `D≈${D.toFixed(1)} mm (ball-ish)`;
-      primaryMm = D;
-    } else if (r12 > 2.2) {
-      measuredText = `Length≈${e1.toFixed(1)} mm (spoon-ish)`;
-      primaryMm = e1;
-    } else if (r12 < 1.15) {
-      const side = 0.5*(e1+e2);
-      measuredText = `Side≈${side.toFixed(1)} mm (box-ish)`;
-      primaryMm = side;
-    } else {
-      measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
-      primaryMm = e1;
-    }
-
-    return { ok:true, primaryMm, measuredText, Npts: pts3.length };
-  }
-
-  /********************************************************************
-   * sampleContourPointsEven(cnt, N, minSpacing)
-   * - cnt is CHAIN_APPROX_NONE contour
-   * - returns array of {x,y} in ROI coordinates
-   ********************************************************************/
-  function sampleContourPointsEven(cnt, N, minSpacing){
-    const out = [];
-    const data = cnt.data32S;          // [x0,y0,x1,y1,...]
-    const nPts = data.length / 2;
-    if (nPts < 10) return out;
-
-    const step = Math.max(1, Math.floor(nPts / N));
-    let last = null;
-
-    for (let i=0; i<nPts; i+=step){
-      const x = data[2*i];
-      const y = data[2*i+1];
-
-      if (last){
-        const dx = x - last.x;
-        const dy = y - last.y;
-        if (dx*dx + dy*dy < minSpacing*minSpacing) continue;
+        if (out.length >= N) break;
       }
 
-      out.push({x,y});
-      last = {x,y};
-
-      if (out.length >= N) break;
-    }
-    return out;
-  }
-
-  /********************************************************************
-   * 8) ROI drag events
-   ********************************************************************/
-  canvas.addEventListener("mousedown", onDown);
-  canvas.addEventListener("mousemove", onMove);
-  canvas.addEventListener("mouseup", onUp);
-
-  canvas.addEventListener("touchstart", onDown, {passive:false});
-  canvas.addEventListener("touchmove", onMove, {passive:false});
-  canvas.addEventListener("touchend", onUp, {passive:false});
-
-  function canvasPointFromEvent(e){
-    const rect = canvas.getBoundingClientRect();
-    const t = e.touches ? e.touches[0] : null;
-    const cx = t ? t.clientX : e.clientX;
-    const cy = t ? t.clientY : e.clientY;
-    return {
-      x: (cx - rect.left) * (canvas.width / rect.width),
-      y: (cy - rect.top)  * (canvas.height / rect.height)
-    };
-  }
-
-  function onDown(e){
-    e.preventDefault();
-    const p = canvasPointFromEvent(e);
-    roi.active = true;
-    roi.x0 = roi.x1 = p.x;
-    roi.y0 = roi.y1 = p.y;
-  }
-  function onMove(e){
-    if (!roi.active) return;
-    e.preventDefault();
-    const p = canvasPointFromEvent(e);
-    roi.x1 = p.x; roi.y1 = p.y;
-  }
-  function onUp(e){
-    if (!roi.active) return;
-    e.preventDefault();
-    roi.active = false;
-
-    const x = Math.min(roi.x0, roi.x1);
-    const y = Math.min(roi.y0, roi.y1);
-    const w = Math.abs(roi.x1 - roi.x0);
-    const h = Math.abs(roi.y1 - roi.y0);
-    if (w<12 || h<12) return;
-
-    lastOverlay = { x,y,w,h };
-
-    if (!poseReady){
-      setOut("ROI drawn ✅ but pose not ready. Do Capture 1 + Capture 2 first.", true);
-      return;
+      return out;
     }
 
-    const res = measureROI(x,y,w,h);
-    if (!res.ok){
-      setOut(res.msg, true);
-      return;
+    /********************************************************************
+     * ROI EVENTS
+     ********************************************************************/
+    canvas.addEventListener("mousedown", onDown);
+    canvas.addEventListener("mousemove", onMove);
+    canvas.addEventListener("mouseup", onUp);
+
+    canvas.addEventListener("touchstart", onDown, { passive:false });
+    canvas.addEventListener("touchmove", onMove, { passive:false });
+    canvas.addEventListener("touchend", onUp, { passive:false });
+
+    function canvasPointFromEvent(e){
+      const rect = canvas.getBoundingClientRect();
+      const t = e.touches ? e.touches[0] : null;
+      const cx = t ? t.clientX : e.clientX;
+      const cy = t ? t.clientY : e.clientY;
+
+      return {
+        x: (cx - rect.left) * (canvas.width / rect.width),
+        y: (cy - rect.top) * (canvas.height / rect.height)
+      };
     }
 
-    setOut(`FINAL: ${res.measuredText}`, false);
-    logResult(res);
-  }
+    function onDown(e){
+      e.preventDefault();
+      const p = canvasPointFromEvent(e);
+      roi.active = true;
+      roi.x0 = roi.x1 = p.x;
+      roi.y0 = roi.y1 = p.y;
+    }
 
-  /********************************************************************
-   * 9) Results table
-   ********************************************************************/
-  function logResult(res){
-    const nameIn = (document.getElementById("objName").value || "").trim();
-    const name = nameIn.length ? nameIn : `Object ${results.length + 1}`;
+    function onMove(e){
+      if (!roi.active) return;
+      e.preventDefault();
+      const p = canvasPointFromEvent(e);
+      roi.x1 = p.x;
+      roi.y1 = p.y;
+    }
 
-    const gtVal = parseFloat(document.getElementById("gtMm").value);
-    const gtMm = (isFinite(gtVal) && gtVal > 0) ? gtVal : null;
+    function onUp(e){
+      if (!roi.active) return;
+      e.preventDefault();
 
-    let errPct = null;
-    if (gtMm != null) errPct = Math.abs(res.primaryMm - gtMm) / gtMm * 100.0;
+      roi.active = false;
 
-    results.push({ name, measuredText: res.measuredText, gtMm, errPct, npts: res.Npts });
+      const x = Math.min(roi.x0, roi.x1);
+      const y = Math.min(roi.y0, roi.y1);
+      const w = Math.abs(roi.x1 - roi.x0);
+      const h = Math.abs(roi.y1 - roi.y0);
+
+      if (w < 12 || h < 12) return;
+
+      lastOverlay = { x, y, w, h };
+
+      if (!poseReady){
+        setOut("ROI drawn ✅ but pose not ready. Do Capture 1 + Capture 2 first.", true);
+        return;
+      }
+
+      const res = measureROI(x, y, w, h);
+      if (!res.ok){
+        setOut(res.msg, true);
+        return;
+      }
+
+      setOut(`FINAL: ${res.measuredText}`, false);
+      logResult(res);
+    }
+
+    /********************************************************************
+     * RESULTS
+     ********************************************************************/
+    function logResult(res){
+      const nameIn = (document.getElementById("objName").value || "").trim();
+      const name = nameIn.length ? nameIn : `Object ${results.length + 1}`;
+
+      const gtVal = parseFloat(document.getElementById("gtMm").value);
+      const gtMm = (isFinite(gtVal) && gtVal > 0) ? gtVal : null;
+
+      let errPct = null;
+      if (gtMm != null){
+        errPct = Math.abs(res.primaryMm - gtMm) / gtMm * 100.0;
+      }
+
+      results.push({
+        name,
+        measuredText: res.measuredText,
+        gtMm,
+        errPct,
+        npts: res.Npts
+      });
+
+      updateResCount();
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${results.length}</td>
+        <td>${escapeHtml(name)}</td>
+        <td>${escapeHtml(res.measuredText)}</td>
+        <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
+        <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
+        <td>${res.Npts}</td>
+      `;
+      resultsBody.appendChild(tr);
+    }
+
+    function clearResults(){
+      results = [];
+      resultsBody.innerHTML = "";
+      updateResCount();
+      setOut("Results cleared.", false);
+    }
+
+    /********************************************************************
+     * RESET / CLEANUP
+     ********************************************************************/
+    function cleanupFrames(){
+      if (gray1){ gray1.delete(); gray1 = null; }
+      if (gray2){ gray2.delete(); gray2 = null; }
+      frozenDisplay = false;
+    }
+
+    function resetAll(){
+      cleanupFrames();
+
+      poseReady = false;
+      R = null;
+      t = null;
+      imuAtV1 = null;
+      lastOverlay = null;
+
+      roi.active = false;
+      roi.x0 = roi.y0 = roi.x1 = roi.y1 = 0;
+
+      results = [];
+      resultsBody.innerHTML = "";
+      updateResCount();
+
+      cap2Btn.disabled = true;
+      setStage(streaming ? "live" : "idle");
+      setOut("Reset ✅ Capture 1 → move baseline → Capture 2 → drag ROI.", false);
+
+      clearLog();
+      logLine("=== RESET ===");
+    }
+
     updateResCount();
 
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${results.length}</td>
-      <td>${escapeHtml(name)}</td>
-      <td>${escapeHtml(res.measuredText)}</td>
-      <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
-      <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
-      <td>${res.Npts}</td>
-    `;
-    resultsBody.appendChild(tr);
-  }
+    /********************************************************************
+     * INTRINSICS
+     ********************************************************************/
+    function buildScaledIntrinsics(W, H){
+      const sx = W / CALIB.calW;
+      const sy = H / CALIB.calH;
 
-  function clearResults(){
-    results = [];
-    resultsBody.innerHTML = "";
-    updateResCount();
-    setOut("Results cleared.", false);
-  }
+      const fx = CALIB.fx * sx;
+      const fy = CALIB.fy * sy;
+      const cx = CALIB.cx * sx;
+      const cy = CALIB.cy * sy;
 
-  function escapeHtml(s){
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
+      K = [
+        [fx, 0, cx],
+        [0, fy, cy],
+        [0, 0, 1]
+      ];
 
-  /********************************************************************
-   * 10) Reset / cleanup
-   ********************************************************************/
-  function cleanupFrames(){
-    if (gray1) { gray1.delete(); gray1 = null; }
-    if (gray2) { gray2.delete(); gray2 = null; }
-    frozenDisplay = false;
-  }
+      Kinv = inv3(K);
 
-  function resetAll(){
-    cleanupFrames();
-    poseReady = false;
-    R = null; t = null;
+      if (Kcv) Kcv.delete();
+      if (DISTcv) DISTcv.delete();
 
-    results = [];
-    resultsBody.innerHTML = "";
-    updateResCount();
-
-    roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
-    lastOverlay = null;
-    imuAtV1 = null;
-
-    cap2Btn.disabled = true;
-    setStage(streaming ? "live" : "idle");
-    setOut("Reset ✅ Capture 1 → move baseline → Capture 2 → drag ROI.", false);
-
-    clearLog();
-    logLine("=== RESET ===");
-  }
-
-  updateResCount();
-
-  /********************************************************************
-   * 11) Intrinsics helpers
-   ********************************************************************/
-  function buildScaledIntrinsics(W,H){
-    const sx = W / CALIB.calW;
-    const sy = H / CALIB.calH;
-
-    const fx = CALIB.fx * sx;
-    const fy = CALIB.fy * sy;
-    const cx = CALIB.cx * sx;
-    const cy = CALIB.cy * sy;
-
-    K = [
-      [fx, 0,  cx],
-      [0,  fy, cy],
-      [0,  0,  1 ]
-    ];
-    Kinv = inv3(K);
-
-    // cv mats for undistort
-    if (Kcv) Kcv.delete();
-    if (DISTcv) DISTcv.delete();
-    Kcv = cv.matFromArray(3,3,cv.CV_64F, [
-      fx,0,cx,
-      0,fy,cy,
-      0,0,1
-    ]);
-    DISTcv = cv.matFromArray(1,5,cv.CV_64F, CALIB.dist);
-  }
-
-  function pixelToNorm(u,v){
-    // x = K^{-1} [u,v,1]^T  (then normalize so z=1)
-    const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2];
-    const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2];
-    const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2];
-    return [x/z, y/z, 1.0];
-  }
-
-  /********************************************************************
-   * 12) RANSAC + 8-point (pure JS eigen solve)
-   ********************************************************************/
-  function estimateE_RANSAC(x1, x2){
-    const N = x1.length;
-    if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
-
-    const ITER = 1500;
-    const TH = 1e-4; // Sampson threshold (normalized coords)
-    let bestInliers = [];
-    let bestE = null;
-
-    const idx = [...Array(N).keys()];
-
-    for (let it=0; it<ITER; it++){
-      shuffleInPlace(idx);
-      const s = idx.slice(0,8);
-
-      let E = eightPointE_pureJS(x1, x2, s);
-      if (!E) continue;
-
-      E = enforceEssential_3x3(E);
-
-      const inl = [];
-      for (let i=0;i<N;i++){
-        const d = sampsonDistance(E, x1[i], x2[i]);
-        if (d < TH) inl.push(i);
-      }
-
-      if (inl.length > bestInliers.length){
-        bestInliers = inl;
-        bestE = E;
-      }
-    }
-
-    if (!bestE || bestInliers.length < 80){
-      return { ok:false, reason:`E RANSAC failed (best inliers=${bestInliers.length}). Increase baseline, reduce rotation/blur, add texture.` };
-    }
-
-    // refit using all inliers (more stable)
-    let Erefit = eightPointE_pureJS(x1, x2, bestInliers);
-    Erefit = enforceEssential_3x3(Erefit);
-
-    return { ok:true, E: Erefit, inliersIdx: bestInliers };
-  }
-
-  function eightPointE_pureJS(x1, x2, indices){
-    const m = indices.length;
-    if (m < 8) return null;
-
-    // Build A (m x 9)
-    const A = [];
-    for (let r=0; r<m; r++){
-      const i = indices[r];
-      const X1 = x1[i][0], Y1 = x1[i][1];
-      const X2 = x2[i][0], Y2 = x2[i][1];
-
-      A.push([
-        X2*X1, X2*Y1, X2,
-        Y2*X1, Y2*Y1, Y2,
-        X1,    Y1,    1
+      Kcv = cv.matFromArray(3, 3, cv.CV_64F, [
+        fx, 0, cx,
+        0, fy, cy,
+        0, 0, 1
       ]);
+
+      DISTcv = cv.matFromArray(1, 5, cv.CV_64F, CALIB.dist);
     }
 
-    // e is smallest eigenvector of (A^T A)
-    const AT = matT(A);
-    const ATA = matMul(AT, A); // 9x9 symmetric
-    const eig = jacobiEigenSym(ATA);
-    const k = argMin(eig.values);
-    const e = eig.vectors.map(row => row[k]); // column k
+    function pixelToNorm(u, v){
+      const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2];
+      const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2];
+      const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2];
+      return [x/z, y/z, 1.0];
+    }
 
-    // reshape to 3x3
-    return [
-      [e[0], e[1], e[2]],
-      [e[3], e[4], e[5]],
-      [e[6], e[7], e[8]]
-    ];
-  }
+    /********************************************************************
+     * ESSENTIAL MATRIX RANSAC
+     ********************************************************************/
+    function estimateE_RANSAC(x1, x2){
+      const N = x1.length;
+      if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
 
-  function enforceEssential_3x3(E){
-    // Essential constraint: singular values become (s,s,0)
-    const Et = transpose3(E);
-    const EtE = mul3(Et, E); // 3x3 symmetric
+      const ITER = 1500;
+      const TH = 1e-4;
+      let bestInliers = [];
+      let bestE = null;
 
-    const ev = jacobiEigenSym(EtE);
-    const vals = ev.values.slice();
-    const V = ev.vectors;
+      const idx = [...Array(N).keys()];
 
-    // sort eigenpairs by descending eigenvalue
-    const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
-    const lam = order.map(i=>Math.max(vals[i], 0));
-    const Vsorted = [
-      [V[0][order[0]], V[0][order[1]], V[0][order[2]]],
-      [V[1][order[0]], V[1][order[1]], V[1][order[2]]],
-      [V[2][order[0]], V[2][order[1]], V[2][order[2]]],
-    ];
+      for (let it = 0; it < ITER; it++){
+        shuffleInPlace(idx);
+        const s = idx.slice(0, 8);
 
-    const s1 = Math.sqrt(lam[0]);
-    const s2 = Math.sqrt(lam[1]);
-    const s = 0.5*(s1+s2);
+        let E = eightPointE_pureJS(x1, x2, s);
+        if (!E) continue;
 
-    const inv = [
-      1/Math.max(s1,1e-12),
-      1/Math.max(s2,1e-12),
-      0
-    ];
+        E = enforceEssential_3x3(E);
 
-    const EV = mul3(E, Vsorted);
-    let U = [
-      [EV[0][0]*inv[0], EV[0][1]*inv[1], EV[0][2]*inv[2]],
-      [EV[1][0]*inv[0], EV[1][1]*inv[1], EV[1][2]*inv[2]],
-      [EV[2][0]*inv[0], EV[2][1]*inv[1], EV[2][2]*inv[2]],
-    ];
+        const inl = [];
+        for (let i = 0; i < N; i++){
+          const d = sampsonDistance(E, x1[i], x2[i]);
+          if (d < TH) inl.push(i);
+        }
 
-    U = ortho3(U);
-
-    const S = [
-      [s,0,0],
-      [0,s,0],
-      [0,0,0]
-    ];
-    const US = mul3(U, S);
-    const Vt = transpose3(Vsorted);
-    return mul3(US, Vt);
-  }
-
-  function sampsonDistance(E, x1, x2){
-    const Ex1 = mulMatVec3(E, x1);
-    const Etx2 = mulMatVec3(transpose3(E), x2);
-    const x2tEx1 = dot3(x2, Ex1);
-    const denom = Ex1[0]*Ex1[0] + Ex1[1]*Ex1[1] + Etx2[0]*Etx2[0] + Etx2[1]*Etx2[1];
-    return (x2tEx1*x2tEx1) / Math.max(denom, 1e-12);
-  }
-
-  /********************************************************************
-   * 13) Recover pose from E (pure JS decomposition + cheirality)
-   ********************************************************************/
-  function recoverPoseFromE(E, x1, x2, inliersIdx){
-    const svd = svd3_from_EtE(E);
-    if (!svd) return { ok:false, reason:"SVD(ish) failed" };
-
-    const U = svd.U;
-    const V = svd.V;
-
-    const W = [
-      [0,-1,0],
-      [1, 0,0],
-      [0, 0,1]
-    ];
-
-    const R1 = mul3(mul3(U, W), transpose3(V));
-    const R2 = mul3(mul3(U, transpose3(W)), transpose3(V));
-
-    const tdir = [U[0][2], U[1][2], U[2][2]];
-    const tdirNeg = [-tdir[0], -tdir[1], -tdir[2]];
-
-    const cand = [
-      {R:R1, t:tdir},
-      {R:R1, t:tdirNeg},
-      {R:R2, t:tdir},
-      {R:R2, t:tdirNeg},
-    ];
-
-    let best = null;
-    let bestCount = -1;
-    const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
-
-    for (const c of cand){
-      let count = 0;
-      for (const idx of subset){
-        const X = triangulateDLT_smallestEigen(c.R, c.t, x1[idx], x2[idx]);
-        if (!X) continue;
-
-        const z1 = X[2];
-        const X2cam = add3(mulMatVec3(c.R, X), c.t);
-        const z2 = X2cam[2];
-
-        if (z1 > 0 && z2 > 0) count++;
+        if (inl.length > bestInliers.length){
+          bestInliers = inl;
+          bestE = E;
+        }
       }
-      if (count > bestCount){
-        bestCount = count;
-        best = c;
+
+      if (!bestE || bestInliers.length < 80){
+        return {
+          ok:false,
+          reason:`E RANSAC failed (best inliers=${bestInliers.length}). Increase baseline, reduce rotation/blur, add texture.`
+        };
       }
+
+      let Erefit = eightPointE_pureJS(x1, x2, bestInliers);
+      Erefit = enforceEssential_3x3(Erefit);
+
+      return { ok:true, E:Erefit, inliersIdx:bestInliers };
     }
 
-    if (!best || bestCount < 10){
-      return { ok:false, reason:`Cheirality failed (bestCount=${bestCount}). More baseline, less rotation.` };
+    function eightPointE_pureJS(x1, x2, indices){
+      const m = indices.length;
+      if (m < 8) return null;
+
+      const A = [];
+      for (let r = 0; r < m; r++){
+        const i = indices[r];
+        const X1 = x1[i][0], Y1 = x1[i][1];
+        const X2 = x2[i][0], Y2 = x2[i][1];
+
+        A.push([
+          X2*X1, X2*Y1, X2,
+          Y2*X1, Y2*Y1, Y2,
+          X1, Y1, 1
+        ]);
+      }
+
+      const AT = matT(A);
+      const ATA = matMul(AT, A);
+      const eig = jacobiEigenSym(ATA);
+      const k = argMin(eig.values);
+      const e = eig.vectors.map(row => row[k]);
+
+      return [
+        [e[0], e[1], e[2]],
+        [e[3], e[4], e[5]],
+        [e[6], e[7], e[8]]
+      ];
     }
 
-    return { ok:true, R: best.R, t: best.t };
-  }
+    function enforceEssential_3x3(E){
+      const Et = transpose3(E);
+      const EtE = mul3(Et, E);
 
-  function svd3_from_EtE(E){
-    const Et = transpose3(E);
-    const EtE = mul3(Et, E);
+      const ev = jacobiEigenSym(EtE);
+      const vals = ev.values.slice();
+      const V = ev.vectors;
 
-    const ev = jacobiEigenSym(EtE);
-    const vals = ev.values.slice();
-    const Vraw = ev.vectors;
+      const order = [0,1,2].sort((a,b) => vals[b] - vals[a]);
+      const lam = order.map(i => Math.max(vals[i], 0));
 
-    const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
-    const lam = order.map(i=>Math.max(vals[i], 0));
-    const V = [
-      [Vraw[0][order[0]], Vraw[0][order[1]], Vraw[0][order[2]]],
-      [Vraw[1][order[0]], Vraw[1][order[1]], Vraw[1][order[2]]],
-      [Vraw[2][order[0]], Vraw[2][order[1]], Vraw[2][order[2]]],
-    ];
+      const Vsorted = [
+        [V[0][order[0]], V[0][order[1]], V[0][order[2]]],
+        [V[1][order[0]], V[1][order[1]], V[1][order[2]]],
+        [V[2][order[0]], V[2][order[1]], V[2][order[2]]]
+      ];
 
-    const s = lam.map(x=>Math.sqrt(x));
+      const s1 = Math.sqrt(lam[0]);
+      const s2 = Math.sqrt(lam[1]);
+      const s = 0.5 * (s1 + s2);
 
-    const EV = mul3(E, V);
-    const inv0 = 1/Math.max(s[0],1e-12);
-    const inv1 = 1/Math.max(s[1],1e-12);
-    const inv2 = 1/Math.max(s[2],1e-12);
+      const inv = [
+        1 / Math.max(s1, 1e-12),
+        1 / Math.max(s2, 1e-12),
+        0
+      ];
 
-    let U = [
-      [EV[0][0]*inv0, EV[0][1]*inv1, EV[0][2]*inv2],
-      [EV[1][0]*inv0, EV[1][1]*inv1, EV[1][2]*inv2],
-      [EV[2][0]*inv0, EV[2][1]*inv1, EV[2][2]*inv2],
-    ];
+      const EV = mul3(E, Vsorted);
+      let U = [
+        [EV[0][0]*inv[0], EV[0][1]*inv[1], EV[0][2]*inv[2]],
+        [EV[1][0]*inv[0], EV[1][1]*inv[1], EV[1][2]*inv[2]],
+        [EV[2][0]*inv[0], EV[2][1]*inv[1], EV[2][2]*inv[2]]
+      ];
 
-    U = ortho3(U);
+      U = ortho3(U);
 
-    if (det3(U) < 0){
-      U[0][2] *= -1; U[1][2] *= -1; U[2][2] *= -1;
-    }
-    if (det3(V) < 0){
-      V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
-    }
+      const S = [
+        [s,0,0],
+        [0,s,0],
+        [0,0,0]
+      ];
 
-    return {U, V, s};
-  }
-
-  /********************************************************************
-   * 14) Triangulation (DLT) via smallest eigenvector of A^T A (4x4)
-   ********************************************************************/
-  function triangulateDLT_smallestEigen(R, t, x1, x2){
-    const x = x1[0], y = x1[1];
-    const xp = x2[0], yp = x2[1];
-
-    const r1 = R[0], r2 = R[1], r3 = R[2];
-
-    const A = [
-      [-1, 0,  x, 0],
-      [ 0,-1,  y, 0],
-      [xp*r3[0]-r1[0], xp*r3[1]-r1[1], xp*r3[2]-r1[2], xp*t[2]-t[0]],
-      [yp*r3[0]-r2[0], yp*r3[1]-r2[1], yp*r3[2]-r2[2], yp*t[2]-t[1]],
-    ];
-
-    const AT = matT(A);
-    const ATA = matMul(AT, A);
-    const ev = jacobiEigenSym(ATA);
-    const k = argMin(ev.values);
-    const vh = ev.vectors.map(row => row[k]);
-
-    if (Math.abs(vh[3]) < 1e-12) return null;
-    return [vh[0]/vh[3], vh[1]/vh[3], vh[2]/vh[3]];
-  }
-
-  /********************************************************************
-   * 15) PCA extents using covariance eigenvectors (3x3)
-   ********************************************************************/
-  function computeExtentsPCA_covEigen(pts3){
-    const N = pts3.length;
-    if (N < 5) return null;
-
-    let mx=0,my=0,mz=0;
-    for (const p of pts3){ mx+=p[0]; my+=p[1]; mz+=p[2]; }
-    mx/=N; my/=N; mz/=N;
-
-    let c00=0,c01=0,c02=0,c11=0,c12=0,c22=0;
-    for (const p of pts3){
-      const x=p[0]-mx, y=p[1]-my, z=p[2]-mz;
-      c00 += x*x; c01 += x*y; c02 += x*z;
-      c11 += y*y; c12 += y*z;
-      c22 += z*z;
-    }
-    c00/=N; c01/=N; c02/=N; c11/=N; c12/=N; c22/=N;
-
-    const C = [
-      [c00,c01,c02],
-      [c01,c11,c12],
-      [c02,c12,c22]
-    ];
-
-    const ev = jacobiEigenSym(C);
-    const order = [0,1,2].sort((a,b)=>ev.values[b]-ev.values[a]);
-    const V = [
-      [ev.vectors[0][order[0]], ev.vectors[0][order[1]], ev.vectors[0][order[2]]],
-      [ev.vectors[1][order[0]], ev.vectors[1][order[1]], ev.vectors[1][order[2]]],
-      [ev.vectors[2][order[0]], ev.vectors[2][order[1]], ev.vectors[2][order[2]]],
-    ];
-
-    let min0=1e9,max0=-1e9,min1=1e9,max1=-1e9,min2=1e9,max2=-1e9;
-    for (const p of pts3){
-      const x=p[0]-mx, y=p[1]-my, z=p[2]-mz;
-      const a0 = V[0][0]*x + V[1][0]*y + V[2][0]*z;
-      const a1 = V[0][1]*x + V[1][1]*y + V[2][1]*z;
-      const a2 = V[0][2]*x + V[1][2]*y + V[2][2]*z;
-      if (a0<min0) min0=a0; if (a0>max0) max0=a0;
-      if (a1<min1) min1=a1; if (a1>max1) max1=a1;
-      if (a2<min2) min2=a2; if (a2>max2) max2=a2;
+      return mul3(mul3(U, S), transpose3(Vsorted));
     }
 
-    const e0=max0-min0, e1=max1-min1, e2=max2-min2;
-    const arr = [e0,e1,e2].sort((a,b)=>b-a);
-    return { e1:arr[0], e2:arr[1], e3:arr[2] };
-  }
+    function sampsonDistance(E, x1, x2){
+      const Ex1 = mulMatVec3(E, x1);
+      const Etx2 = mulMatVec3(transpose3(E), x2);
+      const x2tEx1 = dot3(x2, Ex1);
+      const denom = Ex1[0]*Ex1[0] + Ex1[1]*Ex1[1] + Etx2[0]*Etx2[0] + Etx2[1]*Etx2[1];
+      return (x2tEx1*x2tEx1) / Math.max(denom, 1e-12);
+    }
 
-  /********************************************************************
-   * 16) PURE JS NUMERICAL TOOLS (eigen + matrices)
-   ********************************************************************/
-  function jacobiEigenSym(A){
-    const n = A.length;
-    const M = Array.from({length:n}, (_,i)=>A[i].slice());
-    const V = Array.from({length:n}, (_,i)=>Array.from({length:n}, (_,j)=> (i===j?1:0)));
+    /********************************************************************
+     * POSE RECOVERY
+     ********************************************************************/
+    function recoverPoseFromE(E, x1, x2, inliersIdx){
+      const svd = svd3_from_EtE(E);
+      if (!svd) return { ok:false, reason:"SVD(ish) failed" };
 
-    const MAX_IT = 60 * n * n;
+      const U = svd.U;
+      const V = svd.V;
 
-    for (let it=0; it<MAX_IT; it++){
-      let p=0,q=1;
-      let max = 0;
-      for (let i=0;i<n;i++){
-        for (let j=i+1;j<n;j++){
-          const val = Math.abs(M[i][j]);
-          if (val > max){
-            max = val; p=i; q=j;
+      const W = [
+        [0,-1,0],
+        [1,0,0],
+        [0,0,1]
+      ];
+
+      const R1 = mul3(mul3(U, W), transpose3(V));
+      const R2 = mul3(mul3(U, transpose3(W)), transpose3(V));
+
+      const tdir = [U[0][2], U[1][2], U[2][2]];
+      const tdirNeg = [-tdir[0], -tdir[1], -tdir[2]];
+
+      const cand = [
+        { R:R1, t:tdir },
+        { R:R1, t:tdirNeg },
+        { R:R2, t:tdir },
+        { R:R2, t:tdirNeg }
+      ];
+
+      let best = null;
+      let bestCount = -1;
+      const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
+
+      for (const c of cand){
+        let count = 0;
+
+        for (const idx of subset){
+          const X = triangulateDLT_smallestEigen(c.R, c.t, x1[idx], x2[idx]);
+          if (!X) continue;
+
+          const z1 = X[2];
+          const X2cam = add3(mulMatVec3(c.R, X), c.t);
+          const z2 = X2cam[2];
+
+          if (z1 > 0 && z2 > 0) count++;
+        }
+
+        if (count > bestCount){
+          bestCount = count;
+          best = c;
+        }
+      }
+
+      if (!best || bestCount < 10){
+        return { ok:false, reason:`Cheirality failed (bestCount=${bestCount}). More baseline, less rotation.` };
+      }
+
+      return { ok:true, R:best.R, t:best.t };
+    }
+
+    function svd3_from_EtE(E){
+      const EtE = mul3(transpose3(E), E);
+      const ev = jacobiEigenSym(EtE);
+      const vals = ev.values.slice();
+      const Vraw = ev.vectors;
+
+      const order = [0,1,2].sort((a,b) => vals[b] - vals[a]);
+      const lam = order.map(i => Math.max(vals[i], 0));
+
+      let V = [
+        [Vraw[0][order[0]], Vraw[0][order[1]], Vraw[0][order[2]]],
+        [Vraw[1][order[0]], Vraw[1][order[1]], Vraw[1][order[2]]],
+        [Vraw[2][order[0]], Vraw[2][order[1]], Vraw[2][order[2]]]
+      ];
+
+      const s = lam.map(x => Math.sqrt(x));
+      const EV = mul3(E, V);
+
+      const inv0 = 1 / Math.max(s[0], 1e-12);
+      const inv1 = 1 / Math.max(s[1], 1e-12);
+      const inv2 = 1 / Math.max(s[2], 1e-12);
+
+      let U = [
+        [EV[0][0]*inv0, EV[0][1]*inv1, EV[0][2]*inv2],
+        [EV[1][0]*inv0, EV[1][1]*inv1, EV[1][2]*inv2],
+        [EV[2][0]*inv0, EV[2][1]*inv1, EV[2][2]*inv2]
+      ];
+
+      U = ortho3(U);
+
+      if (det3(U) < 0){
+        U[0][2] *= -1; U[1][2] *= -1; U[2][2] *= -1;
+      }
+      if (det3(V) < 0){
+        V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
+      }
+
+      return { U, V, s };
+    }
+
+    /********************************************************************
+     * TRIANGULATION / EXTENTS
+     ********************************************************************/
+    function triangulateDLT_smallestEigen(R, t, x1, x2){
+      const x = x1[0], y = x1[1];
+      const xp = x2[0], yp = x2[1];
+
+      const r1 = R[0], r2 = R[1], r3 = R[2];
+
+      const A = [
+        [-1, 0, x, 0],
+        [0, -1, y, 0],
+        [xp*r3[0]-r1[0], xp*r3[1]-r1[1], xp*r3[2]-r1[2], xp*t[2]-t[0]],
+        [yp*r3[0]-r2[0], yp*r3[1]-r2[1], yp*r3[2]-r2[2], yp*t[2]-t[1]]
+      ];
+
+      const ATA = matMul(matT(A), A);
+      const ev = jacobiEigenSym(ATA);
+      const k = argMin(ev.values);
+      const vh = ev.vectors.map(row => row[k]);
+
+      if (Math.abs(vh[3]) < 1e-12) return null;
+      return [vh[0]/vh[3], vh[1]/vh[3], vh[2]/vh[3]];
+    }
+
+    function computeExtentsPCA_covEigen(pts3){
+      const N = pts3.length;
+      if (N < 5) return null;
+
+      let mx = 0, my = 0, mz = 0;
+      for (const p of pts3){
+        mx += p[0];
+        my += p[1];
+        mz += p[2];
+      }
+      mx /= N; my /= N; mz /= N;
+
+      let c00 = 0, c01 = 0, c02 = 0, c11 = 0, c12 = 0, c22 = 0;
+
+      for (const p of pts3){
+        const x = p[0] - mx;
+        const y = p[1] - my;
+        const z = p[2] - mz;
+        c00 += x*x; c01 += x*y; c02 += x*z;
+        c11 += y*y; c12 += y*z;
+        c22 += z*z;
+      }
+
+      c00 /= N; c01 /= N; c02 /= N;
+      c11 /= N; c12 /= N; c22 /= N;
+
+      const C = [
+        [c00,c01,c02],
+        [c01,c11,c12],
+        [c02,c12,c22]
+      ];
+
+      const ev = jacobiEigenSym(C);
+      const order = [0,1,2].sort((a,b) => ev.values[b] - ev.values[a]);
+
+      const V = [
+        [ev.vectors[0][order[0]], ev.vectors[0][order[1]], ev.vectors[0][order[2]]],
+        [ev.vectors[1][order[0]], ev.vectors[1][order[1]], ev.vectors[1][order[2]]],
+        [ev.vectors[2][order[0]], ev.vectors[2][order[1]], ev.vectors[2][order[2]]]
+      ];
+
+      let min0 = 1e9, max0 = -1e9;
+      let min1 = 1e9, max1 = -1e9;
+      let min2 = 1e9, max2 = -1e9;
+
+      for (const p of pts3){
+        const x = p[0] - mx;
+        const y = p[1] - my;
+        const z = p[2] - mz;
+
+        const a0 = V[0][0]*x + V[1][0]*y + V[2][0]*z;
+        const a1 = V[0][1]*x + V[1][1]*y + V[2][1]*z;
+        const a2 = V[0][2]*x + V[1][2]*y + V[2][2]*z;
+
+        if (a0 < min0) min0 = a0;
+        if (a0 > max0) max0 = a0;
+        if (a1 < min1) min1 = a1;
+        if (a1 > max1) max1 = a1;
+        if (a2 < min2) min2 = a2;
+        if (a2 > max2) max2 = a2;
+      }
+
+      const arr = [max0-min0, max1-min1, max2-min2].sort((a,b) => b-a);
+      return { e1:arr[0], e2:arr[1], e3:arr[2] };
+    }
+
+    /********************************************************************
+     * NUMERICAL HELPERS
+     ********************************************************************/
+    function jacobiEigenSym(A){
+      const n = A.length;
+      const M = Array.from({ length:n }, (_,i) => A[i].slice());
+      const V = Array.from({ length:n }, (_,i) =>
+        Array.from({ length:n }, (_,j) => i === j ? 1 : 0)
+      );
+
+      const MAX_IT = 60 * n * n;
+
+      for (let it = 0; it < MAX_IT; it++){
+        let p = 0, q = 1;
+        let max = 0;
+
+        for (let i = 0; i < n; i++){
+          for (let j = i + 1; j < n; j++){
+            const val = Math.abs(M[i][j]);
+            if (val > max){
+              max = val;
+              p = i;
+              q = j;
+            }
+          }
+        }
+
+        if (max < 1e-12) break;
+
+        const app = M[p][p];
+        const aqq = M[q][q];
+        const apq = M[p][q];
+
+        const phi = 0.5 * Math.atan2(2*apq, (aqq - app));
+        const c = Math.cos(phi);
+        const s = Math.sin(phi);
+
+        for (let k = 0; k < n; k++){
+          const mkp = M[k][p];
+          const mkq = M[k][q];
+          M[k][p] = c*mkp - s*mkq;
+          M[k][q] = s*mkp + c*mkq;
+        }
+
+        for (let k = 0; k < n; k++){
+          const mpk = M[p][k];
+          const mqk = M[q][k];
+          M[p][k] = c*mpk - s*mqk;
+          M[q][k] = s*mpk + c*mqk;
+        }
+
+        M[p][p] = c*c*app - 2*s*c*apq + s*s*aqq;
+        M[q][q] = s*s*app + 2*s*c*apq + c*c*aqq;
+        M[p][q] = 0;
+        M[q][p] = 0;
+
+        for (let k = 0; k < n; k++){
+          const vkp = V[k][p];
+          const vkq = V[k][q];
+          V[k][p] = c*vkp - s*vkq;
+          V[k][q] = s*vkp + c*vkq;
+        }
+      }
+
+      const values = Array.from({ length:n }, (_,i) => M[i][i]);
+
+      for (let j = 0; j < n; j++){
+        let nn = 0;
+        for (let i = 0; i < n; i++) nn += V[i][j] * V[i][j];
+        nn = Math.sqrt(Math.max(nn, 1e-30));
+        for (let i = 0; i < n; i++) V[i][j] /= nn;
+      }
+
+      return { values, vectors:V };
+    }
+
+    function argMin(arr){
+      let k = 0;
+      let best = arr[0];
+      for (let i = 1; i < arr.length; i++){
+        if (arr[i] < best){
+          best = arr[i];
+          k = i;
+        }
+      }
+      return k;
+    }
+
+    function matMul(A, B){
+      const m = A.length;
+      const n = A[0].length;
+      const p = B[0].length;
+      const C = Array.from({ length:m }, () => Array(p).fill(0));
+
+      for (let i = 0; i < m; i++){
+        for (let k = 0; k < n; k++){
+          const aik = A[i][k];
+          for (let j = 0; j < p; j++){
+            C[i][j] += aik * B[k][j];
           }
         }
       }
-      if (max < 1e-12) break;
+      return C;
+    }
 
-      const app = M[p][p];
-      const aqq = M[q][q];
-      const apq = M[p][q];
+    function matT(A){
+      const m = A.length;
+      const n = A[0].length;
+      const AT = Array.from({ length:n }, () => Array(m).fill(0));
 
-      const phi = 0.5 * Math.atan2(2*apq, (aqq - app));
-      const c = Math.cos(phi);
-      const s = Math.sin(phi);
-
-      for (let k=0;k<n;k++){
-        const mkp = M[k][p];
-        const mkq = M[k][q];
-        M[k][p] = c*mkp - s*mkq;
-        M[k][q] = s*mkp + c*mkq;
+      for (let i = 0; i < m; i++){
+        for (let j = 0; j < n; j++){
+          AT[j][i] = A[i][j];
+        }
       }
-      for (let k=0;k<n;k++){
-        const mpk = M[p][k];
-        const mqk = M[q][k];
-        M[p][k] = c*mpk - s*mqk;
-        M[q][k] = s*mpk + c*mqk;
-      }
+      return AT;
+    }
 
-      M[p][p] = c*c*app - 2*s*c*apq + s*s*aqq;
-      M[q][q] = s*s*app + 2*s*c*apq + c*c*aqq;
-      M[p][q] = 0;
-      M[q][p] = 0;
-
-      for (let k=0;k<n;k++){
-        const vkp = V[k][p];
-        const vkq = V[k][q];
-        V[k][p] = c*vkp - s*vkq;
-        V[k][q] = s*vkp + c*vkq;
+    function shuffleInPlace(a){
+      for (let i = a.length - 1; i > 0; i--){
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = a[i];
+        a[i] = a[j];
+        a[j] = temp;
       }
     }
 
-    const values = Array.from({length:n}, (_,i)=>M[i][i]);
+    function dot3(a,b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+    function add3(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+    function sub3(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+    function scale3(v,s){ return [v[0]*s, v[1]*s, v[2]*s]; }
 
-    for (let j=0;j<n;j++){
-      let nn=0;
-      for (let i=0;i<n;i++) nn += V[i][j]*V[i][j];
-      nn = Math.sqrt(Math.max(nn,1e-30));
-      for (let i=0;i<n;i++) V[i][j] /= nn;
+    function cross3(a,b){
+      return [
+        a[1]*b[2] - a[2]*b[1],
+        a[2]*b[0] - a[0]*b[2],
+        a[0]*b[1] - a[1]*b[0]
+      ];
     }
 
-    return { values, vectors: V };
-  }
-
-  function argMin(arr){
-    let k=0, best=arr[0];
-    for (let i=1;i<arr.length;i++){
-      if (arr[i] < best){ best=arr[i]; k=i; }
+    function normalize3(v){
+      const n = Math.sqrt(Math.max(dot3(v,v), 1e-30));
+      return [v[0]/n, v[1]/n, v[2]/n];
     }
-    return k;
-  }
 
-  function matMul(A, B) {
-    const m = A.length, n = A[0].length, p = B[0].length;
-    const C = Array.from({length:m}, () => Array(p).fill(0));
-    for (let i=0;i<m;i++){
-      for (let k=0;k<n;k++){
-        const aik = A[i][k];
-        for (let j=0;j<p;j++) C[i][j] += aik * B[k][j];
+    function mulMatVec3(M, v){
+      return [
+        M[0][0]*v[0] + M[0][1]*v[1] + M[0][2]*v[2],
+        M[1][0]*v[0] + M[1][1]*v[1] + M[1][2]*v[2],
+        M[2][0]*v[0] + M[2][1]*v[1] + M[2][2]*v[2]
+      ];
+    }
+
+    function transpose3(M){
+      return [
+        [M[0][0], M[1][0], M[2][0]],
+        [M[0][1], M[1][1], M[2][1]],
+        [M[0][2], M[1][2], M[2][2]]
+      ];
+    }
+
+    function mul3(A, B){
+      const C = [[0,0,0],[0,0,0],[0,0,0]];
+      for (let i = 0; i < 3; i++){
+        for (let j = 0; j < 3; j++){
+          C[i][j] = A[i][0]*B[0][j] + A[i][1]*B[1][j] + A[i][2]*B[2][j];
+        }
       }
+      return C;
     }
-    return C;
-  }
 
-  function matT(A) {
-    const m=A.length, n=A[0].length;
-    const AT = Array.from({length:n}, () => Array(m).fill(0));
-    for (let i=0;i<m;i++) for (let j=0;j<n;j++) AT[j][i]=A[i][j];
-    return AT;
-  }
-
-  function shuffleInPlace(a){
-    for (let i=a.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
-      const t=a[i]; a[i]=a[j]; a[j]=t;
+    function det3(M){
+      return (
+        M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1]) -
+        M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0]) +
+        M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0])
+      );
     }
-  }
 
-  function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
-  function add3(a,b){ return [a[0]+b[0],a[1]+b[1],a[2]+b[2]]; }
+    function inv3(M){
+      const d = det3(M);
+      if (Math.abs(d) < 1e-12) throw new Error("K is singular? inv3 failed");
 
-  function mulMatVec3(M,v){
-    return [
-      M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2],
-      M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2],
-      M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2],
-    ];
-  }
-
-  function transpose3(M){
-    return [
-      [M[0][0], M[1][0], M[2][0]],
-      [M[0][1], M[1][1], M[2][1]],
-      [M[0][2], M[1][2], M[2][2]],
-    ];
-  }
-
-  function mul3(A,B){
-    const C = [[0,0,0],[0,0,0],[0,0,0]];
-    for (let i=0;i<3;i++){
-      for (let j=0;j<3;j++){
-        C[i][j] = A[i][0]*B[0][j]+A[i][1]*B[1][j]+A[i][2]*B[2][j];
-      }
+      return [
+        [
+          (M[1][1]*M[2][2]-M[1][2]*M[2][1])/d,
+          (M[0][2]*M[2][1]-M[0][1]*M[2][2])/d,
+          (M[0][1]*M[1][2]-M[0][2]*M[1][1])/d
+        ],
+        [
+          (M[1][2]*M[2][0]-M[1][0]*M[2][2])/d,
+          (M[0][0]*M[2][2]-M[0][2]*M[2][0])/d,
+          (M[0][2]*M[1][0]-M[0][0]*M[1][2])/d
+        ],
+        [
+          (M[1][0]*M[2][1]-M[1][1]*M[2][0])/d,
+          (M[0][1]*M[2][0]-M[0][0]*M[2][1])/d,
+          (M[0][0]*M[1][1]-M[0][1]*M[1][0])/d
+        ]
+      ];
     }
-    return C;
-  }
 
-  function det3(M){
-    return (
-      M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1]) -
-      M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0]) +
-      M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0])
-    );
-  }
+    function ortho3(M){
+      let c0 = [M[0][0], M[1][0], M[2][0]];
+      let c1 = [M[0][1], M[1][1], M[2][1]];
+      let c2 = [M[0][2], M[1][2], M[2][2]];
 
-  function inv3(M){
-    const d = det3(M);
-    if (Math.abs(d) < 1e-12) throw new Error("K is singular? inv3 failed");
-    return [
-      [
-        (M[1][1]*M[2][2]-M[1][2]*M[2][1])/d,
-        (M[0][2]*M[2][1]-M[0][1]*M[2][2])/d,
-        (M[0][1]*M[1][2]-M[0][2]*M[1][1])/d,
-      ],
-      [
-        (M[1][2]*M[2][0]-M[1][0]*M[2][2])/d,
-        (M[0][0]*M[2][2]-M[0][2]*M[2][0])/d,
-        (M[0][2]*M[1][0]-M[0][0]*M[1][2])/d,
-      ],
-      [
-        (M[1][0]*M[2][1]-M[1][1]*M[2][0])/d,
-        (M[0][1]*M[2][0]-M[0][0]*M[2][1])/d,
-        (M[0][0]*M[1][1]-M[0][1]*M[1][0])/d,
-      ],
-    ];
-  }
+      c0 = normalize3(c0);
 
-  function ortho3(M){
-    let c0 = [M[0][0], M[1][0], M[2][0]];
-    let c1 = [M[0][1], M[1][1], M[2][1]];
-    let c2 = [M[0][2], M[1][2], M[2][2]];
+      c1 = sub3(c1, scale3(c0, dot3(c0, c1)));
+      c1 = normalize3(c1);
 
-    c0 = normalize3(c0);
+      c2 = cross3(c0, c1);
+      c2 = normalize3(c2);
 
-    c1 = sub3(c1, scale3(c0, dot3(c0,c1)));
-    c1 = normalize3(c1);
-
-    c2 = cross3(c0,c1);
-    c2 = normalize3(c2);
-
-    return [
-      [c0[0], c1[0], c2[0]],
-      [c0[1], c1[1], c2[1]],
-      [c0[2], c1[2], c2[2]],
-    ];
-  }
-
-  function normalize3(v){
-    const n = Math.sqrt(Math.max(dot3(v,v), 1e-30));
-    return [v[0]/n, v[1]/n, v[2]/n];
-  }
-  function scale3(v,s){ return [v[0]*s,v[1]*s,v[2]*s]; }
-  function sub3(a,b){ return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]; }
-  function cross3(a,b){
-    return [
-      a[1]*b[2]-a[2]*b[1],
-      a[2]*b[0]-a[0]*b[2],
-      a[0]*b[1]-a[1]*b[0],
-    ];
-  }
+      return [
+        [c0[0], c1[0], c2[0]],
+        [c0[1], c1[1], c2[1]],
+        [c0[2], c1[2], c2[2]]
+      ];
+    }
   </script>
 </body>
 </html>
