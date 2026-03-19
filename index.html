@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>iPhone Epipolar Measure (OpenCV.js + IMU)</title>
+  <title>iPhone Epipolar Measure (OpenCV.js + IMU) — No Reference</title>
 
   <style>
     :root{
@@ -29,7 +29,6 @@
       background:#000;
     }
 
-    /* Sticky toolbar so it feels like an app */
     .toolbar{
       position: sticky;
       top: 0;
@@ -128,7 +127,6 @@
     }
     th{ position: sticky; top:0; background:#fff; }
 
-    /* Debug box */
     pre{
       margin: 8px 0 0;
       white-space: pre-wrap;
@@ -143,12 +141,9 @@
 <body>
   <h2>Epipolar Measurement (2 views + IMU) — no reference object</h2>
 
-  <!-- I keep the <video> hidden.
-       I draw frames into a hidden rawCanvas for OpenCV, and into the visible canvas for display. -->
   <video id="video" autoplay playsinline style="display:none;"></video>
   <canvas id="canvas"></canvas>
 
-  <!-- Toolbar: everything I need during demo -->
   <div class="toolbar">
     <button id="startBtn" onclick="startCamera()" disabled>Start</button>
     <button id="imuBtn" onclick="toggleIMU()" disabled>IMU</button>
@@ -156,7 +151,7 @@
     <button id="cap2Btn" class="primary" onclick="captureView2()" disabled>Capture 2</button>
 
     <div class="pill">
-      <span>Preset baseline (cm) — I physically move phone this distance</span>
+      <span>Baseline (cm) — I physically move phone this distance</span>
       <input id="baselineCm" type="number" value="20" step="1" style="width:110px;">
     </div>
 
@@ -192,30 +187,28 @@
 
     <details open>
       <summary>
-        <span>Debug log </span>
+        <span>Debug log</span>
         <span class="small">tap to collapse</span>
       </summary>
       <div class="row">
         <button onclick="clearLog()">Clear log</button>
-        <span class="small">Tip: after Capture 2 fails, scroll here and read the exact “reason”.</span>
+        <span class="small">If Capture 2 fails, scroll here for the exact reason.</span>
       </div>
       <pre id="log"></pre>
     </details>
 
     <details open>
       <summary>
-        <span>How I use this during demo (my steps)</span>
+        <span>How I use this (demo steps)</span>
         <span class="small">tap to collapse</span>
       </summary>
-
       <ol class="small" style="margin-top:8px;">
         <li>Start</li>
         <li>IMU → allow permission</li>
-        <li>Capture 1 (I keep the phone still)</li>
-        <li>I move phone sideways by the baseline (e.g., 10–20 cm). I try not to tilt/rotate.</li>
-        <li>When IMU gate turns green, I press Capture 2</li>
-        <li>Now I measure: I drag a rectangle around an object (ROI) and it measures.</li>
-        <li>I can drag multiple objects without recapturing (extra credit b).</li>
+        <li>Capture 1 (hold still)</li>
+        <li>Move phone sideways by baseline (10–25 cm) with minimal rotation</li>
+        <li>When gate is green, Capture 2</li>
+        <li>Drag ROI around object to measure (repeat for multiple objects)</li>
       </ol>
     </details>
 
@@ -224,7 +217,6 @@
         <span>Results</span>
         <span class="small" id="resCount">0</span>
       </summary>
-
       <div class="row">
         <input id="objName" type="text" placeholder="object name (optional)" style="width: 200px;">
         <input id="gtMm" type="number" step="0.1" placeholder="GT mm (optional)" style="width: 140px;">
@@ -244,113 +236,54 @@
     </details>
   </div>
 
-  <script>
-    // I compute an absolute base URL so GitHub Pages subfolders never break it.
-    // Example base becomes: https://USERNAME.github.io/iphone-opencv-measurement/assets/opencv/
-    const OPENCV_BASE = new URL("assets/opencv/", window.location.href).toString();
-  
-    var Module = {
-      locateFile: function(path) {
-        return OPENCV_BASE + path;
-      }
-    };
-  </script>
-  
-  <script src="assets/opencv/opencv.js"></script>
-
-  <script>
-    // Catch silent failures during OpenCV startup
-    window.onerror = (m, s, l, c, e) => {
-      const el = document.getElementById("log");
-      if (el) el.textContent += "[window.onerror] " + m + "\n";
-    };
-  
-    // Force OpenCV initialization for MODULARIZE builds
-    async function forceInitOpenCV(){
-      try {
-        // Case: cv is a factory function (MODULARIZE)
-        if (typeof window.cv === "function") {
-          const realCv = await window.cv();   // <-- IMPORTANT
-          window.cv = realCv;
-        }
-        // Case: cv is a Promise
-        else if (window.cv && typeof window.cv.then === "function") {
-          window.cv = await window.cv;
-        }
-        // Case: classic build uses onRuntimeInitialized (we just wait)
-        else if (window.cv && typeof window.cv.onRuntimeInitialized !== "undefined") {
-          // handled by your waitForCv path
-          return;
-        }
-  
-        // If we get here, cv should now be the real object
-        const el = document.getElementById("log");
-        if (el) {
-          el.textContent += "[boot] forced init complete\n";
-          el.textContent += "LK: " + typeof cv.calcOpticalFlowPyrLK + "\n";
-          el.textContent += "F: " + typeof cv.findFundamentalMat + "\n";
-          el.textContent += "recoverPose: " + typeof cv.recoverPose + "\n";
-          el.textContent += "triangulate: " + typeof cv.triangulatePoints + "\n";
-        }
-  
-        // flip your UI ready state
-        window.__opencv_ready__ = true;
-        cvReady = true;
-        document.getElementById("cvStatus").textContent = "ready ✅";
-        document.getElementById("cvStatus").className = "ok";
-        document.getElementById("startBtn").disabled = false;
-  
-      } catch (e) {
-        const el = document.getElementById("log");
-        if (el) el.textContent += "[boot] forceInitOpenCV failed: " + e + "\n";
-      }
-    }
-  
-    // Run it a moment after script load
-    setTimeout(forceInitOpenCV, 200);
-  </script>
-  
-  <script>
-    // If OpenCV isn't ready after 6 seconds, something is blocking initialization.
-    setTimeout(() => {
-      const msg = (typeof window.cv === "undefined")
-        ? "cv is undefined → opencv.js did not execute"
-        : "cv exists → waiting for onRuntimeInitialized / Promise resolve";
-      document.getElementById("log").textContent += "[boot] " + msg + "\n";
-    }, 6000);
-  </script>
+  <!-- IMPORTANT:
+       We use OpenCV.js from CDN ONLY for:
+         - goodFeaturesToTrack
+         - calcOpticalFlowPyrLK
+         - SVDecomp (SVD)
+         - basic matrix storage (cv.Mat)
+       We implement epipolar geometry ourselves in JS:
+         - RANSAC + normalized 8-point to estimate Essential matrix E
+         - Decompose E -> R, t
+         - Triangulate using DLT
+  -->
+  <script src="https://docs.opencv.org/4.13.0/opencv.js"></script>
 
   <script>
   /********************************************************************
-   * EPIPOLAR TOOL (in my own words)
+   * HARD DEBUG (I never want silent failures)
+   ********************************************************************/
+  const logEl = document.getElementById("log");
+  function logLine(s){ console.log(s); logEl.textContent += s + "\n"; }
+  function clearLog(){ logEl.textContent = ""; }
+
+  window.addEventListener("error", (e) => {
+    logLine(`[window.onerror] ${e.message} @ ${e.filename}:${e.lineno}`);
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    logLine(`[promise.reject] ${e.reason}`);
+  });
+
+  /********************************************************************
+   * PROJECT MODEL (my own words)
    * ---------------------------------------------------------------
-   * - One iPhone camera acts like a stereo pair by taking TWO frames:
-   *     View1 then View2 after I translate the phone sideways.
-   * - From matched points, I estimate F (Fundamental matrix) with RANSAC.
-   * - With intrinsics K, I convert to E (Essential matrix): E = K^T * F * K
-   * - recoverPose(E) gives me R and direction of t (translation up to scale).
-   * - I force scale using baseline (cm) that I physically moved.
-   * - With P1 = K[I|0] and P2 = K[R|t], I triangulate a 3D point cloud.
-   * - From the 3D cloud inside my ROI, I estimate size (mm) and auto-classify:
-   *     ball-ish => diameter
-   *     spoon-ish => length
-   *     phone/box-ish => length & width
+   * We capture two views with one iPhone camera (move the phone sideways).
    *
-   * DEBUG GOAL:
-   * - When capture2 fails, I want the page to tell me EXACTLY where it died:
-   *     Not enough corners? Tracking collapsed? Too few RANSAC inliers? recoverPose unstable?
+   * Epipolar constraint in normalized camera coords:
+   *    x2^T * E * x1 = 0
+   *
+   * Steps:
+   *  1) Detect corners in view1, track them to view2 using LK.
+   *  2) Convert pixel points to normalized camera points: x = K^{-1} [u,v,1]^T
+   *  3) Use RANSAC + normalized 8-point to estimate Essential matrix E.
+   *  4) Enforce rank-2 constraint on E (two equal singular values).
+   *  5) Decompose E -> candidate (R,t) pairs; pick the one with most points in front.
+   *  6) Scale t using known baseline (cm).
+   *  7) For ROI: detect points in ROI, track, triangulate with DLT using P1=[I|0], P2=[R|t].
    ********************************************************************/
 
   /********************************************************************
    * 0) YOUR iPHONE CALIBRATION RESULTS (HARD-CODED)
-   * ---------------------------------------------------------------
-   * From your checkerboard calibration:
-   * Image size (W,H): (1920, 2560)
-   * K:
-   *  fx=1977.60619, fy=1981.57064
-   *  cx=962.418592, cy=1247.75805
-   * dist (k1,k2,p1,p2,k3):
-   *  [0.247937836, -0.915690663, -0.00215712011, -0.000132342062, 0.550086004]
    ********************************************************************/
   const CALIB = {
     calW: 1920,
@@ -373,7 +306,6 @@
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-  // rawCanvas holds the image OpenCV reads (no overlays).
   const rawCanvas = document.createElement("canvas");
   const rawCtx = rawCanvas.getContext("2d", { willReadFrequently: true });
 
@@ -398,139 +330,76 @@
   const resultsBody = document.getElementById("resultsBody");
   const resCount = document.getElementById("resCount");
 
-  // Debug log
-  const logEl = document.getElementById("log");
-  function logLine(s){
-    console.log(s);
-    logEl.textContent += s + "\n";
-  }
-  function clearLog(){
-    logEl.textContent = "";
-  }
-  // ---- Hook console.error so Safari errors show in my Debug log ----
-  const _cerr = console.error.bind(console);
-  console.error = (...args) => {
-    try {
-      logLine("[console.error] " + args.map(a => {
-        try { return (typeof a === "string") ? a : JSON.stringify(a); }
-        catch(e) { return String(a); }
-      }).join(" "));
-    } catch (e) {
-      // ignore log failures
-    }
-    _cerr(...args);
-  };
-  
-  // Also catch uncaught JS errors
-  window.addEventListener("error", (ev) => {
-    try { logLine("[window.error] " + (ev.message || ev.type)); } catch(e) {}
-  });
-  window.addEventListener("unhandledrejection", (ev) => {
-    try { logLine("[promise.reject] " + String(ev.reason)); } catch(e) {}
-  });
+  // Stage machine
+  let stage = "idle"; // live | v1 | ready
+  function setStage(s){ stage = s; stageStatus.textContent = s; }
 
-  // Stage machine:
-  // - live  : camera running, no view1 yet
-  // - v1    : captured view1, waiting for view2
-  // - ready : captured view2 and pose computed; now I can measure by ROI drag
-  let stage = "idle";
-
-  function setStage(s) {
-    stage = s;
-    stageStatus.textContent = s;
-  }
-
-  function setOut(msg, isWarn=false) {
+  function setOut(msg, isWarn=false){
     outEl.textContent = msg;
     outEl.className = isWarn ? "warn" : "";
   }
 
   function updateResCount(){ resCount.textContent = String(results.length); }
 
-  // Freeze controls whether I keep updating the displayed scene after capture2.
+  // Freeze display after Capture 2
   let frozenDisplay = false;
 
-  // IMU state
+  // IMU
   let imuEnabled = false;
   let imuNow = { yaw:0, pitch:0, roll:0 };
   let imuAtV1 = null;
   const ROT_THRESH_DEG = { yaw: 6, pitch: 4, roll: 4 };
 
-  // Two frames stored as grayscale cv.Mat (already undistorted if enabled)
+  // Intrinsics scaled to current video resolution
+  let K = null;      // 3x3 as plain JS array (not cv.Mat)
+  let Kinv = null;   // 3x3 JS array
+  let Kcv = null;    // cv.Mat 3x3 for undistort
+  let DISTcv = null; // cv.Mat 1x5 for undistort
+
+  // Captured frames (grayscale)
   let gray1 = null;
   let gray2 = null;
 
-  // Intrinsics used at runtime (scaled to current video size)
-  let K = null;       // cv.Mat 3x3 CV_64F
-  let DIST = null;    // cv.Mat 1x5 CV_64F
-
-  // Pose and projection matrices
-  let R = null;       // cv.Mat 3x3
-  let t = null;       // cv.Mat 3x1 (scaled to baseline)
-  let P1 = null;      // cv.Mat 3x4
-  let P2 = null;      // cv.Mat 3x4
-
+  // Pose results (camera coords)
+  let R = null; // 3x3 JS array
+  let t = null; // 3x1 JS array (scaled meters)
   let poseReady = false;
 
-  // ROI drag state (extra credit a interface)
+  // ROI drag
   let roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
   let lastOverlay = null;
 
-  // Results
+  // Results list
   let results = [];
 
   /********************************************************************
-   * 2) OpenCV READY
+   * 2) OpenCV ready
    ********************************************************************/
   (function waitForCv(){
     const timer = setInterval(() => {
-      if (typeof window.cv === "undefined") return;
-  
-      // Case A: cv is a Promise
-      if (typeof window.cv.then === "function") {
-        window.cv.then((realCv) => { window.cv = realCv; });
-        return;
-      }
-  
-      // Case B: cv is a factory function (MODULARIZE build)
-      if (typeof window.cv === "function" && typeof window.cv.onRuntimeInitialized === "undefined") {
-        // calling cv() returns a Promise-like module in many builds
-        try {
-          const maybe = window.cv();
-          if (maybe && typeof maybe.then === "function") {
-            maybe.then((realCv) => { window.cv = realCv; });
-          }
-        } catch (e) {}
-        return;
-      }
-  
-      // Case C: normal build
-      if (window.cv && typeof window.cv.onRuntimeInitialized !== "undefined") {
-        clearInterval(timer);
-        window.cv.onRuntimeInitialized = () => {
-          cvReady = true;
-          cvStatus.textContent = "ready ✅";
-          cvStatus.className = "ok";
-          startBtn.disabled = false;
-  
-          logLine("LK: " + typeof cv.calcOpticalFlowPyrLK);
-          logLine("F: " + typeof cv.findFundamentalMat);
-          logLine("recoverPose: " + typeof cv.recoverPose);
-          logLine("triangulate: " + typeof cv.triangulatePoints);
-          logLine("SVDecomp: " + typeof cv.SVDecomp);
-          logLine("gemm: " + typeof cv.gemm);
-        };
-      }
+      if (typeof cv === "undefined") return;
+      if (typeof cv.onRuntimeInitialized === "undefined") return;
+
+      clearInterval(timer);
+      cv.onRuntimeInitialized = () => {
+        cvReady = true;
+        cvStatus.textContent = "ready ✅";
+        cvStatus.className = "ok";
+        startBtn.disabled = false;
+        logLine("[boot] OpenCV ready ✅");
+        logLine("[boot] SVDecomp: " + typeof cv.SVDecomp);
+        logLine("[boot] LK: " + typeof cv.calcOpticalFlowPyrLK);
+      };
     }, 50);
   })();
 
   /********************************************************************
-   * 3) CAMERA START
+   * 3) Camera start/loop
    ********************************************************************/
-  async function startCamera() {
-    if (!cvReady) { setOut("Wait for OpenCV first.", true); return; }
+  async function startCamera(){
+    if (!cvReady){ setOut("Wait for OpenCV first.", true); return; }
 
-    try {
+    try{
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" } },
         audio: false
@@ -541,64 +410,44 @@
       await video.play();
 
       video.onloadedmetadata = () => {
-        // Match canvas sizes to actual stream resolution
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         rawCanvas.width = video.videoWidth;
         rawCanvas.height = video.videoHeight;
-
         streamInfoEl.textContent = `${video.videoWidth}×${video.videoHeight}`;
 
-        // Build runtime K (scaled from calibration)
-        if (K) { K.delete(); K = null; }
-        K = buildScaledK(video.videoWidth, video.videoHeight);
-
-        // Build distortion mat once (dist does not scale)
-        if (DIST) { DIST.delete(); DIST = null; }
-        DIST = cv.matFromArray(1, 5, cv.CV_64F, CALIB.dist);
-
-        // Default: keep undistort OFF unless you toggle it
-        undToggle.checked = false;
+        // Build runtime intrinsics for this stream size
+        buildScaledIntrinsics(video.videoWidth, video.videoHeight);
 
         streaming = true;
         imuBtn.disabled = false;
         cap1Btn.disabled = false;
         cap2Btn.disabled = true;
-
         setStage("live");
-        setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
 
+        setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
         clearLog();
         logLine("=== START CAMERA ===");
         logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
-        logLine(`calib  = ${CALIB.calW}x${CALIB.calH}`);
-        logLine(`undistort toggle = ${undToggle.checked}`);
-
-        // Print scaled K to the debug log (this matters a lot)
-        logLine(`Kscaled fx=${K.doubleAt(0,0).toFixed(2)} fy=${K.doubleAt(1,1).toFixed(2)} cx=${K.doubleAt(0,2).toFixed(2)} cy=${K.doubleAt(1,2).toFixed(2)}`);
+        logLine(`K fx=${K[0][0].toFixed(2)} fy=${K[1][1].toFixed(2)} cx=${K[0][2].toFixed(2)} cy=${K[1][2].toFixed(2)}`);
 
         requestAnimationFrame(drawLoop);
       };
-
-    } catch (err) {
-      console.error(err);
-      setOut("Camera failed. Must be HTTPS and allow camera permission.", true);
+    }catch(e){
+      logLine("[camera] failed: " + e);
+      setOut("Camera failed (HTTPS + permission required).", true);
     }
   }
 
-  /********************************************************************
-   * 4) DRAW LOOP (DISPLAY)
-   ********************************************************************/
-  function drawLoop() {
+  function drawLoop(){
     if (!streaming) return;
 
-    if (!frozenDisplay) {
+    if (!frozenDisplay){
       rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
     }
-
     ctx.drawImage(rawCanvas, 0, 0, canvas.width, canvas.height);
 
-    // Draw ROI in green while I drag
+    // ROI overlay while dragging
     if (roi.active || (roi.x0!==roi.x1 && roi.y0!==roi.y1)) {
       const x = Math.min(roi.x0, roi.x1);
       const y = Math.min(roi.y0, roi.y1);
@@ -612,8 +461,8 @@
       ctx.restore();
     }
 
-    // Draw last measured ROI in yellow
-    if (lastOverlay) {
+    // last measured ROI
+    if (lastOverlay){
       ctx.save();
       ctx.strokeStyle = "yellow";
       ctx.lineWidth = 4;
@@ -625,10 +474,10 @@
   }
 
   /********************************************************************
-   * 5) IMU TOGGLE
+   * 4) IMU
    ********************************************************************/
-  async function toggleIMU() {
-    if (imuEnabled) {
+  async function toggleIMU(){
+    if (imuEnabled){
       imuEnabled = false;
       imuGateEl.textContent = "IMU off";
       imuGateEl.className = "warn";
@@ -637,9 +486,9 @@
       return;
     }
 
-    try {
+    try{
       if (typeof DeviceOrientationEvent !== "undefined" &&
-          typeof DeviceOrientationEvent.requestPermission === "function") {
+          typeof DeviceOrientationEvent.requestPermission === "function"){
         const p = await DeviceOrientationEvent.requestPermission();
         if (p !== "granted") throw new Error("Orientation denied");
       }
@@ -648,22 +497,27 @@
       imuGateEl.textContent = "IMU on (waiting for Capture 1)";
       imuGateEl.className = "ok";
       window.addEventListener("deviceorientation", onOrientation);
-
-    } catch (e) {
-      console.error(e);
+    }catch(e){
       imuEnabled = false;
       imuGateEl.textContent = "IMU permission denied";
       imuGateEl.className = "warn";
-      setOut("IMU permission denied. Enable it for best Capture 2 gating.", true);
+      setOut("IMU permission denied.", true);
     }
   }
 
-  function onOrientation(e) {
+  function angleDiffDeg(a,b){
+    let d=a-b;
+    while (d>180) d-=360;
+    while (d<-180) d+=360;
+    return d;
+  }
+
+  function onOrientation(e){
     imuNow.yaw = (e.alpha ?? 0);
     imuNow.pitch = (e.beta ?? 0);
     imuNow.roll = (e.gamma ?? 0);
 
-    if (imuAtV1) {
+    if (imuAtV1){
       const dy = angleDiffDeg(imuNow.yaw, imuAtV1.yaw);
       const dp = angleDiffDeg(imuNow.pitch, imuAtV1.pitch);
       const dr = angleDiffDeg(imuNow.roll, imuAtV1.roll);
@@ -672,11 +526,11 @@
       dpitchEl.textContent = dp.toFixed(1);
       drollEl.textContent = dr.toFixed(1);
 
-      const ok = (Math.abs(dy) < ROT_THRESH_DEG.yaw &&
-                  Math.abs(dp) < ROT_THRESH_DEG.pitch &&
-                  Math.abs(dr) < ROT_THRESH_DEG.roll);
+      const ok = (Math.abs(dy)<ROT_THRESH_DEG.yaw &&
+                  Math.abs(dp)<ROT_THRESH_DEG.pitch &&
+                  Math.abs(dr)<ROT_THRESH_DEG.roll);
 
-      if (stage === "v1") {
+      if (stage === "v1"){
         imuGateEl.textContent = ok ? "OK for Capture 2 ✅ (rotation small)" : "Move mostly sideways (reduce rotation)";
         imuGateEl.className = ok ? "ok" : "warn";
         cap2Btn.disabled = !ok;
@@ -684,301 +538,263 @@
     }
   }
 
-  function angleDiffDeg(a, b) {
-    let d = a - b;
-    while (d > 180) d -= 360;
-    while (d < -180) d += 360;
-    return d;
-  }
-
   /********************************************************************
-   * 6) CAPTURE VIEW 1 / VIEW 2
+   * 5) Capture frames
    ********************************************************************/
-  function grabGrayFrame() {
-    // Read RGBA -> gray
+  function grabGrayFrame(){
     const src = cv.imread(rawCanvas);
     const gray = new cv.Mat();
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     src.delete();
 
-    // Optional undistort (I toggle it so I can test quickly)
-    const useUnd = undToggle.checked;
-    if (useUnd && DIST && K && typeof cv.undistort === "function") {
+    // Optional undistort (recommended for iPhone wide lens)
+    if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
       const und = new cv.Mat();
-      cv.undistort(gray, und, K, DIST);
+      cv.undistort(gray, und, Kcv, DISTcv);
       gray.delete();
       return und;
     }
     return gray;
   }
 
-  function captureView1() {
+  function captureView1(){
     if (!streaming) return;
 
     cleanupFrames();
-    cleanupPose();
+    poseReady = false;
 
     gray1 = grabGrayFrame();
-
     imuAtV1 = imuEnabled ? { ...imuNow } : null;
 
     dyawEl.textContent = "0";
     dpitchEl.textContent = "0";
     drollEl.textContent = "0";
 
-    // I want IMU enabled for best gating (you can remove this if you want free capture2)
     cap2Btn.disabled = !imuEnabled;
-
     setStage("v1");
-    setOut("Captured View 1 ✅ Now move phone sideways by baseline cm. Keep pitch/roll steady.", false);
 
     clearLog();
     logLine("=== CAPTURE 1 ===");
-    logLine(`undistort toggle = ${undToggle.checked}`);
-    logLine(`gray1: ${gray1.cols}x${gray1.rows}`);
-    logLine(`baseline cm = ${document.getElementById("baselineCm").value}`);
-    logLine(`Kscaled fx=${K.doubleAt(0,0).toFixed(2)} fy=${K.doubleAt(1,1).toFixed(2)} cx=${K.doubleAt(0,2).toFixed(2)} cy=${K.doubleAt(1,2).toFixed(2)}`);
+    logLine(`undistort=${undToggle.checked}`);
+    logLine(`gray1=${gray1.cols}x${gray1.rows}`);
+    logLine(`baseline cm=${document.getElementById("baselineCm").value}`);
+
+    setOut("Captured View 1 ✅ Move sideways by baseline, keep rotation low, then Capture 2.", false);
+    imuGateEl.textContent = "Move sideways; wait for green gate";
+    imuGateEl.className = "warn";
   }
 
-  function captureView2() {
+  function captureView2(){
     if (!streaming || !gray1) return;
 
     gray2 = grabGrayFrame();
     frozenDisplay = freezeToggle.checked;
 
     logLine("=== CAPTURE 2 ===");
-    logLine(`gray2: ${gray2.cols}x${gray2.rows}`);
+    logLine(`gray2=${gray2.cols}x${gray2.rows}`);
 
-    const res = computePoseFromTwoViews(); // returns {ok, reason, stats}
-    if (!res.ok) {
+    const res = computePose_Epipolar_JS();
+    if (!res.ok){
       logLine("POSE FAIL: " + res.reason);
       setOut("Pose failed: " + res.reason, true);
       setStage("v1");
-      cap2Btn.disabled = false; // let you retry
+      cap2Btn.disabled = false;
       return;
     }
 
+    R = res.R;
+    t = res.t_scaled;
     poseReady = true;
     setStage("ready");
     cap2Btn.disabled = true;
 
-    logLine(`POSE OK ✅ inliersF=${res.stats.inliersF} poseInliers=${res.stats.poseInliers}`);
-    setOut("Pose ready ✅ Now drag ROI around objects to measure (no more captures needed).", false);
+    logLine(`POSE OK ✅ inliers=${res.inliers} / ${res.total}`);
+    setOut("Pose ready ✅ Drag ROI around objects to measure (repeat for multiple objects).", false);
   }
 
   /********************************************************************
-   * 7) POSE FROM TWO VIEWS (GLOBAL FEATURES) — DEBUG VERSION
+   * 6) Epipolar geometry in JS (Option A)
    * ---------------------------------------------------------------
-   * Instead of returning true/false only, I return the exact reason it failed.
+   * We estimate Essential matrix E directly from normalized coords:
+   *   x2^T E x1 = 0
    ********************************************************************/
-  function computePoseFromTwoViews() {
-    if (!gray1 || !gray2 || !K) return { ok:false, reason:"Missing gray1/gray2/K", stats:{} };
+  function computePose_Epipolar_JS(){
+    if (!gray1 || !gray2 || !Kinv) return { ok:false, reason:"Missing gray1/gray2/Kinv" };
 
-    if (typeof cv.calcOpticalFlowPyrLK !== "function" ||
-        typeof cv.findFundamentalMat !== "function" ||
-        typeof cv.recoverPose !== "function" ||
-        typeof cv.triangulatePoints !== "function") {
-      return { ok:false, reason:"opencv.js missing LK / calib3d functions", stats:{} };
+    if (typeof cv.calcOpticalFlowPyrLK !== "function") {
+      return { ok:false, reason:"OpenCV missing LK optical flow" };
+    }
+    if (typeof cv.SVDecomp !== "function") {
+      return { ok:false, reason:"OpenCV missing SVDecomp (needed for SVD)" };
     }
 
-    // ---- Tunable parameters (these matter) ----
-    const MAX_CORNERS = 1500;
-    const QUALITY = 0.005;
-    const MIN_DIST = 8;
-
-    const LK_WIN = new cv.Size(31,31);
-    const LK_LEVEL = 4;
-    const LK_CRIT = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
-
-    const RANSAC_THRESH = 2.0;  // pixels
-    const RANSAC_CONF = 0.99;
-
-    // ---- 1) Detect corners in view1 ----
+    // --- 1) detect corners in view1
     const corners1 = new cv.Mat();
-    cv.goodFeaturesToTrack(gray1, corners1, MAX_CORNERS, QUALITY, MIN_DIST);
-    logLine(`corners1 = ${corners1.rows}`);
-
-    if (corners1.rows < 80) {
+    cv.goodFeaturesToTrack(gray1, corners1, 1500, 0.005, 8);
+    logLine(`corners1=${corners1.rows}`);
+    if (corners1.rows < 80){
       corners1.delete();
-      return { ok:false, reason:`Not enough corners (${corners1.rows}). Add texture/lighting.`, stats:{corners:corners1.rows} };
+      return { ok:false, reason:`Not enough corners (${corners1.rows}). Add texture/lighting.` };
     }
 
-    // ---- 2) Track corners to view2 ----
+    // --- 2) track to view2
     const corners2 = new cv.Mat();
     const status = new cv.Mat();
     const err = new cv.Mat();
-    cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, LK_WIN, LK_LEVEL, LK_CRIT);
+    const win = new cv.Size(31,31);
+    const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+    cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, win, 4, crit);
 
-    // Filter tracks
+    // --- 3) build match arrays + normalized coords
     const pts1 = [];
     const pts2 = [];
-    for (let i=0; i<status.rows; i++) {
+    const x1n = [];
+    const x2n = [];
+
+    for (let i=0; i<status.rows; i++){
       if (!status.ucharPtr(i,0)[0]) continue;
 
-      const x1 = corners1.data32F[i*2];
-      const y1 = corners1.data32F[i*2 + 1];
-      const x2 = corners2.data32F[i*2];
-      const y2 = corners2.data32F[i*2 + 1];
+      const u1 = corners1.data32F[i*2];
+      const v1 = corners1.data32F[i*2 + 1];
+      const u2 = corners2.data32F[i*2];
+      const v2 = corners2.data32F[i*2 + 1];
 
-      if (x2 < 0 || x2 >= gray2.cols || y2 < 0 || y2 >= gray2.rows) continue;
+      if (u2<0 || u2>=gray2.cols || v2<0 || v2>=gray2.rows) continue;
 
-      pts1.push({x:x1,y:y1});
-      pts2.push({x:x2,y:y2});
+      pts1.push({u:u1,v:v1});
+      pts2.push({u:u2,v:v2});
+
+      x1n.push(pixelToNorm(u1,v1));
+      x2n.push(pixelToNorm(u2,v2));
     }
 
     corners1.delete(); corners2.delete(); status.delete(); err.delete();
 
-    logLine(`tracked = ${pts1.length}`);
-
-    if (pts1.length < 80) {
-      return { ok:false, reason:`Tracking collapsed (${pts1.length}). Too much motion/blur/baseline.`, stats:{tracked:pts1.length} };
+    logLine(`tracked=${pts1.length}`);
+    if (pts1.length < 120){
+      return { ok:false, reason:`Too few tracked points (${pts1.length}). Less blur/rotation; more texture.` };
     }
 
-    // ---- 3) Fundamental matrix with RANSAC ----
-    const pts1Mat = pointsToMat(pts1);
-    const pts2Mat = pointsToMat(pts2);
-    const mask = new cv.Mat();
-
-    const F = cv.findFundamentalMat(pts1Mat, pts2Mat, cv.FM_RANSAC, RANSAC_THRESH, RANSAC_CONF, mask);
-
-    let inliersF = 0;
-    for (let i=0;i<mask.rows;i++) inliersF += mask.ucharPtr(i,0)[0] ? 1 : 0;
-    logLine(`F inliers = ${inliersF}`);
-
-    if (!F || F.rows !== 3 || inliersF < 60) {
-      pts1Mat.delete(); pts2Mat.delete(); mask.delete();
-      if (F) F.delete();
-      return {
-        ok:false,
-        reason:`F RANSAC failed / too few inliers (${inliersF}). Usually rotation, K mismatch, or poor texture.`,
-        stats:{tracked:pts1.length, inliersF}
-      };
+    // --- 4) RANSAC + 8-point to estimate E
+    const ransac = estimateE_RANSAC(x1n, x2n);
+    if (!ransac.ok){
+      return { ok:false, reason: ransac.reason };
     }
 
-    // ---- 4) Essential matrix ----
-    const E = computeEfromF(F, K);
+    const E = ransac.E; // 3x3 JS array
+    const inliersIdx = ransac.inliersIdx;
 
-    // ---- 5) recoverPose ----
-    cleanupPose();
-    R = new cv.Mat();
-    t = new cv.Mat();
-    const poseMask = new cv.Mat();
-    const poseInliers = cv.recoverPose(E, pts1Mat, pts2Mat, K, R, t, poseMask);
-    logLine(`recoverPose inliers = ${poseInliers}`);
+    logLine(`E RANSAC inliers=${inliersIdx.length}`);
 
-    // cleanup temp mats
-    pts1Mat.delete(); pts2Mat.delete(); mask.delete();
-    F.delete(); E.delete(); poseMask.delete();
-
-    if (!isFinite(t.doubleAt(0,0)) || poseInliers < 40) {
-      return {
-        ok:false,
-        reason:`recoverPose unstable (poseInliers=${poseInliers}). K/undistort mismatch or too much rotation.`,
-        stats:{tracked:pts1.length, inliersF, poseInliers}
-      };
+    // --- 5) decompose E -> choose best (R,t) via cheirality
+    const best = recoverPoseFromE(E, x1n, x2n, inliersIdx);
+    if (!best.ok){
+      return { ok:false, reason: best.reason };
     }
 
-    // ---- 6) scale t using baseline (cm) ----
+    // --- 6) scale t using baseline (meters)
     const baselineCm = parseFloat(document.getElementById("baselineCm").value);
-    if (!(isFinite(baselineCm) && baselineCm > 0)) {
-      return { ok:false, reason:"Baseline must be > 0 cm", stats:{tracked:pts1.length, inliersF, poseInliers} };
+    if (!(isFinite(baselineCm) && baselineCm > 0)){
+      return { ok:false, reason:"Baseline must be > 0 cm" };
     }
-
     const baselineM = baselineCm / 100.0;
-    const tnorm = Math.hypot(t.doubleAt(0,0), t.doubleAt(1,0), t.doubleAt(2,0));
-    const s = baselineM / Math.max(tnorm, 1e-9);
 
-    t.doublePtr(0,0)[0] *= s;
-    t.doublePtr(1,0)[0] *= s;
-    t.doublePtr(2,0)[0] *= s;
+    const tdir = best.t; // unit-ish direction
+    const tn = Math.hypot(tdir[0], tdir[1], tdir[2]);
+    const s = baselineM / Math.max(tn, 1e-12);
 
-    // ---- 7) Build projection matrices ----
-    P1 = buildP1(K);
-    P2 = buildP2(K, R, t);
+    const t_scaled = [tdir[0]*s, tdir[1]*s, tdir[2]*s];
 
-    return { ok:true, reason:"ok", stats:{tracked:pts1.length, inliersF, poseInliers} };
+    return {
+      ok:true,
+      R: best.R,
+      t_scaled,
+      inliers: inliersIdx.length,
+      total: x1n.length
+    };
   }
 
   /********************************************************************
-   * 8) ROI MEASUREMENT
+   * 7) ROI measurement (triangulate + extents)
    ********************************************************************/
-  function measureROI(rx, ry, rw, rh) {
-    if (!poseReady || !gray1 || !gray2 || !P1 || !P2) return { ok:false, msg:"Pose not ready yet." };
+  function measureROI(rx, ry, rw, rh){
+    if (!poseReady || !gray1 || !gray2 || !R || !t) return { ok:false, msg:"Pose not ready." };
+    if (typeof cv.SVDecomp !== "function") return { ok:false, msg:"Missing SVDecomp." };
 
+    // clamp ROI
     rx = Math.max(0, Math.min(rx, gray1.cols-1));
     ry = Math.max(0, Math.min(ry, gray1.rows-1));
     rw = Math.max(1, Math.min(rw, gray1.cols - rx));
     rh = Math.max(1, Math.min(rh, gray1.rows - ry));
 
-    // Mask so goodFeatures only picks points in ROI
+    // mask for points in ROI
     const mask = new cv.Mat(gray1.rows, gray1.cols, cv.CV_8U);
     mask.setTo(new cv.Scalar(0));
-    const roiRect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
-    const maskROI = mask.roi(roiRect);
+    const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
+    const maskROI = mask.roi(rect);
     maskROI.setTo(new cv.Scalar(255));
     maskROI.delete();
 
     const p1 = new cv.Mat();
-    cv.goodFeaturesToTrack(gray1, p1, 500, 0.01, 6, mask);
+    cv.goodFeaturesToTrack(gray1, p1, 600, 0.01, 6, mask);
     mask.delete();
 
-    if (p1.rows < 25) {
+    if (p1.rows < 25){
       p1.delete();
-      return { ok:false, msg:"Not enough texture in ROI. Try tighter box / better lighting." };
+      return { ok:false, msg:"Not enough texture in ROI. Use tighter box / better lighting." };
     }
 
     const p2 = new cv.Mat();
     const status = new cv.Mat();
     const err = new cv.Mat();
-    const winSize = new cv.Size(31,31);
-    const maxLevel = 4;
-    const criteria = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
-    cv.calcOpticalFlowPyrLK(gray1, gray2, p1, p2, status, err, winSize, maxLevel, criteria);
+    const win = new cv.Size(31,31);
+    const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+    cv.calcOpticalFlowPyrLK(gray1, gray2, p1, p2, status, err, win, 4, crit);
 
-    const xs1 = [], ys1 = [], xs2 = [], ys2 = [];
-    for (let i=0; i<status.rows; i++) {
+    const x1 = [];
+    const x2 = [];
+    for (let i=0; i<status.rows; i++){
       if (!status.ucharPtr(i,0)[0]) continue;
-      const x1 = p1.data32F[i*2], y1 = p1.data32F[i*2+1];
-      const x2 = p2.data32F[i*2], y2 = p2.data32F[i*2+1];
-      if (x2 < 0 || x2 >= gray2.cols || y2 < 0 || y2 >= gray2.rows) continue;
-      xs1.push(x1); ys1.push(y1);
-      xs2.push(x2); ys2.push(y2);
+
+      const u1 = p1.data32F[i*2];
+      const v1 = p1.data32F[i*2 + 1];
+      const u2 = p2.data32F[i*2];
+      const v2 = p2.data32F[i*2 + 1];
+
+      if (u2<0 || u2>=gray2.cols || v2<0 || v2>=gray2.rows) continue;
+
+      x1.push(pixelToNorm(u1,v1));
+      x2.push(pixelToNorm(u2,v2));
     }
 
     p1.delete(); p2.delete(); status.delete(); err.delete();
 
-    const N = xs1.length;
-    if (N < 25) return { ok:false, msg:`Too few tracked points in ROI (${N}).` };
-
-    const m1 = new cv.Mat(2, N, cv.CV_64F);
-    const m2 = new cv.Mat(2, N, cv.CV_64F);
-    for (let i=0;i<N;i++){
-      m1.doublePtr(0,i)[0] = xs1[i];
-      m1.doublePtr(1,i)[0] = ys1[i];
-      m2.doublePtr(0,i)[0] = xs2[i];
-      m2.doublePtr(1,i)[0] = ys2[i];
+    if (x1.length < 25){
+      return { ok:false, msg:`Too few tracked points in ROI (${x1.length}).` };
     }
 
-    const X4 = new cv.Mat();
-    cv.triangulatePoints(P1, P2, m1, m2, X4);
-    m1.delete(); m2.delete();
-
+    // Triangulate points with DLT in camera coords:
+    // P1 = [I|0], P2 = [R|t]
     const pts3 = [];
-    for (let i=0;i<N;i++){
-      const X = X4.doubleAt(0,i), Y = X4.doubleAt(1,i), Z = X4.doubleAt(2,i), W = X4.doubleAt(3,i);
-      if (Math.abs(W) < 1e-12) continue;
-      const x = X/W, y = Y/W, z = Z/W;
-      if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
-      if (Math.abs(z) > 10) continue;
-      pts3.push([x,y,z]);
+    for (let i=0; i<x1.length; i++){
+      const X = triangulateDLT(R, t, x1[i], x2[i]); // [X,Y,Z]
+      if (!X) continue;
+
+      // quick sanity filter
+      if (!isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])) continue;
+      if (X[2] <= 0) continue;      // in front of cam1
+      if (X[2] > 10) continue;      // reject crazy far
+      pts3.push(X);
     }
-    X4.delete();
 
-    if (pts3.length < 15) return { ok:false, msg:`Triangulation unstable (kept ${pts3.length} pts).` };
+    if (pts3.length < 15){
+      return { ok:false, msg:`Triangulation unstable (kept ${pts3.length}). Try bigger baseline / less rotation.` };
+    }
 
-    const ext = computeExtentsSVD(pts3);
-    if (!ext) return { ok:false, msg:"SVD failed." };
+    const ext = computeExtentsPCA(pts3); // meters
+    if (!ext) return { ok:false, msg:"Extent PCA failed." };
 
+    // convert to mm
     const e1 = ext.e1 * 1000;
     const e2 = ext.e2 * 1000;
     const e3 = ext.e3 * 1000;
@@ -989,18 +805,25 @@
     let measuredText = "";
     let primaryMm = e1;
 
+    // ball-ish
     if (r12 < 1.2 && r23 < 1.2) {
       const D = (e1 + e2 + e3) / 3.0;
       measuredText = `D≈${D.toFixed(1)} mm (ball-ish)`;
       primaryMm = D;
-    } else if (r12 > 2.2) {
+    }
+    // spoon-ish
+    else if (r12 > 2.2) {
       measuredText = `Length≈${e1.toFixed(1)} mm (spoon-ish)`;
       primaryMm = e1;
-    } else if (r12 < 1.15) {
+    }
+    // box-ish (two similar big dims)
+    else if (r12 < 1.15) {
       const side = 0.5*(e1+e2);
       measuredText = `Side≈${side.toFixed(1)} mm (box-ish)`;
       primaryMm = side;
-    } else {
+    }
+    // phone-ish
+    else {
       measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
       primaryMm = e1;
     }
@@ -1009,7 +832,7 @@
   }
 
   /********************************************************************
-   * 9) ROI DRAG EVENTS
+   * 8) ROI drag events
    ********************************************************************/
   canvas.addEventListener("mousedown", onDown);
   canvas.addEventListener("mousemove", onMove);
@@ -1019,7 +842,7 @@
   canvas.addEventListener("touchmove", onMove, {passive:false});
   canvas.addEventListener("touchend", onUp, {passive:false});
 
-  function canvasPointFromEvent(e) {
+  function canvasPointFromEvent(e){
     const rect = canvas.getBoundingClientRect();
     const t = e.touches ? e.touches[0] : null;
     const cx = t ? t.clientX : e.clientX;
@@ -1030,22 +853,20 @@
     };
   }
 
-  function onDown(e) {
+  function onDown(e){
     e.preventDefault();
     const p = canvasPointFromEvent(e);
     roi.active = true;
     roi.x0 = roi.x1 = p.x;
     roi.y0 = roi.y1 = p.y;
   }
-
-  function onMove(e) {
+  function onMove(e){
     if (!roi.active) return;
     e.preventDefault();
     const p = canvasPointFromEvent(e);
     roi.x1 = p.x; roi.y1 = p.y;
   }
-
-  function onUp(e) {
+  function onUp(e){
     if (!roi.active) return;
     e.preventDefault();
     roi.active = false;
@@ -1054,24 +875,29 @@
     const y = Math.min(roi.y0, roi.y1);
     const w = Math.abs(roi.x1 - roi.x0);
     const h = Math.abs(roi.y1 - roi.y0);
-    if (w < 12 || h < 12) return;
+    if (w<12 || h<12) return;
 
     lastOverlay = { x,y,w,h };
 
-    if (poseReady) {
-      const res = measureROI(x,y,w,h);
-      if (!res.ok) { setOut(res.msg, true); return; }
-      setOut(`FINAL: ${res.measuredText}`, false);
-      logResult(res);
-    } else {
-      setOut("ROI drawn ✅ Now capture View 1 and View 2 first.", true);
+    if (!poseReady){
+      setOut("ROI drawn ✅ but pose not ready. Do Capture 1 + Capture 2 first.", true);
+      return;
     }
+
+    const res = measureROI(x,y,w,h);
+    if (!res.ok){
+      setOut(res.msg, true);
+      return;
+    }
+
+    setOut(`FINAL: ${res.measuredText}`, false);
+    logResult(res);
   }
 
   /********************************************************************
-   * 10) RESULTS LOGGING
+   * 9) Results table
    ********************************************************************/
-  function logResult(res) {
+  function logResult(res){
     const nameIn = (document.getElementById("objName").value || "").trim();
     const name = nameIn.length ? nameIn : `Object ${results.length + 1}`;
 
@@ -1094,156 +920,32 @@
       <td>${res.Npts}</td>
     `;
     resultsBody.appendChild(tr);
-
-    if (errPct != null && errPct > 10) {
-      setOut(`${name}: ${res.measuredText} | GT ${gtMm.toFixed(1)} | error ${errPct.toFixed(1)}%`, true);
-    }
   }
 
-  function clearResults() {
+  function clearResults(){
     results = [];
     resultsBody.innerHTML = "";
     updateResCount();
     setOut("Results cleared.", false);
   }
 
-  function escapeHtml(s) {
+  function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
   /********************************************************************
-   * 11) MATH + OPENCV HELPERS
+   * 10) Reset / cleanup
    ********************************************************************/
-  function buildScaledK(W, H) {
-    // Scale intrinsics from calibration resolution to runtime resolution
-    const sx = W / CALIB.calW;
-    const sy = H / CALIB.calH;
-    const fx = CALIB.fx * sx;
-    const fy = CALIB.fy * sy;
-    const cx = CALIB.cx * sx;
-    const cy = CALIB.cy * sy;
-
-    return cv.matFromArray(3,3,cv.CV_64F, [
-      fx, 0,  cx,
-      0,  fy, cy,
-      0,  0,  1
-    ]);
-  }
-
-  function pointsToMat(pts) {
-    // Nx1 CV_32FC2
-    const data = [];
-    for (const p of pts) data.push(p.x, p.y);
-    return cv.matFromArray(pts.length, 1, cv.CV_32FC2, data);
-  }
-
-  function computeEfromF(F, K) {
-    // E = K^T * F * K
-    const Kt = new cv.Mat();
-    cv.transpose(K, Kt);
-
-    const tmp = new cv.Mat();
-    const E = new cv.Mat();
-
-    const Z = new cv.Mat(); // empty add matrix for gemm
-    cv.gemm(Kt, F, 1, Z, 0, tmp);
-    cv.gemm(tmp, K, 1, Z, 0, E);
-
-    Kt.delete(); tmp.delete(); Z.delete();
-    return E;
-  }
-
-  function buildP1(K) {
-    // P1 = K[I|0]
-    const fx = K.doubleAt(0,0), fy = K.doubleAt(1,1);
-    const cx = K.doubleAt(0,2), cy = K.doubleAt(1,2);
-    return cv.matFromArray(3,4,cv.CV_64F, [
-      fx, 0,  cx, 0,
-      0,  fy, cy, 0,
-      0,  0,  1,  0
-    ]);
-  }
-
-  function buildP2(K, R, t) {
-    // P2 = K[R|t]
-    const Rt = cv.matFromArray(3,4,cv.CV_64F, [
-      R.doubleAt(0,0), R.doubleAt(0,1), R.doubleAt(0,2), t.doubleAt(0,0),
-      R.doubleAt(1,0), R.doubleAt(1,1), R.doubleAt(1,2), t.doubleAt(1,0),
-      R.doubleAt(2,0), R.doubleAt(2,1), R.doubleAt(2,2), t.doubleAt(2,0)
-    ]);
-
-    const P = new cv.Mat();
-    const Z = new cv.Mat();
-    cv.gemm(K, Rt, 1, Z, 0, P);
-
-    Rt.delete(); Z.delete();
-    return P;
-  }
-
-  function computeExtentsSVD(pts3) {
-    // pts3: array of [x,y,z] in meters
-    const N = pts3.length;
-    if (N < 5) return null;
-
-    let mx=0,my=0,mz=0;
-    for (const p of pts3) { mx+=p[0]; my+=p[1]; mz+=p[2]; }
-    mx/=N; my/=N; mz/=N;
-
-    const A = new cv.Mat(N, 3, cv.CV_64F);
-    for (let i=0;i<N;i++){
-      A.doublePtr(i,0)[0] = pts3[i][0] - mx;
-      A.doublePtr(i,1)[0] = pts3[i][1] - my;
-      A.doublePtr(i,2)[0] = pts3[i][2] - mz;
-    }
-
-    const W = new cv.Mat();
-    const U = new cv.Mat();
-    const Vt = new cv.Mat();
-    cv.SVDecomp(A, W, U, Vt);
-
-    const V = new cv.Mat();
-    cv.transpose(Vt, V);
-
-    const Y = new cv.Mat();
-    const Z = new cv.Mat();
-    cv.gemm(A, V, 1, Z, 0, Y);
-
-    let min0=1e9,max0=-1e9,min1=1e9,max1=-1e9,min2=1e9,max2=-1e9;
-    for (let i=0;i<N;i++){
-      const a0 = Y.doubleAt(i,0);
-      const a1 = Y.doubleAt(i,1);
-      const a2 = Y.doubleAt(i,2);
-      if (a0<min0) min0=a0; if (a0>max0) max0=a0;
-      if (a1<min1) min1=a1; if (a1>max1) max1=a1;
-      if (a2<min2) min2=a2; if (a2>max2) max2=a2;
-    }
-
-    const e = [max0-min0, max1-min1, max2-min2].sort((a,b)=>b-a);
-
-    A.delete(); W.delete(); U.delete(); Vt.delete(); V.delete(); Y.delete(); Z.delete();
-    return { e1:e[0], e2:e[1], e3:e[2] };
-  }
-
-  /********************************************************************
-   * 12) CLEANUP
-   ********************************************************************/
-  function cleanupFrames() {
+  function cleanupFrames(){
     if (gray1) { gray1.delete(); gray1 = null; }
     if (gray2) { gray2.delete(); gray2 = null; }
-    poseReady = false;
     frozenDisplay = false;
   }
 
-  function cleanupPose() {
-    if (R) { R.delete(); R = null; }
-    if (t) { t.delete(); t = null; }
-    if (P1) { P1.delete(); P1 = null; }
-    if (P2) { P2.delete(); P2 = null; }
-  }
-
-  function resetAll() {
+  function resetAll(){
     cleanupFrames();
-    cleanupPose();
+    poseReady = false;
+    R = null; t = null;
 
     results = [];
     resultsBody.innerHTML = "";
@@ -1255,17 +957,471 @@
 
     cap2Btn.disabled = true;
     setStage(streaming ? "live" : "idle");
-
-    setOut("Reset ✅ Start over: Capture 1 → move baseline → Capture 2 → drag ROI.", false);
-    imuGateEl.textContent = imuEnabled ? "IMU on" : "IMU off";
-    imuGateEl.className = imuEnabled ? "ok" : "warn";
+    setOut("Reset ✅ Capture 1 → move baseline → Capture 2 → drag ROI.", false);
 
     clearLog();
     logLine("=== RESET ===");
   }
 
-  // init
   updateResCount();
+
+  /********************************************************************
+   * 11) Intrinsics helpers
+   ********************************************************************/
+  function buildScaledIntrinsics(W,H){
+    const sx = W / CALIB.calW;
+    const sy = H / CALIB.calH;
+
+    const fx = CALIB.fx * sx;
+    const fy = CALIB.fy * sy;
+    const cx = CALIB.cx * sx;
+    const cy = CALIB.cy * sy;
+
+    K = [
+      [fx, 0,  cx],
+      [0,  fy, cy],
+      [0,  0,  1 ]
+    ];
+    Kinv = inv3(K);
+
+    // cv mats for undistort
+    if (Kcv) Kcv.delete();
+    if (DISTcv) DISTcv.delete();
+    Kcv = cv.matFromArray(3,3,cv.CV_64F, [
+      fx,0,cx,
+      0,fy,cy,
+      0,0,1
+    ]);
+    DISTcv = cv.matFromArray(1,5,cv.CV_64F, CALIB.dist);
+  }
+
+  function pixelToNorm(u,v){
+    // x = K^{-1} [u,v,1]
+    const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2]*1;
+    const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2]*1;
+    const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2]*1;
+    return [x/z, y/z, 1.0];
+  }
+
+  /********************************************************************
+   * 12) Essential matrix estimation (RANSAC + 8-point)
+   ********************************************************************/
+  function estimateE_RANSAC(x1, x2){
+    const N = x1.length;
+    if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
+
+    const ITER = 1200;          // increase if needed
+    const TH = 1e-4;            // Sampson distance threshold in normalized coords
+    let bestInliers = [];
+    let bestE = null;
+
+    // Pre-allocate indices
+    const idx = [...Array(N).keys()];
+
+    for (let it=0; it<ITER; it++){
+      // sample 8 unique indices
+      shuffleInPlace(idx);
+      const s = idx.slice(0,8);
+
+      const E = eightPointE(x1, x2, s);
+      if (!E) continue;
+
+      // Enforce rank-2 + equal singular values
+      const E2 = enforceEssential(E);
+      if (!E2) continue;
+
+      // Score with Sampson distance
+      const inl = [];
+      for (let i=0; i<N; i++){
+        const d = sampsonDistance(E2, x1[i], x2[i]);
+        if (d < TH) inl.push(i);
+      }
+
+      if (inl.length > bestInliers.length){
+        bestInliers = inl;
+        bestE = E2;
+      }
+    }
+
+    if (!bestE || bestInliers.length < 80){
+      return { ok:false, reason:`E RANSAC failed (best inliers=${bestInliers.length}). Increase baseline, reduce rotation/blur, add texture.` };
+    }
+
+    // Refit E using all inliers (better)
+    const Erefit = eightPointE(x1, x2, bestInliers);
+    const Efinal = enforceEssential(Erefit) || bestE;
+
+    return { ok:true, E: Efinal, inliersIdx: bestInliers };
+  }
+
+  function eightPointE(x1, x2, indices){
+    // Build A (m x 9)
+    const m = indices.length;
+    if (m < 8) return null;
+
+    const A = new cv.Mat(m, 9, cv.CV_64F);
+
+    for (let r=0; r<m; r++){
+      const i = indices[r];
+      const X1 = x1[i][0], Y1 = x1[i][1];
+      const X2 = x2[i][0], Y2 = x2[i][1];
+
+      // row = [x2*x1, x2*y1, x2, y2*x1, y2*y1, y2, x1, y1, 1]
+      const row = [
+        X2*X1, X2*Y1, X2,
+        Y2*X1, Y2*Y1, Y2,
+        X1,    Y1,    1
+      ];
+      for (let c=0; c<9; c++){
+        A.doublePtr(r,c)[0] = row[c];
+      }
+    }
+
+    // SVD(A) -> last column of V gives solution for e (min singular value)
+    const W = new cv.Mat();
+    const U = new cv.Mat();
+    const Vt = new cv.Mat();
+    cv.SVDecomp(A, W, U, Vt);
+
+    // Vt is 9x9, last row corresponds to smallest singular value vector
+    const e = [];
+    for (let c=0; c<9; c++){
+      e.push(Vt.doubleAt(8, c));
+    }
+
+    A.delete(); W.delete(); U.delete(); Vt.delete();
+
+    // reshape into 3x3
+    return [
+      [e[0], e[1], e[2]],
+      [e[3], e[4], e[5]],
+      [e[6], e[7], e[8]],
+    ];
+  }
+
+  function enforceEssential(E){
+    // Essential matrix has rank 2 with equal first two singular values.
+    const Ecv = mat3ToCv(E);
+    const W = new cv.Mat();
+    const U = new cv.Mat();
+    const Vt = new cv.Mat();
+    cv.SVDecomp(Ecv, W, U, Vt);
+
+    const s1 = W.doubleAt(0,0);
+    const s2 = W.doubleAt(1,0);
+    const s = 0.5*(s1+s2);
+
+    // diag(s,s,0)
+    const S = cv.matFromArray(3,3,cv.CV_64F, [
+      s,0,0,
+      0,s,0,
+      0,0,0
+    ]);
+
+    const tmp = new cv.Mat();
+    const E2 = new cv.Mat();
+    cv.gemm(U, S, 1, new cv.Mat(), 0, tmp);
+    cv.gemm(tmp, Vt, 1, new cv.Mat(), 0, E2);
+
+    const Eout = cv3ToMat3(E2);
+
+    Ecv.delete(); W.delete(); U.delete(); Vt.delete(); S.delete(); tmp.delete(); E2.delete();
+
+    return Eout;
+  }
+
+  function sampsonDistance(E, x1, x2){
+    // d = (x2^T E x1)^2 / ( (Ex1)_0^2+(Ex1)_1^2+(E^T x2)_0^2+(E^T x2)_1^2 )
+    const Ex1 = mulMatVec3(E, x1);
+    const Etx2 = mulMatVec3(transpose3(E), x2);
+    const x2tEx1 = dot3(x2, Ex1);
+    const denom = Ex1[0]*Ex1[0] + Ex1[1]*Ex1[1] + Etx2[0]*Etx2[0] + Etx2[1]*Etx2[1];
+    return (x2tEx1*x2tEx1) / Math.max(denom, 1e-12);
+  }
+
+  /********************************************************************
+   * 13) Recover pose from E (decompose + cheirality)
+   ********************************************************************/
+  function recoverPoseFromE(E, x1, x2, inliersIdx){
+    // Decompose E = U diag(s) Vt
+    const Ecv = mat3ToCv(E);
+    const Wm = new cv.Mat();
+    const U = new cv.Mat();
+    const Vt = new cv.Mat();
+    cv.SVDecomp(Ecv, Wm, U, Vt);
+
+    // Fix determinant sign issues
+    // Ensure det(U)*det(V) is positive (so R is proper rotation)
+    let U3 = cv3ToMat3(U);
+    let V3t = cv3ToMat3(Vt);
+    let Udet = det3(U3);
+    let Vdet = det3(transpose3(V3t)); // det(V)
+    if (Udet*Vdet < 0){
+      // flip sign of last column of U
+      for (let r=0; r<3; r++){
+        U.doublePtr(r,2)[0] *= -1;
+      }
+      U3 = cv3ToMat3(U);
+    }
+
+    // W matrix
+    const W = [
+      [0,-1,0],
+      [1, 0,0],
+      [0, 0,1],
+    ];
+
+    const Ut = transpose3(U3);
+    const V = transpose3(V3t);
+
+    // Two rotation options
+    const R1 = mul3(mul3(U3, W), V);
+    const R2 = mul3(mul3(U3, transpose3(W)), V);
+
+    // t direction is third column of U
+    const tdir = [U3[0][2], U3[1][2], U3[2][2]];
+    const tdirNeg = [-tdir[0], -tdir[1], -tdir[2]];
+
+    Ecv.delete(); Wm.delete(); U.delete(); Vt.delete();
+
+    // Four candidates
+    const cand = [
+      {R:R1, t:tdir},
+      {R:R1, t:tdirNeg},
+      {R:R2, t:tdir},
+      {R:R2, t:tdirNeg},
+    ];
+
+    // Cheirality test: pick the (R,t) with most points in front of both cameras
+    let best = null;
+    let bestCount = -1;
+
+    // Use subset of inliers (speed)
+    const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
+
+    for (const c of cand){
+      let count = 0;
+      for (const idx of subset){
+        const X = triangulateDLT(c.R, c.t, x1[idx], x2[idx]);
+        if (!X) continue;
+
+        // Depth in cam1 is Z
+        const z1 = X[2];
+
+        // Depth in cam2 is Z2 = (R*X + t)_z
+        const X2cam = add3(mulMatVec3(c.R, X), c.t);
+        const z2 = X2cam[2];
+
+        if (z1 > 0 && z2 > 0) count++;
+      }
+      if (count > bestCount){
+        bestCount = count;
+        best = c;
+      }
+    }
+
+    if (!best || bestCount < 10){
+      return { ok:false, reason:`Cheirality test failed (bestCount=${bestCount}). More baseline, less rotation.` };
+    }
+
+    return { ok:true, R: best.R, t: best.t };
+  }
+
+  /********************************************************************
+   * 14) Triangulation (DLT) in camera coordinates
+   * ---------------------------------------------------------------
+   * P1 = [I|0]
+   * P2 = [R|t]
+   * x1, x2 are normalized: [x,y,1]
+   ********************************************************************/
+  function triangulateDLT(R, t, x1, x2){
+    // Build 4x4 A:
+    // x*P3 - P1, y*P3 - P2 for each view
+    // For P1=[I|0]:
+    // rows:
+    // [ -1,  0, x1, 0]
+    // [  0, -1, y1, 0]
+    // For P2=[R|t], P2 rows are r1|t1, r2|t2, r3|t3:
+    const x = x1[0], y = x1[1];
+    const xp = x2[0], yp = x2[1];
+
+    const r1 = R[0], r2 = R[1], r3 = R[2];
+
+    const A = new cv.Mat(4,4,cv.CV_64F);
+
+    // view1
+    setRow(A, 0, [-1, 0,  x, 0]);
+    setRow(A, 1, [ 0,-1,  y, 0]);
+
+    // view2: xp*(r3|t3) - (r1|t1)
+    setRow(A, 2, [
+      xp*r3[0] - r1[0],
+      xp*r3[1] - r1[1],
+      xp*r3[2] - r1[2],
+      xp*t[2]  - t[0]
+    ]);
+
+    // view2: yp*(r3|t3) - (r2|t2)
+    setRow(A, 3, [
+      yp*r3[0] - r2[0],
+      yp*r3[1] - r2[1],
+      yp*r3[2] - r2[2],
+      yp*t[2]  - t[1]
+    ]);
+
+    const W = new cv.Mat();
+    const U = new cv.Mat();
+    const Vt = new cv.Mat();
+    cv.SVDecomp(A, W, U, Vt);
+
+    // Solution is last row of Vt (smallest singular value)
+    const Xh = [Vt.doubleAt(3,0), Vt.doubleAt(3,1), Vt.doubleAt(3,2), Vt.doubleAt(3,3)];
+
+    A.delete(); W.delete(); U.delete(); Vt.delete();
+
+    if (Math.abs(Xh[3]) < 1e-12) return null;
+    return [Xh[0]/Xh[3], Xh[1]/Xh[3], Xh[2]/Xh[3]];
+  }
+
+  function setRow(M, r, arr){
+    for (let c=0;c<arr.length;c++){
+      M.doublePtr(r,c)[0] = arr[c];
+    }
+  }
+
+  /********************************************************************
+   * 15) PCA extents (SVD on centered points)
+   ********************************************************************/
+  function computeExtentsPCA(pts3){
+    const N = pts3.length;
+    if (N < 5) return null;
+
+    let mx=0,my=0,mz=0;
+    for (const p of pts3){ mx+=p[0]; my+=p[1]; mz+=p[2]; }
+    mx/=N; my/=N; mz/=N;
+
+    // Nx3 matrix
+    const A = new cv.Mat(N,3,cv.CV_64F);
+    for (let i=0;i<N;i++){
+      A.doublePtr(i,0)[0] = pts3[i][0]-mx;
+      A.doublePtr(i,1)[0] = pts3[i][1]-my;
+      A.doublePtr(i,2)[0] = pts3[i][2]-mz;
+    }
+
+    const W = new cv.Mat();
+    const U = new cv.Mat();
+    const Vt = new cv.Mat();
+    cv.SVDecomp(A, W, U, Vt);
+
+    // V = Vt^T
+    const V = transpose3(cv3ToMat3(Vt));
+
+    // Project points: Y = A * V (N x 3)
+    const Y = new cv.Mat();
+    const Vcv = mat3ToCv(V);
+    cv.gemm(A, Vcv, 1, new cv.Mat(), 0, Y);
+
+    let min0=1e9,max0=-1e9,min1=1e9,max1=-1e9,min2=1e9,max2=-1e9;
+    for (let i=0;i<N;i++){
+      const a0=Y.doubleAt(i,0), a1=Y.doubleAt(i,1), a2=Y.doubleAt(i,2);
+      if (a0<min0) min0=a0; if (a0>max0) max0=a0;
+      if (a1<min1) min1=a1; if (a1>max1) max1=a1;
+      if (a2<min2) min2=a2; if (a2>max2) max2=a2;
+    }
+
+    const e = [max0-min0, max1-min1, max2-min2].sort((a,b)=>b-a);
+
+    A.delete(); W.delete(); U.delete(); Vt.delete(); Vcv.delete(); Y.delete();
+
+    return { e1:e[0], e2:e[1], e3:e[2] };
+  }
+
+  /********************************************************************
+   * 16) Small linear algebra (3x3)
+   ********************************************************************/
+  function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+  function add3(a,b){ return [a[0]+b[0],a[1]+b[1],a[2]+b[2]]; }
+
+  function mulMatVec3(M,v){
+    return [
+      M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2],
+      M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2],
+      M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2],
+    ];
+  }
+
+  function transpose3(M){
+    return [
+      [M[0][0], M[1][0], M[2][0]],
+      [M[0][1], M[1][1], M[2][1]],
+      [M[0][2], M[1][2], M[2][2]],
+    ];
+  }
+
+  function mul3(A,B){
+    const C = [[0,0,0],[0,0,0],[0,0,0]];
+    for (let i=0;i<3;i++){
+      for (let j=0;j<3;j++){
+        C[i][j] = A[i][0]*B[0][j]+A[i][1]*B[1][j]+A[i][2]*B[2][j];
+      }
+    }
+    return C;
+  }
+
+  function det3(M){
+    return (
+      M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1]) -
+      M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0]) +
+      M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0])
+    );
+  }
+
+  function inv3(M){
+    const d = det3(M);
+    if (Math.abs(d) < 1e-12) throw new Error("K is singular? inv3 failed");
+    const inv = [
+      [
+        (M[1][1]*M[2][2]-M[1][2]*M[2][1])/d,
+        (M[0][2]*M[2][1]-M[0][1]*M[2][2])/d,
+        (M[0][1]*M[1][2]-M[0][2]*M[1][1])/d,
+      ],
+      [
+        (M[1][2]*M[2][0]-M[1][0]*M[2][2])/d,
+        (M[0][0]*M[2][2]-M[0][2]*M[2][0])/d,
+        (M[0][2]*M[1][0]-M[0][0]*M[1][2])/d,
+      ],
+      [
+        (M[1][0]*M[2][1]-M[1][1]*M[2][0])/d,
+        (M[0][1]*M[2][0]-M[0][0]*M[2][1])/d,
+        (M[0][0]*M[1][1]-M[0][1]*M[1][0])/d,
+      ],
+    ];
+    return inv;
+  }
+
+  function mat3ToCv(M){
+    return cv.matFromArray(3,3,cv.CV_64F, [
+      M[0][0],M[0][1],M[0][2],
+      M[1][0],M[1][1],M[1][2],
+      M[2][0],M[2][1],M[2][2],
+    ]);
+  }
+
+  function cv3ToMat3(Mcv){
+    // reads top-left 3x3 (works for 3x3 or bigger mats)
+    return [
+      [Mcv.doubleAt(0,0), Mcv.doubleAt(0,1), Mcv.doubleAt(0,2)],
+      [Mcv.doubleAt(1,0), Mcv.doubleAt(1,1), Mcv.doubleAt(1,2)],
+      [Mcv.doubleAt(2,0), Mcv.doubleAt(2,1), Mcv.doubleAt(2,2)],
+    ];
+  }
+
+  function shuffleInPlace(a){
+    for (let i=a.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      const t=a[i]; a[i]=a[j]; a[j]=t;
+    }
+  }
   </script>
 </body>
 </html>
