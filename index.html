@@ -186,6 +186,11 @@
       <input id="freezeToggle" type="checkbox" checked>
     </div>
 
+    <div class="pill">
+      <span>Strict IMU gate for Capture 2</span>
+      <input id="strictImuToggle" type="checkbox" checked>
+    </div>
+
     <button onclick="resetAll()" style="grid-column: 1 / -1;">Reset</button>
   </div>
 
@@ -231,7 +236,7 @@
         <li>Start camera.</li>
         <li>Optional: enable Sensors.</li>
         <li>Capture 1 at position A.</li>
-        <li>Move to position B.</li>
+        <li>Move to position B. Keep IMU green if you enabled it.</li>
         <li>Capture 2.</li>
         <li>Draw ROI around the target object in view 1.</li>
         <li>Then draw ROI around the same target object in view 2.</li>
@@ -323,7 +328,6 @@
     let cvReady = false;
     let streaming = false;
     let poseReady = false;
-    let frozenDisplay = false;
 
     let gray1 = null;
     let gray2 = null;
@@ -348,18 +352,14 @@
 
     const SAFE_BORDER_FRAC = 0.18;
     const ROT_THRESH_DEG = { yaw: 3, pitch: 2, roll: 2 };
-    const MAX_LK_ERR = 30.0;
-    const MAX_REPROJ_ERR_PX = 3.5;
     const MAX_DEPTH_M = 8.0;
+    const MAX_REPROJ_ERR_PX = 3.5;
     const MIN_TRACKED_POSE = 120;
 
     let roiState = "none"; // none, await1, await2
     const roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
     let roi1Box = null;
     let roi2Box = null;
-
-    let view1Obj = null;
-    let view2Obj = null;
 
     let results = [];
 
@@ -380,6 +380,7 @@
     const streamInfoEl = document.getElementById("streamInfo");
     const undToggle = document.getElementById("undToggle");
     const freezeToggle = document.getElementById("freezeToggle");
+    const strictImuToggle = document.getElementById("strictImuToggle");
 
     const startBtn = document.getElementById("startBtn");
     const imuBtn = document.getElementById("imuBtn");
@@ -514,13 +515,8 @@
         ctx.putImageData(frame2ImageData, 0, 0);
       }
 
-      // overlay ROIs
-      if (roi1Box && displayMode === "view1"){
-        drawBox(roi1Box, "yellow");
-      }
-      if (roi2Box && displayMode === "view2"){
-        drawBox(roi2Box, "yellow");
-      }
+      if (roi1Box && displayMode === "view1") drawBox(roi1Box, "yellow");
+      if (roi2Box && displayMode === "view2") drawBox(roi2Box, "yellow");
 
       if (roi.active){
         const x = Math.min(roi.x0, roi.x1);
@@ -551,6 +547,7 @@
         window.removeEventListener("devicemotion", onMotion);
         imuGateEl.textContent = "Sensors off";
         imuGateEl.className = "warn";
+        if (stage === "v1" && !strictImuToggle.checked) cap2Btn.disabled = false;
         return;
       }
 
@@ -610,6 +607,10 @@
 
       imuGateEl.textContent = ok ? "Rotation small ✅" : "Rotation high";
       imuGateEl.className = ok ? "ok" : "warn";
+
+      if (stage === "v1" && sensorsEnabled && strictImuToggle.checked){
+        cap2Btn.disabled = !ok;
+      }
     }
 
     function onMotion(e){
@@ -668,7 +669,7 @@
 
       setStage("v1");
       setDisplayMode("view1");
-      cap2Btn.disabled = false;
+      cap2Btn.disabled = sensorsEnabled && strictImuToggle.checked;
 
       logLine("=== CAPTURE 1 ===");
       logLine(`undistort=${undToggle.checked}`);
@@ -679,6 +680,10 @@
       }
 
       setOut("Captured View 1 ✅ Move to preset B, then Capture 2.", false);
+
+      if (!sensorsEnabled || !strictImuToggle.checked){
+        cap2Btn.disabled = false;
+      }
     }
 
     function captureView2(){
@@ -689,7 +694,6 @@
 
       gray2 = cap.gray;
       frame2ImageData = cap.imageData;
-      frozenDisplay = freezeToggle.checked;
 
       setDisplayMode("view2");
 
@@ -804,9 +808,7 @@
         total:x1n.length
       };
     }
-  </script>
 
-  <script>
     /********************************************************************
      * ROI FLOW
      ********************************************************************/
@@ -887,29 +889,29 @@
     }
 
     /********************************************************************
-     * OBJECT EXTRACTION + 2D SUPPORT GEOMETRY
+     * OBJECT EXTRACTION
      ********************************************************************/
     function measureWithTwoROIs(){
       if (!poseReady || !gray1 || !gray2 || !roi1Box || !roi2Box){
         return { ok:false, msg:"Need pose + two ROIs first." };
       }
 
-      view1Obj = extractObjectFromROI(gray1, roi1Box, "view1");
-      if (!view1Obj.ok) return view1Obj;
+      const obj1 = extractObjectFromROI(gray1, roi1Box, "view1");
+      if (!obj1.ok) return obj1;
 
-      view2Obj = extractObjectFromROI(gray2, roi2Box, "view2");
-      if (!view2Obj.ok) return view2Obj;
+      const obj2 = extractObjectFromROI(gray2, roi2Box, "view2");
+      if (!obj2.ok) return obj2;
 
       logLine(
-        `[OBJ1] area=${view1Obj.area.toFixed(1)} per=${view1Obj.perimeter.toFixed(1)} ` +
-        `circ=${view1Obj.circularity.toFixed(3)} aspect=${view1Obj.aspect.toFixed(3)} solid=${view1Obj.solidity.toFixed(3)}`
+        `[OBJ1] area=${obj1.area.toFixed(1)} per=${obj1.perimeter.toFixed(1)} ` +
+        `circ=${obj1.circularity.toFixed(3)} aspect=${obj1.aspect.toFixed(3)} solid=${obj1.solidity.toFixed(3)}`
       );
       logLine(
-        `[OBJ2] area=${view2Obj.area.toFixed(1)} per=${view2Obj.perimeter.toFixed(1)} ` +
-        `circ=${view2Obj.circularity.toFixed(3)} aspect=${view2Obj.aspect.toFixed(3)} solid=${view2Obj.solidity.toFixed(3)}`
+        `[OBJ2] area=${obj2.area.toFixed(1)} per=${obj2.perimeter.toFixed(1)} ` +
+        `circ=${obj2.circularity.toFixed(3)} aspect=${obj2.aspect.toFixed(3)} solid=${obj2.solidity.toFixed(3)}`
       );
 
-      return measureFromMatchedSupport(view1Obj, view2Obj);
+      return measureObjectFromAxes(obj1, obj2);
     }
 
     function extractObjectFromROI(gray, box, tag){
@@ -983,6 +985,7 @@
           const cnt = contours.get(i);
           const desc = contourDescriptors(cnt);
           const ctr = contourCentroid(cnt);
+
           if (!ctr || desc.area < 80){
             cnt.delete();
             continue;
@@ -1008,45 +1011,25 @@
         cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
 
         const bestCnt = contours.get(bestIdx);
-        const pts = contourPointsArray(bestCnt); // in upsampled ROI coords
-
+        const pts = contourPointsArray(bestCnt);
         if (pts.length < 20){
           bestCnt.delete();
           return { ok:false, msg:`${tag}: contour too weak.` };
         }
 
         const pca2 = pca2DPoints(pts);
-        if (!pca2) {
+        if (!pca2){
           bestCnt.delete();
-          return { ok:false, msg:`${tag}: 2D contour PCA failed.` };
+          return { ok:false, msg:`${tag}: 2D PCA failed.` };
         }
 
-        // full-image support points
-        const majorA = {
-          x: rx + pts[pca2.idxMajorMin].x / UPS,
-          y: ry + pts[pca2.idxMajorMin].y / UPS
-        };
-        const majorB = {
-          x: rx + pts[pca2.idxMajorMax].x / UPS,
-          y: ry + pts[pca2.idxMajorMax].y / UPS
-        };
-        const minorA = {
-          x: rx + pts[pca2.idxMinorMin].x / UPS,
-          y: ry + pts[pca2.idxMinorMin].y / UPS
-        };
-        const minorB = {
-          x: rx + pts[pca2.idxMinorMax].x / UPS,
-          y: ry + pts[pca2.idxMinorMax].y / UPS
-        };
+        const majorA = { x: rx + pts[pca2.idxMajorMin].x / 2, y: ry + pts[pca2.idxMajorMin].y / 2 };
+        const majorB = { x: rx + pts[pca2.idxMajorMax].x / 2, y: ry + pts[pca2.idxMajorMax].y / 2 };
+        const minorA = { x: rx + pts[pca2.idxMinorMin].x / 2, y: ry + pts[pca2.idxMinorMin].y / 2 };
+        const minorB = { x: rx + pts[pca2.idxMinorMax].x / 2, y: ry + pts[pca2.idxMinorMax].y / 2 };
 
-        const majorAxis = normalize2({
-          x: majorB.x - majorA.x,
-          y: majorB.y - majorA.y
-        });
-        const minorAxis = normalize2({
-          x: minorB.x - minorA.x,
-          y: minorB.y - minorA.y
-        });
+        const majorAxis = normalize2({ x: majorB.x - majorA.x, y: majorB.y - majorA.y });
+        const minorAxis = normalize2({ x: minorB.x - minorA.x, y: minorB.y - minorA.y });
 
         bestCnt.delete();
 
@@ -1057,8 +1040,7 @@
           circularity: bestDesc.circularity,
           aspect: bestDesc.aspect,
           solidity: bestDesc.solidity,
-          bbox: bestDesc.bbox,
-          center: { x: roiCenter.x, y: roiCenter.y },
+          center: roiCenter,
           majorA, majorB, minorA, minorB,
           majorAxis, minorAxis,
           majorLen2DPx: Math.hypot(majorB.x - majorA.x, majorB.y - majorA.y),
@@ -1107,14 +1089,11 @@
       c01 /= pts.length;
       c11 /= pts.length;
 
-      const C = [[c00,c01],[c01,c11]];
-      const ev = jacobiEigenSym(C);
+      const ev = jacobiEigenSym([[c00,c01],[c01,c11]]);
       const order = [0,1].sort((a,b)=>ev.values[b]-ev.values[a]);
 
-      let vMajor = { x: ev.vectors[0][order[0]], y: ev.vectors[1][order[0]] };
-      let vMinor = { x: ev.vectors[0][order[1]], y: ev.vectors[1][order[1]] };
-      vMajor = normalize2(vMajor);
-      vMinor = normalize2(vMinor);
+      let vMajor = normalize2({ x: ev.vectors[0][order[0]], y: ev.vectors[1][order[0]] });
+      let vMinor = normalize2({ x: ev.vectors[0][order[1]], y: ev.vectors[1][order[1]] });
 
       let majorMin=Infinity, majorMax=-Infinity;
       let minorMin=Infinity, minorMax=-Infinity;
@@ -1134,75 +1113,53 @@
 
       return {
         idxMajorMin, idxMajorMax,
-        idxMinorMin, idxMinorMax,
-        majorSpan: majorMax - majorMin,
-        minorSpan: minorMax - minorMin,
-        vMajor, vMinor
+        idxMinorMin, idxMinorMax
       };
     }
 
     /********************************************************************
-     * MEASUREMENT FROM MATCHED SUPPORT POINTS
+     * MEASUREMENT
      ********************************************************************/
-    function measureFromMatchedSupport(obj1, obj2){
-      // Align endpoint ordering by axis direction
-      let v1Maj = obj1.majorAxis;
-      let v2Maj = obj2.majorAxis;
-      let major2A = obj2.majorA;
-      let major2B = obj2.majorB;
-      if (dot2(v1Maj, v2Maj) < 0){
-        [major2A, major2B] = [major2B, major2A];
-      }
-
-      let v1Min = obj1.minorAxis;
-      let v2Min = obj2.minorAxis;
-      let minor2A = obj2.minorA;
-      let minor2B = obj2.minorB;
-      if (dot2(v1Min, v2Min) < 0){
-        [minor2A, minor2B] = [minor2B, minor2A];
-      }
-
-      const maj1 = triangulateMatchedPixels(obj1.majorA, major2A, "majorA");
-      const maj2 = triangulateMatchedPixels(obj1.majorB, major2B, "majorB");
-      if (!maj1.ok || !maj2.ok){
-        return { ok:false, msg:"Major-axis endpoint triangulation failed." };
-      }
-
-      const min1 = triangulateMatchedPixels(obj1.minorA, minor2A, "minorA");
-      const min2 = triangulateMatchedPixels(obj1.minorB, minor2B, "minorB");
-
-      const lengthMm = 1000 * dist3(maj1.X, maj2.X);
-
-      let widthMm = null;
-      let widthGood = false;
-      if (min1.ok && min2.ok){
-        widthMm = 1000 * dist3(min1.X, min2.X);
-        widthGood = isFinite(widthMm) && widthMm > 0 && widthMm < 5000;
-      }
-
+    function measureObjectFromAxes(obj1, obj2){
       const circularity = 0.5 * (obj1.circularity + obj2.circularity);
       const aspect2D = 0.5 * (obj1.aspect + obj2.aspect);
 
-      let measuredText = "";
-      let primaryMm = lengthMm;
-      let mode = "length";
+      const majorPair = bestAxisPair(obj1.majorA, obj1.majorB, obj2.majorA, obj2.majorB, "major");
+      const minorPair = bestAxisPair(obj1.minorA, obj1.minorB, obj2.minorA, obj2.minorB, "minor");
 
-      if (circularity > 0.78 && aspect2D < 1.2 && widthGood){
+      if (!majorPair.ok && !minorPair.ok){
+        return { ok:false, msg:"Axis endpoint triangulation failed." };
+      }
+
+      const lengthMm = majorPair.ok ? 1000 * dist3(majorPair.XA, majorPair.XB) : null;
+      const widthMm = minorPair.ok ? 1000 * dist3(minorPair.XA, minorPair.XB) : null;
+
+      let mode = "length";
+      let primaryMm = lengthMm ?? widthMm;
+      let measuredText = "";
+
+      if (circularity > 0.78 && aspect2D < 1.20 && lengthMm && widthMm){
         const D = 0.5 * (lengthMm + widthMm);
-        primaryMm = D;
         mode = "diameter";
+        primaryMm = D;
         measuredText = `D≈${D.toFixed(1)} mm`;
-      } else if (aspect2D > 2.0 || !widthGood){
+      } else if (aspect2D > 2.0 || !widthMm){
         mode = "length";
+        primaryMm = lengthMm;
         measuredText = `Length≈${lengthMm.toFixed(1)} mm`;
       } else {
+        // compact rectangular-ish object like eraser/phone/box
+        const L = Math.max(lengthMm ?? 0, widthMm ?? 0);
+        const W = Math.min(lengthMm ?? 0, widthMm ?? 0);
         mode = "length_width";
-        measuredText = `L≈${lengthMm.toFixed(1)} mm, W≈${widthMm.toFixed(1)} mm`;
+        primaryMm = L;
+        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
       }
 
       logLine(
-        `[MEASURE] mode=${mode} L=${lengthMm.toFixed(1)} mm ` +
-        `${widthGood ? `W=${widthMm.toFixed(1)} mm ` : ""}` +
+        `[MEASURE] mode=${mode} ` +
+        `${lengthMm ? `major=${lengthMm.toFixed(1)} mm ` : ""}` +
+        `${widthMm ? `minor=${widthMm.toFixed(1)} mm ` : ""}` +
         `circ=${circularity.toFixed(3)} aspect2D=${aspect2D.toFixed(3)}`
       );
 
@@ -1214,10 +1171,38 @@
         circularity,
         aspect2D,
         lengthMm,
-        widthMm: widthGood ? widthMm : null,
+        widthMm,
         metaText: `circ=${circularity.toFixed(3)}, ar=${aspect2D.toFixed(3)}`,
-        reprojMajPx: 0.5*((maj1.reprojPx ?? 0) + (maj2.reprojPx ?? 0)),
-        reprojMinPx: (min1.ok && min2.ok) ? 0.5*((min1.reprojPx ?? 0) + (min2.reprojPx ?? 0)) : null
+        reprojMajPx: majorPair.ok ? majorPair.reprojAvg : null,
+        reprojMinPx: minorPair.ok ? minorPair.reprojAvg : null
+      };
+    }
+
+    function bestAxisPair(a1, b1, a2, b2, tag){
+      const cand1 = testAxisPair(a1, b1, a2, b2, `${tag}:same`);
+      const cand2 = testAxisPair(a1, b1, b2, a2, `${tag}:swap`);
+
+      const valid = [cand1, cand2].filter(c => c.ok);
+      if (valid.length === 0){
+        return { ok:false };
+      }
+
+      valid.sort((u,v) => u.reprojAvg - v.reprojAvg);
+      logLine(`[${tag}] chose ${valid[0].label} reproj=${valid[0].reprojAvg.toFixed(2)} px`);
+      return valid[0];
+    }
+
+    function testAxisPair(p1A, p1B, p2A, p2B, label){
+      const A = triangulateMatchedPixels(p1A, p2A, `${label}:A`);
+      const B = triangulateMatchedPixels(p1B, p2B, `${label}:B`);
+      if (!A.ok || !B.ok) return { ok:false };
+
+      return {
+        ok:true,
+        label,
+        XA:A.X,
+        XB:B.X,
+        reprojAvg: 0.5 * (A.reprojPx + B.reprojPx)
       };
     }
 
@@ -1284,7 +1269,7 @@
         <td>${escapeHtml(res.measuredText)}</td>
         <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
         <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
-        <td title="reprojMaj=${(res.reprojMajPx ?? 0).toFixed(2)} px ${res.reprojMinPx!=null ? `reprojMin=${res.reprojMinPx.toFixed(2)} px` : ''}">
+        <td title="reprojMaj=${res.reprojMajPx!=null ? res.reprojMajPx.toFixed(2) : ''} px ${res.reprojMinPx!=null ? `reprojMin=${res.reprojMinPx.toFixed(2)} px` : ''}">
           ${escapeHtml(res.metaText)}
         </td>
       `;
@@ -1305,8 +1290,6 @@
       roiState = "none";
       roi1Box = null;
       roi2Box = null;
-      view1Obj = null;
-      view2Obj = null;
     }
 
     function cleanupFrames(){
@@ -1314,7 +1297,6 @@
       if (gray2){ gray2.delete(); gray2 = null; }
       frame1ImageData = null;
       frame2ImageData = null;
-      frozenDisplay = false;
     }
 
     function resetAll(){
@@ -1331,7 +1313,7 @@
 
       cap2Btn.disabled = true;
       setStage(streaming ? "live" : "idle");
-      setDisplayMode(streaming ? "live" : "live");
+      setDisplayMode("live");
       setOut("Reset ✅ Start over with Capture 1.", false);
 
       clearLog();
@@ -1341,12 +1323,8 @@
     updateResCount();
 
     /********************************************************************
-     * NUMERIC + GEOMETRY HELPERS
+     * HELPERS
      ********************************************************************/
-    function clamp(v, lo, hi){
-      return Math.max(lo, Math.min(hi, v));
-    }
-    
     function buildScaledIntrinsics(W,H){
       const sx = W / CALIB.calW;
       const sy = H / CALIB.calH;
@@ -1373,6 +1351,10 @@
         0,0,1
       ]);
       DISTcv = cv.matFromArray(1,5,cv.CV_64F, CALIB.dist);
+    }
+
+    function clamp(v, lo, hi){
+      return Math.max(lo, Math.min(hi, v));
     }
 
     function pixelToNorm(u,v){
@@ -1452,231 +1434,6 @@
       const e1 = Math.hypot(p1.u - u1, p1.v - v1);
       const e2 = Math.hypot(p2.u - u2, p2.v - v2);
       return 0.5*(e1 + e2);
-    }
-
-    function triangulateDLT_smallestEigen(R, t, x1, x2){
-      const x = x1[0], y = x1[1];
-      const xp = x2[0], yp = x2[1];
-
-      const r1 = R[0], r2 = R[1], r3 = R[2];
-      const A = [
-        [-1, 0, x, 0],
-        [ 0,-1, y, 0],
-        [xp*r3[0]-r1[0], xp*r3[1]-r1[1], xp*r3[2]-r1[2], xp*t[2]-t[0]],
-        [yp*r3[0]-r2[0], yp*r3[1]-r2[1], yp*r3[2]-r2[2], yp*t[2]-t[1]]
-      ];
-
-      const ATA = matMul(matT(A), A);
-      const ev = jacobiEigenSym(ATA);
-      const k = argMin(ev.values);
-      const vh = ev.vectors.map(row => row[k]);
-
-      if (Math.abs(vh[3]) < 1e-12) return null;
-      return [vh[0]/vh[3], vh[1]/vh[3], vh[2]/vh[3]];
-    }
-
-    function estimateE_RANSAC(x1, x2){
-      const N = x1.length;
-      if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
-
-      const ITER = 1500;
-      const TH = 1e-4;
-      let bestInliers = [];
-      let bestE = null;
-
-      const idx = [...Array(N).keys()];
-
-      for (let it=0; it<ITER; it++){
-        shuffleInPlace(idx);
-        const s = idx.slice(0,8);
-
-        let E = eightPointE_pureJS(x1, x2, s);
-        if (!E) continue;
-
-        E = enforceEssential_3x3(E);
-
-        const inl = [];
-        for (let i=0; i<N; i++){
-          const d = sampsonDistance(E, x1[i], x2[i]);
-          if (d < TH) inl.push(i);
-        }
-
-        if (inl.length > bestInliers.length){
-          bestInliers = inl;
-          bestE = E;
-        }
-      }
-
-      if (!bestE || bestInliers.length < 80){
-        return { ok:false, reason:`E RANSAC failed (best inliers=${bestInliers.length}).` };
-      }
-
-      let Erefit = eightPointE_pureJS(x1, x2, bestInliers);
-      Erefit = enforceEssential_3x3(Erefit);
-
-      return { ok:true, E:Erefit, inliersIdx:bestInliers };
-    }
-
-    function eightPointE_pureJS(x1, x2, indices){
-      const A = [];
-      for (let r=0; r<indices.length; r++){
-        const i = indices[r];
-        const X1 = x1[i][0], Y1 = x1[i][1];
-        const X2 = x2[i][0], Y2 = x2[i][1];
-        A.push([
-          X2*X1, X2*Y1, X2,
-          Y2*X1, Y2*Y1, Y2,
-          X1, Y1, 1
-        ]);
-      }
-
-      const ATA = matMul(matT(A), A);
-      const eig = jacobiEigenSym(ATA);
-      const k = argMin(eig.values);
-      const e = eig.vectors.map(row => row[k]);
-
-      return [
-        [e[0], e[1], e[2]],
-        [e[3], e[4], e[5]],
-        [e[6], e[7], e[8]]
-      ];
-    }
-
-    function enforceEssential_3x3(E){
-      const EtE = mul3(transpose3(E), E);
-      const ev = jacobiEigenSym(EtE);
-      const vals = ev.values.slice();
-      const V = ev.vectors;
-
-      const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
-      const lam = order.map(i=>Math.max(vals[i],0));
-
-      const Vsorted = [
-        [V[0][order[0]], V[0][order[1]], V[0][order[2]]],
-        [V[1][order[0]], V[1][order[1]], V[1][order[2]]],
-        [V[2][order[0]], V[2][order[1]], V[2][order[2]]]
-      ];
-
-      const s1 = Math.sqrt(lam[0]);
-      const s2 = Math.sqrt(lam[1]);
-      const s = 0.5*(s1+s2);
-
-      const inv = [
-        1/Math.max(s1,1e-12),
-        1/Math.max(s2,1e-12),
-        0
-      ];
-
-      const EV = mul3(E, Vsorted);
-      let U = [
-        [EV[0][0]*inv[0], EV[0][1]*inv[1], EV[0][2]*inv[2]],
-        [EV[1][0]*inv[0], EV[1][1]*inv[1], EV[1][2]*inv[2]],
-        [EV[2][0]*inv[0], EV[2][1]*inv[1], EV[2][2]*inv[2]]
-      ];
-      U = ortho3(U);
-
-      const S = [
-        [s,0,0],
-        [0,s,0],
-        [0,0,0]
-      ];
-
-      return mul3(mul3(U,S), transpose3(Vsorted));
-    }
-
-    function sampsonDistance(E, x1, x2){
-      const Ex1 = mulMatVec3(E, x1);
-      const Etx2 = mulMatVec3(transpose3(E), x2);
-      const x2tEx1 = dot3(x2, Ex1);
-      const denom = Ex1[0]*Ex1[0] + Ex1[1]*Ex1[1] + Etx2[0]*Etx2[0] + Etx2[1]*Etx2[1];
-      return (x2tEx1*x2tEx1) / Math.max(denom, 1e-12);
-    }
-
-    function recoverPoseFromE(E, x1, x2, inliersIdx){
-      const svd = svd3_from_EtE(E);
-      if (!svd) return { ok:false, reason:"SVD failed" };
-
-      const U = svd.U;
-      const V = svd.V;
-
-      const W = [[0,-1,0],[1,0,0],[0,0,1]];
-
-      const R1 = mul3(mul3(U,W), transpose3(V));
-      const R2 = mul3(mul3(U,transpose3(W)), transpose3(V));
-      const tdir = [U[0][2], U[1][2], U[2][2]];
-      const tneg = [-tdir[0], -tdir[1], -tdir[2]];
-
-      const cand = [
-        {R:R1,t:tdir},
-        {R:R1,t:tneg},
-        {R:R2,t:tdir},
-        {R:R2,t:tneg}
-      ];
-
-      let best = null;
-      let bestCount = -1;
-      const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
-
-      for (const c of cand){
-        let count = 0;
-        for (const idx of subset){
-          const X = triangulateDLT_smallestEigen(c.R, c.t, x1[idx], x2[idx]);
-          if (!X) continue;
-          const z1 = X[2];
-          const X2 = add3(mulMatVec3(c.R, X), c.t);
-          const z2 = X2[2];
-          if (z1 > 0 && z2 > 0) count++;
-        }
-        if (count > bestCount){
-          bestCount = count;
-          best = c;
-        }
-      }
-
-      if (!best || bestCount < 10){
-        return { ok:false, reason:`Cheirality failed (bestCount=${bestCount}).` };
-      }
-
-      return { ok:true, R:best.R, t:best.t };
-    }
-
-    function svd3_from_EtE(E){
-      const EtE = mul3(transpose3(E), E);
-      const ev = jacobiEigenSym(EtE);
-      const vals = ev.values.slice();
-      const Vraw = ev.vectors;
-      const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
-      const lam = order.map(i=>Math.max(vals[i],0));
-
-      let V = [
-        [Vraw[0][order[0]], Vraw[0][order[1]], Vraw[0][order[2]]],
-        [Vraw[1][order[0]], Vraw[1][order[1]], Vraw[1][order[2]]],
-        [Vraw[2][order[0]], Vraw[2][order[1]], Vraw[2][order[2]]]
-      ];
-
-      const s = lam.map(x=>Math.sqrt(x));
-      const EV = mul3(E, V);
-
-      const inv0 = 1/Math.max(s[0],1e-12);
-      const inv1 = 1/Math.max(s[1],1e-12);
-      const inv2 = 1/Math.max(s[2],1e-12);
-
-      let U = [
-        [EV[0][0]*inv0, EV[0][1]*inv1, EV[0][2]*inv2],
-        [EV[1][0]*inv0, EV[1][1]*inv1, EV[1][2]*inv2],
-        [EV[2][0]*inv0, EV[2][1]*inv1, EV[2][2]*inv2]
-      ];
-
-      U = ortho3(U);
-
-      if (det3(U) < 0){
-        U[0][2] *= -1; U[1][2] *= -1; U[2][2] *= -1;
-      }
-      if (det3(V) < 0){
-        V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
-      }
-
-      return { U, V, s };
     }
 
     function jacobiEigenSym(A){
@@ -1775,13 +1532,6 @@
       }
     }
 
-    function dot2(a,b){ return a.x*b.x + a.y*b.y; }
-    function normalize2(v){
-      const n = Math.hypot(v.x, v.y);
-      if (n < 1e-12) return { x:1, y:0 };
-      return { x:v.x/n, y:v.y/n };
-    }
-
     function dot3(a,b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
     function dist3(a,b){ return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]); }
     function add3(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
@@ -1798,13 +1548,19 @@
       const n = Math.sqrt(Math.max(dot3(v,v),1e-30));
       return [v[0]/n, v[1]/n, v[2]/n];
     }
-
     function mulMatVec3(M, v){
       return [
         M[0][0]*v[0] + M[0][1]*v[1] + M[0][2]*v[2],
         M[1][0]*v[0] + M[1][1]*v[1] + M[1][2]*v[2],
         M[2][0]*v[0] + M[2][1]*v[1] + M[2][2]*v[2]
       ];
+    }
+
+    function dot2(a,b){ return a.x*b.x + a.y*b.y; }
+    function normalize2(v){
+      const n = Math.hypot(v.x, v.y);
+      if (n < 1e-12) return { x:1, y:0 };
+      return { x:v.x/n, y:v.y/n };
     }
 
     function transpose3(M){
