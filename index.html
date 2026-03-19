@@ -198,7 +198,7 @@
     <button id="cap2Btn" class="primary" onclick="captureView2()" disabled>Capture 2</button>
 
     <div class="pill">
-      <span>Baseline (cm) — I physically move phone this distance</span>
+      <span>Baseline (cm) — move between preset positions</span>
       <input id="baselineCm" type="number" value="20" step="1" style="width:110px;">
     </div>
 
@@ -208,8 +208,8 @@
     </div>
 
     <div class="pill">
-      <span>Undistort (toggle)</span>
-      <input id="undToggle" type="checkbox">
+      <span>Undistort (recommended ON)</span>
+      <input id="undToggle" type="checkbox" checked>
     </div>
 
     <button onclick="resetAll()" style="grid-column: 1 / -1;">Reset</button>
@@ -239,23 +239,23 @@
       </summary>
       <div class="row">
         <button onclick="clearLog()">Clear log</button>
-        <span class="small">If Capture 2 fails, scroll here for the exact reason.</span>
+        <span class="small">If Capture 2 or ROI measurement fails, scroll here.</span>
       </div>
       <pre id="log"></pre>
     </details>
 
     <details open>
       <summary>
-        <span>How I use this (demo steps)</span>
+        <span>How I use this</span>
         <span class="small">tap to collapse</span>
       </summary>
       <ol class="small" style="margin-top:8px;">
         <li>Start</li>
-        <li>IMU → allow permission</li>
-        <li>Capture 1 (hold still)</li>
-        <li>Move phone sideways by baseline (10–25 cm) with minimal rotation</li>
-        <li>When gate is green, Capture 2</li>
-        <li>Drag ROI around object to measure (repeat for multiple objects)</li>
+        <li>Optional: IMU → allow permission</li>
+        <li>Capture 1 at preset position A</li>
+        <li>Move the phone/tripod/slider to preset position B</li>
+        <li>Capture 2</li>
+        <li>Drag ROI around one object</li>
       </ol>
     </details>
 
@@ -301,7 +301,7 @@
       }
 
       cv.onRuntimeInitialized = () => {
-        window.__cvReadyHook && window.__cvReadyHook();
+        if (window.__cvReadyHook) window.__cvReadyHook();
       };
     }
   </script>
@@ -310,7 +310,7 @@
 
   <script>
     /********************************************************************
-     * HARD DEBUG
+     * DEBUG
      ********************************************************************/
     const logEl = document.getElementById("log");
 
@@ -372,7 +372,14 @@
     let results = [];
     let stage = "idle";
 
-    const ROT_THRESH_DEG = { yaw: 6, pitch: 4, roll: 4 };
+    const ROT_THRESH_DEG = { yaw: 3, pitch: 2, roll: 2 };
+    const SAFE_BORDER_FRAC = 0.20;
+
+    const MAX_LK_ERR = 30.0;
+    const MAX_REPROJ_ERR_PX = 3.5;
+    const MIN_TRACKED_POINTS = 18;
+    const MIN_3D_POINTS = 12;
+    const MAX_DEPTH_M = 8.0;
 
     const roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
     let lastOverlay = null;
@@ -496,7 +503,7 @@
           logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
           logLine(`K fx=${K[0][0].toFixed(2)} fy=${K[1][1].toFixed(2)} cx=${K[0][2].toFixed(2)} cy=${K[1][2].toFixed(2)}`);
 
-          setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
+          setOut("Start ✅ Capture 1 at preset A, then Capture 2 at preset B.", false);
           requestAnimationFrame(drawLoop);
         };
 
@@ -554,7 +561,7 @@
         window.removeEventListener("deviceorientation", onOrientation);
         imuGateEl.textContent = "IMU off";
         imuGateEl.className = "warn";
-        cap2Btn.disabled = true;
+        if (stage === "v1") cap2Btn.disabled = false;
         return;
       }
 
@@ -567,7 +574,7 @@
 
         imuEnabled = true;
         window.addEventListener("deviceorientation", onOrientation);
-        imuGateEl.textContent = "IMU on (waiting for Capture 1)";
+        imuGateEl.textContent = "IMU on";
         imuGateEl.className = "ok";
         setOut("IMU enabled.", false);
 
@@ -609,10 +616,9 @@
 
       if (stage === "v1"){
         imuGateEl.textContent = ok
-          ? "OK for Capture 2 ✅ (rotation small)"
-          : "Move mostly sideways (reduce rotation)";
+          ? "Rotation small ✅"
+          : "Rotation high";
         imuGateEl.className = ok ? "ok" : "warn";
-        cap2Btn.disabled = !ok;
       }
     }
 
@@ -651,7 +657,7 @@
       drollEl.textContent = "0";
 
       setStage("v1");
-      cap2Btn.disabled = !imuEnabled;
+      cap2Btn.disabled = false;
 
       clearLog();
       logLine("=== CAPTURE 1 ===");
@@ -659,9 +665,9 @@
       logLine(`gray1=${gray1.cols}x${gray1.rows}`);
       logLine(`baseline cm=${document.getElementById("baselineCm").value}`);
 
-      imuGateEl.textContent = "Move sideways; wait for green gate";
-      imuGateEl.className = "warn";
-      setOut("Captured View 1 ✅ Move sideways by baseline, keep rotation low, then Capture 2.", false);
+      imuGateEl.textContent = imuEnabled ? "Move to preset B; keep rotation low" : "IMU not enabled";
+      imuGateEl.className = imuEnabled ? "warn" : "warn";
+      setOut("Captured View 1 ✅ Move to preset B, then Capture 2.", false);
     }
 
     function captureView2(){
@@ -690,7 +696,7 @@
       cap2Btn.disabled = true;
 
       logLine(`POSE OK ✅ inliers=${res.inliers} / ${res.total}`);
-      setOut("Pose ready ✅ Drag ROI around objects to measure.", false);
+      setOut("Pose ready ✅ Drag ROI around one object.", false);
     }
 
     /********************************************************************
@@ -794,48 +800,22 @@
       if (typeof cv.Canny !== "function") return { ok:false, msg:"Missing Canny." };
       if (typeof cv.findContours !== "function") return { ok:false, msg:"Missing findContours." };
 
-      rx = Math.max(0, Math.min(Math.round(rx), gray1.cols - 1));
-      ry = Math.max(0, Math.min(Math.round(ry), gray1.rows - 1));
-      rw = Math.max(1, Math.min(Math.round(rw), gray1.cols - rx));
-      rh = Math.max(1, Math.min(Math.round(rh), gray1.rows - ry));
+      rx = clamp(Math.round(rx), 0, gray1.cols - 1);
+      ry = clamp(Math.round(ry), 0, gray1.rows - 1);
+      rw = clamp(Math.round(rw), 1, gray1.cols - rx);
+      rh = clamp(Math.round(rh), 1, gray1.rows - ry);
 
-      // First try corners within ROI
-      {
-        const mask = new cv.Mat(gray1.rows, gray1.cols, cv.CV_8U);
-        mask.setTo(new cv.Scalar(0));
-
-        const rect = new cv.Rect(rx, ry, rw, rh);
-        const maskROI = mask.roi(rect);
-        maskROI.setTo(new cv.Scalar(255));
-        maskROI.delete();
-
-        const p1 = new cv.Mat();
-        cv.goodFeaturesToTrack(gray1, p1, 600, 0.01, 6, mask);
-        mask.delete();
-
-        const nCorners = p1.rows;
-
-        if (nCorners >= 25){
-          const res = trackAndTriangulateFromPointMat(p1);
-          p1.delete();
-
-          if (res.ok){
-            res.measuredText += " (corners)";
-            return res;
-          }
-
-          logLine(`[ROI] Corners path failed -> ${res.msg} | switching to contour`);
-        } else {
-          p1.delete();
-          logLine(`[ROI] Corners path: not enough corners (${nCorners}) | switching to contour`);
-        }
+      const roiCenterImg = { x: rx + 0.5*rw, y: ry + 0.5*rh };
+      if (!pointInSafeCenterRegion(roiCenterImg.x, roiCenterImg.y, gray1.cols, gray1.rows)){
+        logLine("[ROI] Warning: ROI center is near image edge; error may be worse.");
       }
 
-      // Fallback: contour-based boundary points
       let roi1 = null;
       let roiUp = null;
       let blur = null;
+      let thresh = null;
       let edges = null;
+      let combo = null;
       let morph = null;
       let contours = null;
       let hierarchy = null;
@@ -851,44 +831,68 @@
         blur = new cv.Mat();
         cv.GaussianBlur(roiUp, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
 
+        thresh = new cv.Mat();
+        cv.threshold(blur, thresh, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+
+        const whiteFrac = cv.countNonZero(thresh) / Math.max(1, thresh.rows * thresh.cols);
+        if (whiteFrac > 0.80 || whiteFrac < 0.05){
+          cv.threshold(blur, thresh, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+        }
+
         edges = new cv.Mat();
         cv.Canny(blur, edges, 40, 120);
 
-        morph = new cv.Mat();
-        const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
-        cv.morphologyEx(edges, morph, cv.MORPH_CLOSE, kClose);
-        kClose.delete();
+        combo = new cv.Mat();
+        cv.bitwise_or(thresh, edges, combo);
 
-        const kDil = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
-        cv.dilate(morph, morph, kDil, new cv.Point(-1,-1), 1);
-        kDil.delete();
+        morph = new cv.Mat();
+        const kOpen = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
+        const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
+
+        cv.morphologyEx(combo, morph, cv.MORPH_OPEN, kOpen);
+        cv.morphologyEx(morph, morph, cv.MORPH_CLOSE, kClose);
+
+        kOpen.delete();
+        kClose.delete();
 
         contours = new cv.MatVector();
         hierarchy = new cv.Mat();
         cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
 
-        logLine(`[ROI] Contour path: contours=${contours.size()}`);
-
+        logLine(`[ROI] contours=${contours.size()}`);
         if (contours.size() === 0){
-          return { ok:false, msg:"Contour path: no contours found. Tighten ROI and increase contrast." };
+          return { ok:false, msg:"No object found in ROI. Tighten ROI and reduce clutter." };
         }
 
+        const roiCtrUp = { x: 0.5 * morph.cols, y: 0.5 * morph.rows };
+
         let bestIdx = -1;
-        let bestPer = -1;
+        let bestScore = -Infinity;
+        let bestDesc = null;
 
         for (let i = 0; i < contours.size(); i++){
           const cnt = contours.get(i);
-          const per = cv.arcLength(cnt, true);
-          cnt.delete();
+          const desc = contourDescriptors(cnt);
+          const ctr = contourCentroid(cnt);
 
-          if (per > bestPer){
-            bestPer = per;
-            bestIdx = i;
+          if (!ctr || desc.area < 80){
+            cnt.delete();
+            continue;
           }
+
+          const score = contourScore(desc, ctr, roiCtrUp);
+
+          if (score > bestScore){
+            bestScore = score;
+            bestIdx = i;
+            bestDesc = desc;
+          }
+
+          cnt.delete();
         }
 
-        if (bestIdx < 0 || bestPer < 120){
-          return { ok:false, msg:"Contour path: contour too small. Use bigger ROI / higher resolution." };
+        if (bestIdx < 0){
+          return { ok:false, msg:"Could not isolate a confident object in ROI." };
         }
 
         contours.delete();
@@ -899,16 +903,59 @@
         cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
 
         const bestCnt = contours.get(bestIdx);
+
+        logLine(
+          `[ROI] chosen contour: area=${bestDesc.area.toFixed(1)} per=${bestDesc.perimeter.toFixed(1)} ` +
+          `circ=${bestDesc.circularity.toFixed(3)} aspect=${bestDesc.aspect.toFixed(3)} solid=${bestDesc.solidity.toFixed(3)}`
+        );
+
+        const maskObj = new cv.Mat(morph.rows, morph.cols, cv.CV_8U);
+        maskObj.setTo(new cv.Scalar(0));
+        cv.drawContours(maskObj, contours, bestIdx, new cv.Scalar(255), -1);
+
+        const pLocal = new cv.Mat();
+        cv.goodFeaturesToTrack(blur, pLocal, 300, 0.01, 6, maskObj);
+        const nLocalCorners = pLocal.rows;
+        maskObj.delete();
+
+        if (nLocalCorners >= 18){
+          const p1 = new cv.Mat(nLocalCorners, 1, cv.CV_32FC2);
+          for (let i = 0; i < nLocalCorners; i++){
+            const u = rx + (pLocal.data32F[i*2] / UPS);
+            const v = ry + (pLocal.data32F[i*2 + 1] / UPS);
+            p1.data32F[i*2] = u;
+            p1.data32F[i*2 + 1] = v;
+          }
+          pLocal.delete();
+
+          const res = trackAndTriangulateFromPointMat(p1, {
+            circularity: bestDesc.circularity,
+            aspect2D: bestDesc.aspect,
+            area2D: bestDesc.area,
+            perimeter2D: bestDesc.perimeter,
+            solidity2D: bestDesc.solidity,
+            source: "corners"
+          });
+          p1.delete();
+
+          if (res.ok){
+            bestCnt.delete();
+            return res;
+          }
+
+          logLine(`[ROI] corners path failed -> ${res.msg}, falling back to contour points`);
+        } else {
+          pLocal.delete();
+          logLine(`[ROI] corners in object mask too few (${nLocalCorners}) -> contour fallback`);
+        }
+
         const wantN = 120;
         const minSpacing = 2;
-
         const ptsUp = sampleContourPointsEven(bestCnt, wantN, minSpacing);
         bestCnt.delete();
 
-        logLine(`[ROI] Contour path: bestPer=${bestPer.toFixed(1)} ptsSampled=${ptsUp.length}`);
-
-        if (ptsUp.length < 30){
-          return { ok:false, msg:`Contour path: too few boundary pts (${ptsUp.length}). Increase ROI or resolution.` };
+        if (ptsUp.length < 25){
+          return { ok:false, msg:`Contour fallback too weak (${ptsUp.length} pts).` };
         }
 
         const p1 = new cv.Mat(ptsUp.length, 1, cv.CV_32FC2);
@@ -919,26 +966,32 @@
           p1.data32F[i*2 + 1] = v;
         }
 
-        const res = trackAndTriangulateFromPointMat(p1);
+        const res = trackAndTriangulateFromPointMat(p1, {
+          circularity: bestDesc.circularity,
+          aspect2D: bestDesc.aspect,
+          area2D: bestDesc.area,
+          perimeter2D: bestDesc.perimeter,
+          solidity2D: bestDesc.solidity,
+          source: "contour"
+        });
         p1.delete();
 
-        if (!res.ok) return res;
-
-        res.measuredText += " (contour)";
         return res;
 
       } finally {
         if (roi1) roi1.delete();
         if (roiUp) roiUp.delete();
         if (blur) blur.delete();
+        if (thresh) thresh.delete();
         if (edges) edges.delete();
+        if (combo) combo.delete();
         if (morph) morph.delete();
         if (contours) contours.delete();
         if (hierarchy) hierarchy.delete();
       }
     }
 
-    function trackAndTriangulateFromPointMat(p1){
+    function trackAndTriangulateFromPointMat(p1, shapeInfo = {}){
       const p2 = new cv.Mat();
       const status = new cv.Mat();
       const err = new cv.Mat();
@@ -948,11 +1001,13 @@
 
       cv.calcOpticalFlowPyrLK(gray1, gray2, p1, p2, status, err, win, 4, crit);
 
-      const x1 = [];
-      const x2 = [];
+      const rawMatches = [];
 
       for (let i = 0; i < status.rows; i++){
         if (!status.ucharPtr(i,0)[0]) continue;
+
+        const lkErr = err.floatAt(i,0);
+        if (lkErr > MAX_LK_ERR) continue;
 
         const u1 = p1.data32F[i*2];
         const v1 = p1.data32F[i*2 + 1];
@@ -961,30 +1016,43 @@
 
         if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
 
-        x1.push(pixelToNorm(u1, v1));
-        x2.push(pixelToNorm(u2, v2));
+        rawMatches.push({
+          u1, v1, u2, v2,
+          x1: pixelToNorm(u1, v1),
+          x2: pixelToNorm(u2, v2),
+          lkErr
+        });
       }
 
       p2.delete();
       status.delete();
       err.delete();
 
-      if (x1.length < 25){
-        return { ok:false, msg:`Tracking failed: kept only ${x1.length} tracked points.` };
+      if (rawMatches.length < MIN_TRACKED_POINTS){
+        return { ok:false, msg:`Tracking weak: only ${rawMatches.length} matches survived LK filtering.` };
       }
 
       const pts3 = [];
-      for (let i = 0; i < x1.length; i++){
-        const X = triangulateDLT_smallestEigen(R, t, x1[i], x2[i]);
+      const reprojErrs = [];
+
+      for (const m of rawMatches){
+        const X = triangulateDLT_smallestEigen(R, t, m.x1, m.x2);
         if (!X) continue;
         if (!isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])) continue;
-        if (X[2] <= 0) continue;
-        if (X[2] > 10) continue;
+        if (X[2] <= 0 || X[2] > MAX_DEPTH_M) continue;
+
+        const X2cam = add3(mulMatVec3(R, X), t);
+        if (X2cam[2] <= 0) continue;
+
+        const rerr = reprojErrPx(X, m.u1, m.v1, m.u2, m.v2);
+        if (!isFinite(rerr) || rerr > MAX_REPROJ_ERR_PX) continue;
+
         pts3.push(X);
+        reprojErrs.push(rerr);
       }
 
-      if (pts3.length < 15){
-        return { ok:false, msg:`Triangulation unstable: only ${pts3.length} 3D points survived.` };
+      if (pts3.length < MIN_3D_POINTS){
+        return { ok:false, msg:`Triangulation unstable: only ${pts3.length} 3D points survived filtering.` };
       }
 
       const ext = computeExtentsPCA_covEigen(pts3);
@@ -994,29 +1062,40 @@
       const e2 = ext.e2 * 1000;
       const e3 = ext.e3 * 1000;
 
-      const r12 = e1 / Math.max(e2, 1e-9);
-      const r23 = e2 / Math.max(e3, 1e-9);
+      const circ = shapeInfo.circularity ?? 0;
+      const aspect2D = shapeInfo.aspect2D ?? (e1 / Math.max(e2, 1e-9));
 
-      let measuredText = "";
-      let primaryMm = e1;
+      const shape = {
+        circularity: circ,
+        aspectRatio: aspect2D,
+        primaryMm: e1,
+        secondaryMm: e2,
+        tertiaryMm: e3
+      };
 
-      if (r12 < 1.2 && r23 < 1.2){
-        const D = (e1 + e2 + e3) / 3.0;
-        measuredText = `D≈${D.toFixed(1)} mm (ball-ish)`;
-        primaryMm = D;
-      } else if (r12 > 2.2){
-        measuredText = `Length≈${e1.toFixed(1)} mm (spoon-ish)`;
-        primaryMm = e1;
-      } else if (r12 < 1.15){
-        const side = 0.5 * (e1 + e2);
-        measuredText = `Side≈${side.toFixed(1)} mm (box-ish)`;
-        primaryMm = side;
-      } else {
-        measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
-        primaryMm = e1;
+      if (circ > 0.78 && aspect2D < 1.20){
+        shape.primaryMm = 0.5 * (e1 + e2);
+        shape.secondaryMm = 0.5 * (e1 + e2);
       }
 
-      return { ok:true, primaryMm, measuredText, Npts: pts3.length };
+      const summary = summarizeMeasurement(shape);
+
+      return {
+        ok: true,
+        primaryMm: summary.primaryMm,
+        measuredText: `${summary.measuredText} [${shapeInfo.source || "unknown"}]`,
+        mode: summary.mode,
+        Npts: pts3.length,
+        reprojMedianPx: median(reprojErrs),
+        circularity: circ,
+        aspect2D,
+        area2D: shapeInfo.area2D ?? null,
+        perimeter2D: shapeInfo.perimeter2D ?? null,
+        solidity2D: shapeInfo.solidity2D ?? null,
+        pca1Mm: e1,
+        pca2Mm: e2,
+        pca3Mm: e3
+      };
     }
 
     function sampleContourPointsEven(cnt, N, minSpacing){
@@ -1136,7 +1215,14 @@
         measuredText: res.measuredText,
         gtMm,
         errPct,
-        npts: res.Npts
+        npts: res.Npts,
+        mode: res.mode,
+        circularity: res.circularity,
+        aspect2D: res.aspect2D,
+        solidity2D: res.solidity2D,
+        pca1Mm: res.pca1Mm,
+        pca2Mm: res.pca2Mm,
+        reprojMedianPx: res.reprojMedianPx
       });
 
       updateResCount();
@@ -1148,9 +1234,20 @@
         <td>${escapeHtml(res.measuredText)}</td>
         <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
         <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
-        <td>${res.Npts}</td>
+        <td title="mode=${escapeHtml(res.mode || '')}, circ=${(res.circularity ?? 0).toFixed(3)}, ar=${(res.aspect2D ?? 0).toFixed(3)}, reproj=${(res.reprojMedianPx ?? 0).toFixed(2)} px">${res.Npts}</td>
       `;
       resultsBody.appendChild(tr);
+
+      logLine(
+        `[RESULT] mode=${res.mode || "?"} ` +
+        `primary=${res.primaryMm.toFixed(1)} mm ` +
+        `pts=${res.Npts} ` +
+        `circ=${(res.circularity ?? 0).toFixed(3)} ` +
+        `aspect2D=${(res.aspect2D ?? 0).toFixed(3)} ` +
+        `solidity=${(res.solidity2D ?? 0).toFixed(3)} ` +
+        `reprojMed=${(res.reprojMedianPx ?? 0).toFixed(2)} px ` +
+        `PCA=(${(res.pca1Mm ?? 0).toFixed(1)}, ${(res.pca2Mm ?? 0).toFixed(1)}, ${(res.pca3Mm ?? 0).toFixed(1)}) mm`
+      );
     }
 
     function clearResults(){
@@ -1196,7 +1293,7 @@
     updateResCount();
 
     /********************************************************************
-     * INTRINSICS
+     * INTRINSICS + HELPER FUNCTIONS
      ********************************************************************/
     function buildScaledIntrinsics(W, H){
       const sx = W / CALIB.calW;
@@ -1232,6 +1329,144 @@
       const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2];
       const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2];
       return [x/z, y/z, 1.0];
+    }
+
+    function clamp(v, lo, hi){
+      return Math.max(lo, Math.min(hi, v));
+    }
+
+    function pointInSafeCenterRegion(x, y, W, H){
+      const bx = SAFE_BORDER_FRAC * W;
+      const by = SAFE_BORDER_FRAC * H;
+      return (x >= bx && x <= (W - bx) && y >= by && y <= (H - by));
+    }
+
+    function median(arr){
+      if (!arr || arr.length === 0) return null;
+      const s = arr.slice().sort((a,b)=>a-b);
+      const m = Math.floor(s.length/2);
+      return (s.length % 2) ? s[m] : 0.5*(s[m-1] + s[m]);
+    }
+
+    function projectCam1(X){
+      const Xc = X[0], Yc = X[1], Zc = X[2];
+      if (Zc <= 1e-9) return null;
+      const u = K[0][0]*(Xc/Zc) + K[0][2];
+      const v = K[1][1]*(Yc/Zc) + K[1][2];
+      return {u,v};
+    }
+
+    function projectCam2(X){
+      const X2 = add3(mulMatVec3(R, X), t);
+      const Zc = X2[2];
+      if (Zc <= 1e-9) return null;
+      const u = K[0][0]*(X2[0]/Zc) + K[0][2];
+      const v = K[1][1]*(X2[1]/Zc) + K[1][2];
+      return {u,v};
+    }
+
+    function reprojErrPx(X, u1, v1, u2, v2){
+      const p1 = projectCam1(X);
+      const p2 = projectCam2(X);
+      if (!p1 || !p2) return Infinity;
+      const e1 = Math.hypot(p1.u - u1, p1.v - v1);
+      const e2 = Math.hypot(p2.u - u2, p2.v - v2);
+      return 0.5*(e1 + e2);
+    }
+
+    function contourCentroid(cnt){
+      const M = cv.moments(cnt, false);
+      if (!M || Math.abs(M.m00) < 1e-9) return null;
+      return { x: M.m10 / M.m00, y: M.m01 / M.m00 };
+    }
+
+    function contourDescriptors(cnt){
+      const area = Math.abs(cv.contourArea(cnt));
+      const per = cv.arcLength(cnt, true);
+
+      let circularity = 0;
+      if (per > 1e-9){
+        circularity = 4 * Math.PI * area / (per * per);
+      }
+
+      const rect = cv.boundingRect(cnt);
+      const aspect = rect.width / Math.max(rect.height, 1e-9);
+
+      const hull = new cv.Mat();
+      cv.convexHull(cnt, hull, false, true);
+      const hullArea = Math.abs(cv.contourArea(hull));
+      hull.delete();
+
+      const solidity = hullArea > 1e-9 ? area / hullArea : 0;
+
+      return {
+        area,
+        perimeter: per,
+        circularity,
+        aspect,
+        solidity,
+        bbox: rect
+      };
+    }
+
+    function contourScore(desc, ctr, roiCenter){
+      const d = Math.hypot(ctr.x - roiCenter.x, ctr.y - roiCenter.y);
+      return (
+        0.45 * desc.area +
+        1200.0 * desc.solidity +
+        800.0 * desc.circularity -
+        8.0 * d
+      );
+    }
+
+    function chooseMeasurementMode(shape){
+      const circ = shape.circularity;
+      const ar = shape.aspectRatio;
+
+      if (circ > 0.78 && ar < 1.20){
+        return "diameter";
+      }
+      if (ar > 2.2){
+        return "length";
+      }
+      if (ar >= 1.15 && ar <= 2.2){
+        return "length_width";
+      }
+      return "pca_fallback";
+    }
+
+    function summarizeMeasurement(shape){
+      const mode = chooseMeasurementMode(shape);
+
+      if (mode === "diameter"){
+        return {
+          primaryMm: shape.primaryMm,
+          measuredText: `D≈${shape.primaryMm.toFixed(1)} mm`,
+          mode
+        };
+      }
+
+      if (mode === "length"){
+        return {
+          primaryMm: shape.primaryMm,
+          measuredText: `Length≈${shape.primaryMm.toFixed(1)} mm`,
+          mode
+        };
+      }
+
+      if (mode === "length_width"){
+        return {
+          primaryMm: shape.primaryMm,
+          measuredText: `L≈${shape.primaryMm.toFixed(1)} mm, W≈${shape.secondaryMm.toFixed(1)} mm`,
+          mode
+        };
+      }
+
+      return {
+        primaryMm: shape.primaryMm,
+        measuredText: `PCA: ${shape.primaryMm.toFixed(1)} / ${shape.secondaryMm.toFixed(1)} mm`,
+        mode
+      };
     }
 
     /********************************************************************
