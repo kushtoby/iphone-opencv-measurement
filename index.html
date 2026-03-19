@@ -244,8 +244,14 @@
     </details>
   </div>
 
-  <!-- OpenCV.js (from OpenCV docs CDN) -->
-  <script src="https://docs.opencv.org/4.13.0/opencv.js"></script>
+  <script>
+    var Module = {
+      locateFile: function(path) {
+        return "./assets/opencv/" + path;
+      }
+    };
+  </script>
+  <script src="./assets/opencv/opencv.js"></script>
 
   <script>
   /********************************************************************
