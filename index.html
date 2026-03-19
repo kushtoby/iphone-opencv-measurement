@@ -396,13 +396,31 @@
    ********************************************************************/
   (function waitForCv(){
     const timer = setInterval(() => {
-      if (typeof cv !== "undefined" && cv && typeof cv.onRuntimeInitialized !== "undefined") {
+      if (typeof window.cv === "undefined") return;
+  
+      // Some OpenCV.js builds export cv as a Promise (MODULARIZE builds).
+      if (typeof window.cv.then === "function") {
+        window.cv.then((realCv) => {
+          window.cv = realCv;  // replace Promise with actual cv object
+        });
+        return;
+      }
+  
+      // Normal OpenCV.js build (cv is already the real object)
+      if (window.cv && typeof window.cv.onRuntimeInitialized !== "undefined") {
         clearInterval(timer);
-        cv.onRuntimeInitialized = () => {
+  
+        window.cv.onRuntimeInitialized = () => {
           cvReady = true;
           cvStatus.textContent = "ready ✅";
           cvStatus.className = "ok";
           startBtn.disabled = false;
+  
+          // Quick sanity check: these MUST be "function" in your custom build
+          logLine("LK: " + typeof cv.calcOpticalFlowPyrLK);
+          logLine("F: " + typeof cv.findFundamentalMat);
+          logLine("recoverPose: " + typeof cv.recoverPose);
+          logLine("triangulate: " + typeof cv.triangulatePoints);
         };
       }
     }, 50);
