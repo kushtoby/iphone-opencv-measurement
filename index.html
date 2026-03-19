@@ -1322,6 +1322,219 @@
 
     updateResCount();
 
+    function estimateE_RANSAC(x1, x2){
+  const N = x1.length;
+  if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
+
+  const ITER = 1500;
+  const TH = 1e-4;
+  let bestInliers = [];
+  let bestE = null;
+
+  const idx = [...Array(N).keys()];
+
+  for (let it=0; it<ITER; it++){
+    shuffleInPlace(idx);
+    const s = idx.slice(0,8);
+
+    let E = eightPointE_pureJS(x1, x2, s);
+    if (!E) continue;
+
+    E = enforceEssential_3x3(E);
+
+    const inl = [];
+    for (let i=0; i<N; i++){
+      const d = sampsonDistance(E, x1[i], x2[i]);
+      if (d < TH) inl.push(i);
+    }
+
+    if (inl.length > bestInliers.length){
+      bestInliers = inl;
+      bestE = E;
+    }
+  }
+
+  if (!bestE || bestInliers.length < 80){
+    return { ok:false, reason:`E RANSAC failed (best inliers=${bestInliers.length}).` };
+  }
+
+  let Erefit = eightPointE_pureJS(x1, x2, bestInliers);
+  Erefit = enforceEssential_3x3(Erefit);
+
+  return { ok:true, E:Erefit, inliersIdx:bestInliers };
+}
+
+function eightPointE_pureJS(x1, x2, indices){
+  const A = [];
+  for (let r=0; r<indices.length; r++){
+    const i = indices[r];
+    const X1 = x1[i][0], Y1 = x1[i][1];
+    const X2 = x2[i][0], Y2 = x2[i][1];
+
+    A.push([
+      X2*X1, X2*Y1, X2,
+      Y2*X1, Y2*Y1, Y2,
+      X1, Y1, 1
+    ]);
+  }
+
+  const ATA = matMul(matT(A), A);
+  const eig = jacobiEigenSym(ATA);
+  const k = argMin(eig.values);
+  const e = eig.vectors.map(row => row[k]);
+
+  return [
+    [e[0], e[1], e[2]],
+    [e[3], e[4], e[5]],
+    [e[6], e[7], e[8]]
+  ];
+}
+
+function enforceEssential_3x3(E){
+  const EtE = mul3(transpose3(E), E);
+  const ev = jacobiEigenSym(EtE);
+  const vals = ev.values.slice();
+  const V = ev.vectors;
+
+  const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
+  const lam = order.map(i=>Math.max(vals[i],0));
+
+  const Vsorted = [
+    [V[0][order[0]], V[0][order[1]], V[0][order[2]]],
+    [V[1][order[0]], V[1][order[1]], V[1][order[2]]],
+    [V[2][order[0]], V[2][order[1]], V[2][order[2]]]
+  ];
+
+  const s1 = Math.sqrt(lam[0]);
+  const s2 = Math.sqrt(lam[1]);
+  const s = 0.5*(s1+s2);
+
+  const inv = [
+    1/Math.max(s1,1e-12),
+    1/Math.max(s2,1e-12),
+    0
+  ];
+
+  const EV = mul3(E, Vsorted);
+  let U = [
+    [EV[0][0]*inv[0], EV[0][1]*inv[1], EV[0][2]*inv[2]],
+    [EV[1][0]*inv[0], EV[1][1]*inv[1], EV[1][2]*inv[2]],
+    [EV[2][0]*inv[0], EV[2][1]*inv[1], EV[2][2]*inv[2]]
+  ];
+
+  U = ortho3(U);
+
+  const S = [
+    [s,0,0],
+    [0,s,0],
+    [0,0,0]
+  ];
+
+  return mul3(mul3(U,S), transpose3(Vsorted));
+}
+
+function sampsonDistance(E, x1, x2){
+  const Ex1 = mulMatVec3(E, x1);
+  const Etx2 = mulMatVec3(transpose3(E), x2);
+  const x2tEx1 = dot3(x2, Ex1);
+  const denom = Ex1[0]*Ex1[0] + Ex1[1]*Ex1[1] + Etx2[0]*Etx2[0] + Etx2[1]*Etx2[1];
+  return (x2tEx1*x2tEx1) / Math.max(denom, 1e-12);
+}
+
+function recoverPoseFromE(E, x1, x2, inliersIdx){
+  const svd = svd3_from_EtE(E);
+  if (!svd) return { ok:false, reason:"SVD failed" };
+
+  const U = svd.U;
+  const V = svd.V;
+
+  const W = [
+    [0,-1,0],
+    [1,0,0],
+    [0,0,1]
+  ];
+
+  const R1 = mul3(mul3(U,W), transpose3(V));
+  const R2 = mul3(mul3(U,transpose3(W)), transpose3(V));
+  const tdir = [U[0][2], U[1][2], U[2][2]];
+  const tneg = [-tdir[0], -tdir[1], -tdir[2]];
+
+  const cand = [
+    {R:R1,t:tdir},
+    {R:R1,t:tneg},
+    {R:R2,t:tdir},
+    {R:R2,t:tneg}
+  ];
+
+  let best = null;
+  let bestCount = -1;
+  const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
+
+  for (const c of cand){
+    let count = 0;
+    for (const idx of subset){
+      const X = triangulateDLT_smallestEigen(c.R, c.t, x1[idx], x2[idx]);
+      if (!X) continue;
+
+      const z1 = X[2];
+      const X2 = add3(mulMatVec3(c.R, X), c.t);
+      const z2 = X2[2];
+
+      if (z1 > 0 && z2 > 0) count++;
+    }
+
+    if (count > bestCount){
+      bestCount = count;
+      best = c;
+    }
+  }
+
+  if (!best || bestCount < 10){
+    return { ok:false, reason:`Cheirality failed (bestCount=${bestCount}).` };
+  }
+
+  return { ok:true, R:best.R, t:best.t };
+}
+
+function svd3_from_EtE(E){
+  const EtE = mul3(transpose3(E), E);
+  const ev = jacobiEigenSym(EtE);
+  const vals = ev.values.slice();
+  const Vraw = ev.vectors;
+  const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
+  const lam = order.map(i=>Math.max(vals[i],0));
+
+  let V = [
+    [Vraw[0][order[0]], Vraw[0][order[1]], Vraw[0][order[2]]],
+    [Vraw[1][order[0]], Vraw[1][order[1]], Vraw[1][order[2]]],
+    [Vraw[2][order[0]], Vraw[2][order[1]], Vraw[2][order[2]]]
+  ];
+
+  const s = lam.map(x=>Math.sqrt(x));
+  const EV = mul3(E, V);
+
+  const inv0 = 1/Math.max(s[0],1e-12);
+  const inv1 = 1/Math.max(s[1],1e-12);
+  const inv2 = 1/Math.max(s[2],1e-12);
+
+  let U = [
+    [EV[0][0]*inv0, EV[0][1]*inv1, EV[0][2]*inv2],
+    [EV[1][0]*inv0, EV[1][1]*inv1, EV[1][2]*inv2],
+    [EV[2][0]*inv0, EV[2][1]*inv1, EV[2][2]*inv2]
+  ];
+
+  U = ortho3(U);
+
+  if (det3(U) < 0){
+    U[0][2] *= -1; U[1][2] *= -1; U[2][2] *= -1;
+  }
+  if (det3(V) < 0){
+    V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
+  }
+
+  return { U, V, s };
+}
+
     /********************************************************************
      * HELPERS
      ********************************************************************/
