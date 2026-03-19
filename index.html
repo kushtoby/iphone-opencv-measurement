@@ -257,6 +257,58 @@
   </script>
   
   <script src="assets/opencv/opencv.js"></script>
+
+  <script>
+    // Catch silent failures during OpenCV startup
+    window.onerror = (m, s, l, c, e) => {
+      const el = document.getElementById("log");
+      if (el) el.textContent += "[window.onerror] " + m + "\n";
+    };
+  
+    // Force OpenCV initialization for MODULARIZE builds
+    async function forceInitOpenCV(){
+      try {
+        // Case: cv is a factory function (MODULARIZE)
+        if (typeof window.cv === "function") {
+          const realCv = await window.cv();   // <-- IMPORTANT
+          window.cv = realCv;
+        }
+        // Case: cv is a Promise
+        else if (window.cv && typeof window.cv.then === "function") {
+          window.cv = await window.cv;
+        }
+        // Case: classic build uses onRuntimeInitialized (we just wait)
+        else if (window.cv && typeof window.cv.onRuntimeInitialized !== "undefined") {
+          // handled by your waitForCv path
+          return;
+        }
+  
+        // If we get here, cv should now be the real object
+        const el = document.getElementById("log");
+        if (el) {
+          el.textContent += "[boot] forced init complete\n";
+          el.textContent += "LK: " + typeof cv.calcOpticalFlowPyrLK + "\n";
+          el.textContent += "F: " + typeof cv.findFundamentalMat + "\n";
+          el.textContent += "recoverPose: " + typeof cv.recoverPose + "\n";
+          el.textContent += "triangulate: " + typeof cv.triangulatePoints + "\n";
+        }
+  
+        // flip your UI ready state
+        window.__opencv_ready__ = true;
+        cvReady = true;
+        document.getElementById("cvStatus").textContent = "ready ✅";
+        document.getElementById("cvStatus").className = "ok";
+        document.getElementById("startBtn").disabled = false;
+  
+      } catch (e) {
+        const el = document.getElementById("log");
+        if (el) el.textContent += "[boot] forceInitOpenCV failed: " + e + "\n";
+      }
+    }
+  
+    // Run it a moment after script load
+    setTimeout(forceInitOpenCV, 200);
+  </script>
   
   <script>
     // If OpenCV isn't ready after 6 seconds, something is blocking initialization.
