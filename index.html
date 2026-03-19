@@ -236,17 +236,8 @@
     </details>
   </div>
 
-  <!-- IMPORTANT:
-       We use OpenCV.js from CDN ONLY for:
-         - goodFeaturesToTrack
-         - calcOpticalFlowPyrLK
-         - SVDecomp (SVD)
-         - basic matrix storage (cv.Mat)
-       We implement epipolar geometry ourselves in JS:
-         - RANSAC + normalized 8-point to estimate Essential matrix E
-         - Decompose E -> R, t
-         - Triangulate using DLT
-  -->
+  <!-- OpenCV.js CDN (only for LK + corners + optional undistort).
+       We DO NOT use cv.SVDecomp because your build doesn't export it. -->
   <script src="https://docs.opencv.org/4.13.0/opencv.js"></script>
 
   <script>
@@ -263,24 +254,6 @@
   window.addEventListener("unhandledrejection", (e) => {
     logLine(`[promise.reject] ${e.reason}`);
   });
-
-  /********************************************************************
-   * PROJECT MODEL (my own words)
-   * ---------------------------------------------------------------
-   * We capture two views with one iPhone camera (move the phone sideways).
-   *
-   * Epipolar constraint in normalized camera coords:
-   *    x2^T * E * x1 = 0
-   *
-   * Steps:
-   *  1) Detect corners in view1, track them to view2 using LK.
-   *  2) Convert pixel points to normalized camera points: x = K^{-1} [u,v,1]^T
-   *  3) Use RANSAC + normalized 8-point to estimate Essential matrix E.
-   *  4) Enforce rank-2 constraint on E (two equal singular values).
-   *  5) Decompose E -> candidate (R,t) pairs; pick the one with most points in front.
-   *  6) Scale t using known baseline (cm).
-   *  7) For ROI: detect points in ROI, track, triangulate with DLT using P1=[I|0], P2=[R|t].
-   ********************************************************************/
 
   /********************************************************************
    * 0) YOUR iPHONE CALIBRATION RESULTS (HARD-CODED)
@@ -300,7 +273,6 @@
    ********************************************************************/
   let cvReady = false;
   let streaming = false;
-  let streamHandle = null;
 
   const video = document.getElementById("video");
   const canvas = document.getElementById("canvas");
@@ -309,7 +281,6 @@
   const rawCanvas = document.createElement("canvas");
   const rawCtx = rawCanvas.getContext("2d", { willReadFrequently: true });
 
-  // UI elements
   const cvStatus = document.getElementById("cvStatus");
   const stageStatus = document.getElementById("stageStatus");
   const outEl = document.getElementById("out");
@@ -330,8 +301,8 @@
   const resultsBody = document.getElementById("resultsBody");
   const resCount = document.getElementById("resCount");
 
-  // Stage machine
-  let stage = "idle"; // live | v1 | ready
+  // Stage machine: idle | live | v1 | ready
+  let stage = "idle";
   function setStage(s){ stage = s; stageStatus.textContent = s; }
 
   function setOut(msg, isWarn=false){
@@ -341,7 +312,6 @@
 
   function updateResCount(){ resCount.textContent = String(results.length); }
 
-  // Freeze display after Capture 2
   let frozenDisplay = false;
 
   // IMU
@@ -350,30 +320,30 @@
   let imuAtV1 = null;
   const ROT_THRESH_DEG = { yaw: 6, pitch: 4, roll: 4 };
 
-  // Intrinsics scaled to current video resolution
-  let K = null;      // 3x3 as plain JS array (not cv.Mat)
-  let Kinv = null;   // 3x3 JS array
-  let Kcv = null;    // cv.Mat 3x3 for undistort
-  let DISTcv = null; // cv.Mat 1x5 for undistort
+  // Intrinsics scaled to current stream
+  let K = null;     // 3x3 JS array
+  let Kinv = null;  // 3x3 JS array
+  let Kcv = null;   // cv.Mat 3x3 (for undistort)
+  let DISTcv = null;// cv.Mat 1x5
 
-  // Captured frames (grayscale)
+  // Captured grayscale frames
   let gray1 = null;
   let gray2 = null;
 
-  // Pose results (camera coords)
-  let R = null; // 3x3 JS array
-  let t = null; // 3x1 JS array (scaled meters)
+  // Pose
+  let R = null; // 3x3
+  let t = null; // 3-vector (meters)
   let poseReady = false;
 
-  // ROI drag
+  // ROI selection
   let roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
   let lastOverlay = null;
 
-  // Results list
+  // Results
   let results = [];
 
   /********************************************************************
-   * 2) OpenCV ready
+   * 2) OpenCV ready gate
    ********************************************************************/
   (function waitForCv(){
     const timer = setInterval(() => {
@@ -386,15 +356,17 @@
         cvStatus.textContent = "ready ✅";
         cvStatus.className = "ok";
         startBtn.disabled = false;
+
         logLine("[boot] OpenCV ready ✅");
-        logLine("[boot] SVDecomp: " + typeof cv.SVDecomp);
+        logLine("[boot] goodFeaturesToTrack: " + typeof cv.goodFeaturesToTrack);
         logLine("[boot] LK: " + typeof cv.calcOpticalFlowPyrLK);
+        logLine("[boot] SVDecomp (we don't need it): " + typeof cv.SVDecomp);
       };
     }, 50);
   })();
 
   /********************************************************************
-   * 3) Camera start/loop
+   * 3) Camera start + draw loop
    ********************************************************************/
   async function startCamera(){
     if (!cvReady){ setOut("Wait for OpenCV first.", true); return; }
@@ -405,7 +377,6 @@
         audio: false
       });
 
-      streamHandle = stream;
       video.srcObject = stream;
       await video.play();
 
@@ -414,9 +385,9 @@
         canvas.height = video.videoHeight;
         rawCanvas.width = video.videoWidth;
         rawCanvas.height = video.videoHeight;
+
         streamInfoEl.textContent = `${video.videoWidth}×${video.videoHeight}`;
 
-        // Build runtime intrinsics for this stream size
         buildScaledIntrinsics(video.videoWidth, video.videoHeight);
 
         streaming = true;
@@ -425,12 +396,12 @@
         cap2Btn.disabled = true;
         setStage("live");
 
-        setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
         clearLog();
         logLine("=== START CAMERA ===");
         logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
         logLine(`K fx=${K[0][0].toFixed(2)} fy=${K[1][1].toFixed(2)} cx=${K[0][2].toFixed(2)} cy=${K[1][2].toFixed(2)}`);
 
+        setOut("Start ✅ Enable IMU ✅ Capture 1 when stable.", false);
         requestAnimationFrame(drawLoop);
       };
     }catch(e){
@@ -547,7 +518,7 @@
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     src.delete();
 
-    // Optional undistort (recommended for iPhone wide lens)
+    // Optional undistort
     if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
       const und = new cv.Mat();
       cv.undistort(gray, und, Kcv, DISTcv);
@@ -604,6 +575,7 @@
 
     R = res.R;
     t = res.t_scaled;
+
     poseReady = true;
     setStage("ready");
     cap2Btn.disabled = true;
@@ -613,22 +585,22 @@
   }
 
   /********************************************************************
-   * 6) Epipolar geometry in JS (Option A)
+   * 6) Epipolar geometry in JS (NO cv.SVDecomp)
    * ---------------------------------------------------------------
-   * We estimate Essential matrix E directly from normalized coords:
-   *   x2^T E x1 = 0
+   * We estimate Essential matrix E from normalized points:
+   *    x2^T E x1 = 0
+   *
+   * Implementation details:
+   * - corners + LK tracking come from OpenCV.js
+   * - RANSAC + 8-point + essential enforcement happen in pure JS
+   * - E decomposition (U,S,V) is done by eigen tricks for 3x3
    ********************************************************************/
   function computePose_Epipolar_JS(){
     if (!gray1 || !gray2 || !Kinv) return { ok:false, reason:"Missing gray1/gray2/Kinv" };
+    if (typeof cv.goodFeaturesToTrack !== "function") return { ok:false, reason:"OpenCV missing goodFeaturesToTrack" };
+    if (typeof cv.calcOpticalFlowPyrLK !== "function") return { ok:false, reason:"OpenCV missing LK optical flow" };
 
-    if (typeof cv.calcOpticalFlowPyrLK !== "function") {
-      return { ok:false, reason:"OpenCV missing LK optical flow" };
-    }
-    if (typeof cv.SVDecomp !== "function") {
-      return { ok:false, reason:"OpenCV missing SVDecomp (needed for SVD)" };
-    }
-
-    // --- 1) detect corners in view1
+    // 1) detect corners
     const corners1 = new cv.Mat();
     cv.goodFeaturesToTrack(gray1, corners1, 1500, 0.005, 8);
     logLine(`corners1=${corners1.rows}`);
@@ -637,20 +609,17 @@
       return { ok:false, reason:`Not enough corners (${corners1.rows}). Add texture/lighting.` };
     }
 
-    // --- 2) track to view2
+    // 2) track corners
     const corners2 = new cv.Mat();
     const status = new cv.Mat();
     const err = new cv.Mat();
     const win = new cv.Size(31,31);
     const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
+
     cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, win, 4, crit);
 
-    // --- 3) build match arrays + normalized coords
-    const pts1 = [];
-    const pts2 = [];
     const x1n = [];
     const x2n = [];
-
     for (let i=0; i<status.rows; i++){
       if (!status.ucharPtr(i,0)[0]) continue;
 
@@ -661,65 +630,48 @@
 
       if (u2<0 || u2>=gray2.cols || v2<0 || v2>=gray2.rows) continue;
 
-      pts1.push({u:u1,v:v1});
-      pts2.push({u:u2,v:v2});
-
       x1n.push(pixelToNorm(u1,v1));
       x2n.push(pixelToNorm(u2,v2));
     }
 
     corners1.delete(); corners2.delete(); status.delete(); err.delete();
 
-    logLine(`tracked=${pts1.length}`);
-    if (pts1.length < 120){
-      return { ok:false, reason:`Too few tracked points (${pts1.length}). Less blur/rotation; more texture.` };
+    logLine(`tracked=${x1n.length}`);
+    if (x1n.length < 120){
+      return { ok:false, reason:`Too few tracked points (${x1n.length}). Less blur/rotation; more texture.` };
     }
 
-    // --- 4) RANSAC + 8-point to estimate E
+    // 3) RANSAC + 8-point => E
     const ransac = estimateE_RANSAC(x1n, x2n);
-    if (!ransac.ok){
-      return { ok:false, reason: ransac.reason };
-    }
+    if (!ransac.ok) return { ok:false, reason: ransac.reason };
 
-    const E = ransac.E; // 3x3 JS array
+    const E = ransac.E;
     const inliersIdx = ransac.inliersIdx;
+    logLine(`E inliers=${inliersIdx.length}`);
 
-    logLine(`E RANSAC inliers=${inliersIdx.length}`);
-
-    // --- 5) decompose E -> choose best (R,t) via cheirality
+    // 4) recover pose from E (decompose + cheirality)
     const best = recoverPoseFromE(E, x1n, x2n, inliersIdx);
-    if (!best.ok){
-      return { ok:false, reason: best.reason };
-    }
+    if (!best.ok) return { ok:false, reason: best.reason };
 
-    // --- 6) scale t using baseline (meters)
+    // 5) scale translation by baseline
     const baselineCm = parseFloat(document.getElementById("baselineCm").value);
-    if (!(isFinite(baselineCm) && baselineCm > 0)){
-      return { ok:false, reason:"Baseline must be > 0 cm" };
-    }
+    if (!(isFinite(baselineCm) && baselineCm > 0)) return { ok:false, reason:"Baseline must be > 0 cm" };
     const baselineM = baselineCm / 100.0;
 
-    const tdir = best.t; // unit-ish direction
-    const tn = Math.hypot(tdir[0], tdir[1], tdir[2]);
+    const tn = Math.hypot(best.t[0], best.t[1], best.t[2]);
     const s = baselineM / Math.max(tn, 1e-12);
+    const t_scaled = [best.t[0]*s, best.t[1]*s, best.t[2]*s];
 
-    const t_scaled = [tdir[0]*s, tdir[1]*s, tdir[2]*s];
-
-    return {
-      ok:true,
-      R: best.R,
-      t_scaled,
-      inliers: inliersIdx.length,
-      total: x1n.length
-    };
+    return { ok:true, R: best.R, t_scaled, inliers: inliersIdx.length, total: x1n.length };
   }
 
   /********************************************************************
-   * 7) ROI measurement (triangulate + extents)
+   * 7) ROI measurement
    ********************************************************************/
   function measureROI(rx, ry, rw, rh){
     if (!poseReady || !gray1 || !gray2 || !R || !t) return { ok:false, msg:"Pose not ready." };
-    if (typeof cv.SVDecomp !== "function") return { ok:false, msg:"Missing SVDecomp." };
+    if (typeof cv.goodFeaturesToTrack !== "function") return { ok:false, msg:"Missing goodFeaturesToTrack." };
+    if (typeof cv.calcOpticalFlowPyrLK !== "function") return { ok:false, msg:"Missing LK flow." };
 
     // clamp ROI
     rx = Math.max(0, Math.min(rx, gray1.cols-1));
@@ -727,7 +679,7 @@
     rw = Math.max(1, Math.min(rw, gray1.cols - rx));
     rh = Math.max(1, Math.min(rh, gray1.rows - ry));
 
-    // mask for points in ROI
+    // mask ROI
     const mask = new cv.Mat(gray1.rows, gray1.cols, cv.CV_8U);
     mask.setTo(new cv.Scalar(0));
     const rect = new cv.Rect(Math.round(rx), Math.round(ry), Math.round(rw), Math.round(rh));
@@ -769,32 +721,27 @@
 
     p1.delete(); p2.delete(); status.delete(); err.delete();
 
-    if (x1.length < 25){
-      return { ok:false, msg:`Too few tracked points in ROI (${x1.length}).` };
-    }
+    if (x1.length < 25) return { ok:false, msg:`Too few tracked points in ROI (${x1.length}).` };
 
-    // Triangulate points with DLT in camera coords:
-    // P1 = [I|0], P2 = [R|t]
+    // triangulate
     const pts3 = [];
     for (let i=0; i<x1.length; i++){
-      const X = triangulateDLT(R, t, x1[i], x2[i]); // [X,Y,Z]
+      const X = triangulateDLT_smallestEigen(R, t, x1[i], x2[i]); // meters in cam1 coords
       if (!X) continue;
 
-      // quick sanity filter
       if (!isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])) continue;
-      if (X[2] <= 0) continue;      // in front of cam1
-      if (X[2] > 10) continue;      // reject crazy far
+      if (X[2] <= 0) continue;
+      if (X[2] > 10) continue;
       pts3.push(X);
     }
 
-    if (pts3.length < 15){
-      return { ok:false, msg:`Triangulation unstable (kept ${pts3.length}). Try bigger baseline / less rotation.` };
-    }
+    if (pts3.length < 15) return { ok:false, msg:`Triangulation unstable (kept ${pts3.length}). Try bigger baseline / less rotation.` };
 
-    const ext = computeExtentsPCA(pts3); // meters
+    // PCA extents (pure JS eigen on 3x3 covariance)
+    const ext = computeExtentsPCA_covEigen(pts3);
     if (!ext) return { ok:false, msg:"Extent PCA failed." };
 
-    // convert to mm
+    // meters -> mm
     const e1 = ext.e1 * 1000;
     const e2 = ext.e2 * 1000;
     const e3 = ext.e3 * 1000;
@@ -805,25 +752,18 @@
     let measuredText = "";
     let primaryMm = e1;
 
-    // ball-ish
     if (r12 < 1.2 && r23 < 1.2) {
       const D = (e1 + e2 + e3) / 3.0;
       measuredText = `D≈${D.toFixed(1)} mm (ball-ish)`;
       primaryMm = D;
-    }
-    // spoon-ish
-    else if (r12 > 2.2) {
+    } else if (r12 > 2.2) {
       measuredText = `Length≈${e1.toFixed(1)} mm (spoon-ish)`;
       primaryMm = e1;
-    }
-    // box-ish (two similar big dims)
-    else if (r12 < 1.15) {
+    } else if (r12 < 1.15) {
       const side = 0.5*(e1+e2);
       measuredText = `Side≈${side.toFixed(1)} mm (box-ish)`;
       primaryMm = side;
-    }
-    // phone-ish
-    else {
+    } else {
       measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
       primaryMm = e1;
     }
@@ -895,7 +835,7 @@
   }
 
   /********************************************************************
-   * 9) Results table
+   * 9) Results
    ********************************************************************/
   function logResult(res){
     const nameIn = (document.getElementById("objName").value || "").trim();
@@ -996,50 +936,46 @@
   }
 
   function pixelToNorm(u,v){
-    // x = K^{-1} [u,v,1]
-    const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2]*1;
-    const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2]*1;
-    const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2]*1;
+    // x = K^{-1} [u,v,1]^T  (then normalize so z=1)
+    const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2];
+    const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2];
+    const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2];
     return [x/z, y/z, 1.0];
   }
 
   /********************************************************************
-   * 12) Essential matrix estimation (RANSAC + 8-point)
+   * 12) RANSAC + 8-point (pure JS eigen solve)
    ********************************************************************/
   function estimateE_RANSAC(x1, x2){
     const N = x1.length;
     if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
 
-    const ITER = 1200;          // increase if needed
-    const TH = 1e-4;            // Sampson distance threshold in normalized coords
+    const ITER = 1500;      // increase if needed
+    const TH = 1e-4;        // Sampson threshold in normalized coords
     let bestInliers = [];
     let bestE = null;
 
-    // Pre-allocate indices
     const idx = [...Array(N).keys()];
 
     for (let it=0; it<ITER; it++){
-      // sample 8 unique indices
       shuffleInPlace(idx);
       const s = idx.slice(0,8);
 
-      const E = eightPointE(x1, x2, s);
+      let E = eightPointE_pureJS(x1, x2, s);
       if (!E) continue;
 
-      // Enforce rank-2 + equal singular values
-      const E2 = enforceEssential(E);
-      if (!E2) continue;
+      // enforce essential constraint (rank-2, equal top singulars) using eigen tricks
+      E = enforceEssential_3x3(E);
 
-      // Score with Sampson distance
       const inl = [];
-      for (let i=0; i<N; i++){
-        const d = sampsonDistance(E2, x1[i], x2[i]);
+      for (let i=0;i<N;i++){
+        const d = sampsonDistance(E, x1[i], x2[i]);
         if (d < TH) inl.push(i);
       }
 
       if (inl.length > bestInliers.length){
         bestInliers = inl;
-        bestE = E2;
+        bestE = E;
       }
     }
 
@@ -1047,91 +983,106 @@
       return { ok:false, reason:`E RANSAC failed (best inliers=${bestInliers.length}). Increase baseline, reduce rotation/blur, add texture.` };
     }
 
-    // Refit E using all inliers (better)
-    const Erefit = eightPointE(x1, x2, bestInliers);
-    const Efinal = enforceEssential(Erefit) || bestE;
+    // refit using all inliers (more stable)
+    let Erefit = eightPointE_pureJS(x1, x2, bestInliers);
+    Erefit = enforceEssential_3x3(Erefit);
 
-    return { ok:true, E: Efinal, inliersIdx: bestInliers };
+    return { ok:true, E: Erefit, inliersIdx: bestInliers };
   }
 
-  function eightPointE(x1, x2, indices){
-    // Build A (m x 9)
+  function eightPointE_pureJS(x1, x2, indices){
     const m = indices.length;
     if (m < 8) return null;
 
-    const A = new cv.Mat(m, 9, cv.CV_64F);
-
+    // Build A (m x 9)
+    const A = [];
     for (let r=0; r<m; r++){
       const i = indices[r];
       const X1 = x1[i][0], Y1 = x1[i][1];
       const X2 = x2[i][0], Y2 = x2[i][1];
 
-      // row = [x2*x1, x2*y1, x2, y2*x1, y2*y1, y2, x1, y1, 1]
-      const row = [
+      A.push([
         X2*X1, X2*Y1, X2,
         Y2*X1, Y2*Y1, Y2,
         X1,    Y1,    1
-      ];
-      for (let c=0; c<9; c++){
-        A.doublePtr(r,c)[0] = row[c];
-      }
+      ]);
     }
 
-    // SVD(A) -> last column of V gives solution for e (min singular value)
-    const W = new cv.Mat();
-    const U = new cv.Mat();
-    const Vt = new cv.Mat();
-    cv.SVDecomp(A, W, U, Vt);
+    // e is smallest eigenvector of (A^T A)
+    const AT = matT(A);
+    const ATA = matMul(AT, A); // 9x9 symmetric
+    const eig = jacobiEigenSym(ATA);
+    const k = argMin(eig.values);
+    const e = eig.vectors.map(row => row[k]); // column k
 
-    // Vt is 9x9, last row corresponds to smallest singular value vector
-    const e = [];
-    for (let c=0; c<9; c++){
-      e.push(Vt.doubleAt(8, c));
-    }
-
-    A.delete(); W.delete(); U.delete(); Vt.delete();
-
-    // reshape into 3x3
+    // reshape to 3x3
     return [
       [e[0], e[1], e[2]],
       [e[3], e[4], e[5]],
-      [e[6], e[7], e[8]],
+      [e[6], e[7], e[8]]
     ];
   }
 
-  function enforceEssential(E){
-    // Essential matrix has rank 2 with equal first two singular values.
-    const Ecv = mat3ToCv(E);
-    const W = new cv.Mat();
-    const U = new cv.Mat();
-    const Vt = new cv.Mat();
-    cv.SVDecomp(Ecv, W, U, Vt);
+  function enforceEssential_3x3(E){
+    // Essential constraint: singular values become (s,s,0)
+    // We'll compute a "pseudo SVD" using eigen decomposition of (E^T E).
+    // 1) V from eigenvectors of E^T E
+    // 2) singular values = sqrt(eigenvalues)
+    // 3) U = E V Σ^{-1}
+    // 4) rebuild E = U diag(s,s,0) V^T
 
-    const s1 = W.doubleAt(0,0);
-    const s2 = W.doubleAt(1,0);
+    const Et = transpose3(E);
+    const EtE = mul3(Et, E); // 3x3 symmetric
+
+    const ev = jacobiEigenSym(EtE);      // eigenvalues + eigenvectors
+    const vals = ev.values.slice();
+    const V = ev.vectors;                // columns are eigenvectors
+
+    // sort eigenpairs by descending eigenvalue
+    const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
+    const lam = order.map(i=>Math.max(vals[i], 0));
+    const Vsorted = [
+      [V[0][order[0]], V[0][order[1]], V[0][order[2]]],
+      [V[1][order[0]], V[1][order[1]], V[1][order[2]]],
+      [V[2][order[0]], V[2][order[1]], V[2][order[2]]],
+    ];
+
+    const s1 = Math.sqrt(lam[0]);
+    const s2 = Math.sqrt(lam[1]);
+    // target s = average of top two
     const s = 0.5*(s1+s2);
 
-    // diag(s,s,0)
-    const S = cv.matFromArray(3,3,cv.CV_64F, [
-      s,0,0,
-      0,s,0,
-      0,0,0
-    ]);
+    // Σ^{-1} for computing U: [1/s1, 1/s2, 0] (avoid divide by zero)
+    const inv = [
+      1/Math.max(s1,1e-12),
+      1/Math.max(s2,1e-12),
+      0
+    ];
 
-    const tmp = new cv.Mat();
-    const E2 = new cv.Mat();
-    cv.gemm(U, S, 1, new cv.Mat(), 0, tmp);
-    cv.gemm(tmp, Vt, 1, new cv.Mat(), 0, E2);
+    // U = E * V * Σ^{-1}  (columns)
+    const EV = mul3(E, Vsorted);
+    let U = [
+      [EV[0][0]*inv[0], EV[0][1]*inv[1], EV[0][2]*inv[2]],
+      [EV[1][0]*inv[0], EV[1][1]*inv[1], EV[1][2]*inv[2]],
+      [EV[2][0]*inv[0], EV[2][1]*inv[1], EV[2][2]*inv[2]],
+    ];
 
-    const Eout = cv3ToMat3(E2);
+    // Orthonormalize U (Gram-Schmidt)
+    U = ortho3(U);
 
-    Ecv.delete(); W.delete(); U.delete(); Vt.delete(); S.delete(); tmp.delete(); E2.delete();
-
-    return Eout;
+    // Rebuild E2 = U * diag(s,s,0) * V^T
+    const S = [
+      [s,0,0],
+      [0,s,0],
+      [0,0,0]
+    ];
+    const US = mul3(U, S);
+    const Vt = transpose3(Vsorted);
+    const E2 = mul3(US, Vt);
+    return E2;
   }
 
   function sampsonDistance(E, x1, x2){
-    // d = (x2^T E x1)^2 / ( (Ex1)_0^2+(Ex1)_1^2+(E^T x2)_0^2+(E^T x2)_1^2 )
     const Ex1 = mulMatVec3(E, x1);
     const Etx2 = mulMatVec3(transpose3(E), x2);
     const x2tEx1 = dot3(x2, Ex1);
@@ -1140,51 +1091,31 @@
   }
 
   /********************************************************************
-   * 13) Recover pose from E (decompose + cheirality)
+   * 13) Recover pose from E (pure JS decomposition + cheirality)
    ********************************************************************/
   function recoverPoseFromE(E, x1, x2, inliersIdx){
-    // Decompose E = U diag(s) Vt
-    const Ecv = mat3ToCv(E);
-    const Wm = new cv.Mat();
-    const U = new cv.Mat();
-    const Vt = new cv.Mat();
-    cv.SVDecomp(Ecv, Wm, U, Vt);
+    // Use "pseudo SVD" again to get U,V
+    const svd = svd3_from_EtE(E);
+    if (!svd) return { ok:false, reason:"SVD(ish) failed" };
 
-    // Fix determinant sign issues
-    // Ensure det(U)*det(V) is positive (so R is proper rotation)
-    let U3 = cv3ToMat3(U);
-    let V3t = cv3ToMat3(Vt);
-    let Udet = det3(U3);
-    let Vdet = det3(transpose3(V3t)); // det(V)
-    if (Udet*Vdet < 0){
-      // flip sign of last column of U
-      for (let r=0; r<3; r++){
-        U.doublePtr(r,2)[0] *= -1;
-      }
-      U3 = cv3ToMat3(U);
-    }
+    const U = svd.U;
+    const V = svd.V;
 
     // W matrix
     const W = [
       [0,-1,0],
       [1, 0,0],
-      [0, 0,1],
+      [0, 0,1]
     ];
 
-    const Ut = transpose3(U3);
-    const V = transpose3(V3t);
+    // Candidate rotations
+    const R1 = mul3(mul3(U, W), transpose3(V));
+    const R2 = mul3(mul3(U, transpose3(W)), transpose3(V));
 
-    // Two rotation options
-    const R1 = mul3(mul3(U3, W), V);
-    const R2 = mul3(mul3(U3, transpose3(W)), V);
-
-    // t direction is third column of U
-    const tdir = [U3[0][2], U3[1][2], U3[2][2]];
+    // Candidate translations (3rd column of U)
+    const tdir = [U[0][2], U[1][2], U[2][2]];
     const tdirNeg = [-tdir[0], -tdir[1], -tdir[2]];
 
-    Ecv.delete(); Wm.delete(); U.delete(); Vt.delete();
-
-    // Four candidates
     const cand = [
       {R:R1, t:tdir},
       {R:R1, t:tdirNeg},
@@ -1192,23 +1123,18 @@
       {R:R2, t:tdirNeg},
     ];
 
-    // Cheirality test: pick the (R,t) with most points in front of both cameras
+    // Cheirality test
     let best = null;
     let bestCount = -1;
-
-    // Use subset of inliers (speed)
     const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
 
     for (const c of cand){
       let count = 0;
       for (const idx of subset){
-        const X = triangulateDLT(c.R, c.t, x1[idx], x2[idx]);
+        const X = triangulateDLT_smallestEigen(c.R, c.t, x1[idx], x2[idx]);
         if (!X) continue;
 
-        // Depth in cam1 is Z
         const z1 = X[2];
-
-        // Depth in cam2 is Z2 = (R*X + t)_z
         const X2cam = add3(mulMatVec3(c.R, X), c.t);
         const z2 = X2cam[2];
 
@@ -1221,124 +1147,265 @@
     }
 
     if (!best || bestCount < 10){
-      return { ok:false, reason:`Cheirality test failed (bestCount=${bestCount}). More baseline, less rotation.` };
+      return { ok:false, reason:`Cheirality failed (bestCount=${bestCount}). More baseline, less rotation.` };
     }
 
     return { ok:true, R: best.R, t: best.t };
   }
 
+  function svd3_from_EtE(E){
+    // 1) V from eigen(E^T E)
+    const Et = transpose3(E);
+    const EtE = mul3(Et, E);
+
+    const ev = jacobiEigenSym(EtE);
+    const vals = ev.values.slice();
+    const Vraw = ev.vectors;
+
+    // sort descending
+    const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
+    const lam = order.map(i=>Math.max(vals[i], 0));
+    const V = [
+      [Vraw[0][order[0]], Vraw[0][order[1]], Vraw[0][order[2]]],
+      [Vraw[1][order[0]], Vraw[1][order[1]], Vraw[1][order[2]]],
+      [Vraw[2][order[0]], Vraw[2][order[1]], Vraw[2][order[2]]],
+    ];
+
+    // singular values
+    const s = lam.map(x=>Math.sqrt(x));
+
+    // 2) U = E V Σ^{-1}
+    const EV = mul3(E, V);
+    const inv0 = 1/Math.max(s[0],1e-12);
+    const inv1 = 1/Math.max(s[1],1e-12);
+    const inv2 = 1/Math.max(s[2],1e-12);
+
+    let U = [
+      [EV[0][0]*inv0, EV[0][1]*inv1, EV[0][2]*inv2],
+      [EV[1][0]*inv0, EV[1][1]*inv1, EV[1][2]*inv2],
+      [EV[2][0]*inv0, EV[2][1]*inv1, EV[2][2]*inv2],
+    ];
+
+    U = ortho3(U);
+
+    // fix det sign if needed (make it a proper rotation basis)
+    if (det3(U) < 0){
+      U[0][2] *= -1; U[1][2] *= -1; U[2][2] *= -1;
+    }
+    if (det3(V) < 0){
+      V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
+    }
+
+    return {U, V, s};
+  }
+
   /********************************************************************
-   * 14) Triangulation (DLT) in camera coordinates
+   * 14) Triangulation (DLT) using smallest eigenvector of (A^T A)
    * ---------------------------------------------------------------
-   * P1 = [I|0]
-   * P2 = [R|t]
-   * x1, x2 are normalized: [x,y,1]
+   * This avoids cv.SVDecomp completely.
    ********************************************************************/
-  function triangulateDLT(R, t, x1, x2){
-    // Build 4x4 A:
-    // x*P3 - P1, y*P3 - P2 for each view
-    // For P1=[I|0]:
-    // rows:
-    // [ -1,  0, x1, 0]
-    // [  0, -1, y1, 0]
-    // For P2=[R|t], P2 rows are r1|t1, r2|t2, r3|t3:
+  function triangulateDLT_smallestEigen(R, t, x1, x2){
     const x = x1[0], y = x1[1];
     const xp = x2[0], yp = x2[1];
 
     const r1 = R[0], r2 = R[1], r3 = R[2];
 
-    const A = new cv.Mat(4,4,cv.CV_64F);
+    // Build 4x4 A (same as classic DLT)
+    const A = [
+      [-1, 0,  x, 0],
+      [ 0,-1,  y, 0],
+      [xp*r3[0]-r1[0], xp*r3[1]-r1[1], xp*r3[2]-r1[2], xp*t[2]-t[0]],
+      [yp*r3[0]-r2[0], yp*r3[1]-r2[1], yp*r3[2]-r2[2], yp*t[2]-t[1]],
+    ];
 
-    // view1
-    setRow(A, 0, [-1, 0,  x, 0]);
-    setRow(A, 1, [ 0,-1,  y, 0]);
+    // Solve smallest eigenvector of A^T A (4x4)
+    const AT = matT(A);
+    const ATA = matMul(AT, A);
+    const ev = jacobiEigenSym(ATA);
+    const k = argMin(ev.values);
+    const vh = ev.vectors.map(row => row[k]); // homogeneous [X,Y,Z,W]
 
-    // view2: xp*(r3|t3) - (r1|t1)
-    setRow(A, 2, [
-      xp*r3[0] - r1[0],
-      xp*r3[1] - r1[1],
-      xp*r3[2] - r1[2],
-      xp*t[2]  - t[0]
-    ]);
-
-    // view2: yp*(r3|t3) - (r2|t2)
-    setRow(A, 3, [
-      yp*r3[0] - r2[0],
-      yp*r3[1] - r2[1],
-      yp*r3[2] - r2[2],
-      yp*t[2]  - t[1]
-    ]);
-
-    const W = new cv.Mat();
-    const U = new cv.Mat();
-    const Vt = new cv.Mat();
-    cv.SVDecomp(A, W, U, Vt);
-
-    // Solution is last row of Vt (smallest singular value)
-    const Xh = [Vt.doubleAt(3,0), Vt.doubleAt(3,1), Vt.doubleAt(3,2), Vt.doubleAt(3,3)];
-
-    A.delete(); W.delete(); U.delete(); Vt.delete();
-
-    if (Math.abs(Xh[3]) < 1e-12) return null;
-    return [Xh[0]/Xh[3], Xh[1]/Xh[3], Xh[2]/Xh[3]];
-  }
-
-  function setRow(M, r, arr){
-    for (let c=0;c<arr.length;c++){
-      M.doublePtr(r,c)[0] = arr[c];
-    }
+    if (Math.abs(vh[3]) < 1e-12) return null;
+    return [vh[0]/vh[3], vh[1]/vh[3], vh[2]/vh[3]];
   }
 
   /********************************************************************
-   * 15) PCA extents (SVD on centered points)
+   * 15) PCA extents using covariance eigenvectors (3x3)
    ********************************************************************/
-  function computeExtentsPCA(pts3){
+  function computeExtentsPCA_covEigen(pts3){
     const N = pts3.length;
     if (N < 5) return null;
 
+    // mean
     let mx=0,my=0,mz=0;
     for (const p of pts3){ mx+=p[0]; my+=p[1]; mz+=p[2]; }
     mx/=N; my/=N; mz/=N;
 
-    // Nx3 matrix
-    const A = new cv.Mat(N,3,cv.CV_64F);
-    for (let i=0;i<N;i++){
-      A.doublePtr(i,0)[0] = pts3[i][0]-mx;
-      A.doublePtr(i,1)[0] = pts3[i][1]-my;
-      A.doublePtr(i,2)[0] = pts3[i][2]-mz;
+    // covariance C = (1/N) sum (p-m)(p-m)^T
+    let c00=0,c01=0,c02=0,c11=0,c12=0,c22=0;
+    for (const p of pts3){
+      const x=p[0]-mx, y=p[1]-my, z=p[2]-mz;
+      c00 += x*x; c01 += x*y; c02 += x*z;
+      c11 += y*y; c12 += y*z;
+      c22 += z*z;
     }
+    c00/=N; c01/=N; c02/=N; c11/=N; c12/=N; c22/=N;
 
-    const W = new cv.Mat();
-    const U = new cv.Mat();
-    const Vt = new cv.Mat();
-    cv.SVDecomp(A, W, U, Vt);
+    const C = [
+      [c00,c01,c02],
+      [c01,c11,c12],
+      [c02,c12,c22]
+    ];
 
-    // V = Vt^T
-    const V = transpose3(cv3ToMat3(Vt));
+    // eigen(C): columns are principal axes
+    const ev = jacobiEigenSym(C);
 
-    // Project points: Y = A * V (N x 3)
-    const Y = new cv.Mat();
-    const Vcv = mat3ToCv(V);
-    cv.gemm(A, Vcv, 1, new cv.Mat(), 0, Y);
+    // sort by descending eigenvalue (principal first)
+    const order = [0,1,2].sort((a,b)=>ev.values[b]-ev.values[a]);
+    const V = [
+      [ev.vectors[0][order[0]], ev.vectors[0][order[1]], ev.vectors[0][order[2]]],
+      [ev.vectors[1][order[0]], ev.vectors[1][order[1]], ev.vectors[1][order[2]]],
+      [ev.vectors[2][order[0]], ev.vectors[2][order[1]], ev.vectors[2][order[2]]],
+    ];
 
+    // project points onto axes and take min/max
     let min0=1e9,max0=-1e9,min1=1e9,max1=-1e9,min2=1e9,max2=-1e9;
-    for (let i=0;i<N;i++){
-      const a0=Y.doubleAt(i,0), a1=Y.doubleAt(i,1), a2=Y.doubleAt(i,2);
+    for (const p of pts3){
+      const x=p[0]-mx, y=p[1]-my, z=p[2]-mz;
+      const a0 = V[0][0]*x + V[1][0]*y + V[2][0]*z;
+      const a1 = V[0][1]*x + V[1][1]*y + V[2][1]*z;
+      const a2 = V[0][2]*x + V[1][2]*y + V[2][2]*z;
       if (a0<min0) min0=a0; if (a0>max0) max0=a0;
       if (a1<min1) min1=a1; if (a1>max1) max1=a1;
       if (a2<min2) min2=a2; if (a2>max2) max2=a2;
     }
 
-    const e = [max0-min0, max1-min1, max2-min2].sort((a,b)=>b-a);
-
-    A.delete(); W.delete(); U.delete(); Vt.delete(); Vcv.delete(); Y.delete();
-
-    return { e1:e[0], e2:e[1], e3:e[2] };
+    const e0=max0-min0, e1=max1-min1, e2=max2-min2;
+    const arr = [e0,e1,e2].sort((a,b)=>b-a);
+    return { e1:arr[0], e2:arr[1], e3:arr[2] };
   }
 
   /********************************************************************
-   * 16) Small linear algebra (3x3)
+   * 16) PURE JS NUMERICAL TOOLS
    ********************************************************************/
+
+  // ---- Jacobi eigen solver for symmetric matrix (n x n) ----
+  // Returns:
+  //   values: eigenvalues
+  //   vectors: matrix V where columns are eigenvectors
+  function jacobiEigenSym(A){
+    const n = A.length;
+
+    // copy A
+    const M = Array.from({length:n}, (_,i)=>A[i].slice());
+
+    // V = I
+    const V = Array.from({length:n}, (_,i)=>Array.from({length:n}, (_,j)=> (i===j?1:0)));
+
+    const MAX_IT = 60 * n * n;
+
+    for (let it=0; it<MAX_IT; it++){
+      // find largest off-diagonal element
+      let p=0,q=1;
+      let max = 0;
+      for (let i=0;i<n;i++){
+        for (let j=i+1;j<n;j++){
+          const val = Math.abs(M[i][j]);
+          if (val > max){
+            max = val; p=i; q=j;
+          }
+        }
+      }
+
+      // converged
+      if (max < 1e-12) break;
+
+      const app = M[p][p];
+      const aqq = M[q][q];
+      const apq = M[p][q];
+
+      // rotation angle
+      const phi = 0.5 * Math.atan2(2*apq, (aqq - app));
+      const c = Math.cos(phi);
+      const s = Math.sin(phi);
+
+      // update M = J^T M J
+      for (let k=0;k<n;k++){
+        const mkp = M[k][p];
+        const mkq = M[k][q];
+        M[k][p] = c*mkp - s*mkq;
+        M[k][q] = s*mkp + c*mkq;
+      }
+      for (let k=0;k<n;k++){
+        const mpk = M[p][k];
+        const mqk = M[q][k];
+        M[p][k] = c*mpk - s*mqk;
+        M[q][k] = s*mpk + c*mqk;
+      }
+
+      // fix diagonals explicitly (numerical stability)
+      M[p][p] = c*c*app - 2*s*c*apq + s*s*aqq;
+      M[q][q] = s*s*app + 2*s*c*apq + c*c*aqq;
+      M[p][q] = 0;
+      M[q][p] = 0;
+
+      // update eigenvectors V = V J
+      for (let k=0;k<n;k++){
+        const vkp = V[k][p];
+        const vkq = V[k][q];
+        V[k][p] = c*vkp - s*vkq;
+        V[k][q] = s*vkp + c*vkq;
+      }
+    }
+
+    const values = Array.from({length:n}, (_,i)=>M[i][i]);
+
+    // normalize columns
+    for (let j=0;j<n;j++){
+      let nn=0;
+      for (let i=0;i<n;i++) nn += V[i][j]*V[i][j];
+      nn = Math.sqrt(Math.max(nn,1e-30));
+      for (let i=0;i<n;i++) V[i][j] /= nn;
+    }
+
+    return { values, vectors: V };
+  }
+
+  function argMin(arr){
+    let k=0, best=arr[0];
+    for (let i=1;i<arr.length;i++){
+      if (arr[i] < best){ best=arr[i]; k=i; }
+    }
+    return k;
+  }
+
+  function matMul(A, B) {
+    const m = A.length, n = A[0].length, p = B[0].length;
+    const C = Array.from({length:m}, () => Array(p).fill(0));
+    for (let i=0;i<m;i++){
+      for (let k=0;k<n;k++){
+        const aik = A[i][k];
+        for (let j=0;j<p;j++) C[i][j] += aik * B[k][j];
+      }
+    }
+    return C;
+  }
+
+  function matT(A) {
+    const m=A.length, n=A[0].length;
+    const AT = Array.from({length:n}, () => Array(m).fill(0));
+    for (let i=0;i<m;i++) for (let j=0;j<n;j++) AT[j][i]=A[i][j];
+    return AT;
+  }
+
+  function shuffleInPlace(a){
+    for (let i=a.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      const t=a[i]; a[i]=a[j]; a[j]=t;
+    }
+  }
+
+  // ---- 3x3 ops ----
   function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
   function add3(a,b){ return [a[0]+b[0],a[1]+b[1],a[2]+b[2]]; }
 
@@ -1399,28 +1466,41 @@
     return inv;
   }
 
-  function mat3ToCv(M){
-    return cv.matFromArray(3,3,cv.CV_64F, [
-      M[0][0],M[0][1],M[0][2],
-      M[1][0],M[1][1],M[1][2],
-      M[2][0],M[2][1],M[2][2],
-    ]);
-  }
+  // Gram-Schmidt to make columns orthonormal
+  function ortho3(M){
+    // columns: c0,c1,c2
+    let c0 = [M[0][0], M[1][0], M[2][0]];
+    let c1 = [M[0][1], M[1][1], M[2][1]];
+    let c2 = [M[0][2], M[1][2], M[2][2]];
 
-  function cv3ToMat3(Mcv){
-    // reads top-left 3x3 (works for 3x3 or bigger mats)
+    c0 = normalize3(c0);
+
+    c1 = sub3(c1, scale3(c0, dot3(c0,c1)));
+    c1 = normalize3(c1);
+
+    // c2 = c0 x c1 (more stable)
+    c2 = cross3(c0,c1);
+    c2 = normalize3(c2);
+
     return [
-      [Mcv.doubleAt(0,0), Mcv.doubleAt(0,1), Mcv.doubleAt(0,2)],
-      [Mcv.doubleAt(1,0), Mcv.doubleAt(1,1), Mcv.doubleAt(1,2)],
-      [Mcv.doubleAt(2,0), Mcv.doubleAt(2,1), Mcv.doubleAt(2,2)],
+      [c0[0], c1[0], c2[0]],
+      [c0[1], c1[1], c2[1]],
+      [c0[2], c1[2], c2[2]],
     ];
   }
 
-  function shuffleInPlace(a){
-    for (let i=a.length-1;i>0;i--){
-      const j = Math.floor(Math.random()*(i+1));
-      const t=a[i]; a[i]=a[j]; a[j]=t;
-    }
+  function normalize3(v){
+    const n = Math.sqrt(Math.max(dot3(v,v), 1e-30));
+    return [v[0]/n, v[1]/n, v[2]/n];
+  }
+  function scale3(v,s){ return [v[0]*s,v[1]*s,v[2]*s]; }
+  function sub3(a,b){ return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]; }
+  function cross3(a,b){
+    return [
+      a[1]*b[2]-a[2]*b[1],
+      a[2]*b[0]-a[0]*b[2],
+      a[0]*b[1]-a[1]*b[0],
+    ];
   }
   </script>
 </body>
