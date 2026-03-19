@@ -27,7 +27,7 @@
       max-width: var(--maxw);
       border-radius: var(--radius);
       border: var(--border);
-      touch-action:none;
+      touch-action: pan-y;
       background:#000;
       display:block;
       margin:0 auto;
@@ -278,6 +278,7 @@
         <li>Mode A: draw object ROI in View 1 and View 2.</li>
         <li>Mode B: draw object ROI in View 1 and View 2, then click measurement points in both views, then press Compute.</li>
         <li>Mode C: draw reference ROI and object ROI in View 1, then click reference and object measurement points, then press Compute.</li>
+        <li>You should now be able to scroll the page vertically whenever you are not actively drawing an ROI.</li>
       </ol>
     </details>
 
@@ -475,6 +476,7 @@
       logLine("[boot] findContours: " + typeof cv.findContours);
       logLine("[boot] undistort: " + typeof cv.undistort);
       logLine("[boot] page script started");
+      updateCanvasTouchAction();
     };
 
     /********************************************************************
@@ -483,6 +485,7 @@
     function setStage(s){
       stage = s;
       stageStatus.textContent = s;
+      updateCanvasTouchAction();
     }
     function setDisplayMode(m){
       displayMode = m;
@@ -503,6 +506,13 @@
         "\"":"&quot;",
         "'":"&#39;"
       }[c]));
+    }
+    function updateCanvasTouchAction(){
+      if (roiState === "await1" || roiState === "await2" || roi.active){
+        canvas.style.touchAction = "none";
+      } else {
+        canvas.style.touchAction = "pan-y";
+      }
     }
 
     function requiredPointsForObject(type){
@@ -594,6 +604,7 @@
 
           setOut("Start ✅ Capture 1 at position A.", false);
           requestAnimationFrame(drawLoop);
+          updateCanvasTouchAction();
         };
 
         if (video.readyState >= 1 && video.videoWidth > 0) finishSetup();
@@ -865,6 +876,7 @@
       if (!sensorsEnabled || !strictImuToggle.checked){
         cap2Btn.disabled = false;
       }
+      updateCanvasTouchAction();
     }
 
     function captureView2(){
@@ -896,6 +908,7 @@
         roiState = "await1";
         setOut("Mode C ✅ Draw ROI around the fixed reference card in View 1.", false);
         cap2Btn.disabled = true;
+        updateCanvasTouchAction();
         return;
       }
 
@@ -905,6 +918,7 @@
         setOut("Pose failed: " + res.reason, true);
         setStage("v1");
         cap2Btn.disabled = false;
+        updateCanvasTouchAction();
         return;
       }
 
@@ -928,6 +942,7 @@
         setStage("roi1_manual");
         setOut("Mode B ✅ Draw ROI around the object in View 1.", false);
       }
+      updateCanvasTouchAction();
     }
 
     /********************************************************************
@@ -964,6 +979,7 @@
       roi.active = true;
       roi.x0 = roi.x1 = p.x;
       roi.y0 = roi.y1 = p.y;
+      updateCanvasTouchAction();
     }
 
     function onMove(e){
@@ -979,6 +995,7 @@
       e.preventDefault();
 
       roi.active = false;
+      updateCanvasTouchAction();
 
       const x = Math.min(roi.x0, roi.x1);
       const y = Math.min(roi.y0, roi.y1);
@@ -996,6 +1013,7 @@
           roiState = "await2";
           setStage("ref_obj_roi");
           setOut("Reference ROI saved ✅ Now draw ROI around the object in View 1.", false);
+          updateCanvasTouchAction();
           return;
         }
 
@@ -1009,6 +1027,7 @@
           setStage("ref_scale_pts");
           setDisplayMode("view1");
           setOut(instructionReferenceScale(), false);
+          updateCanvasTouchAction();
           return;
         }
       }
@@ -1020,6 +1039,7 @@
         setStage("roi2");
         setDisplayMode("view2");
         setOut("ROI 1 saved ✅ Now draw ROI around the object in View 2.", false);
+        updateCanvasTouchAction();
         return;
       }
 
@@ -1034,15 +1054,18 @@
             if (!res.ok){
               setOut(res.msg, true);
               logLine(`[AUTO] failed: ${res.msg}`);
+              updateCanvasTouchAction();
               return;
             }
             setStage("measured");
             setOut(`FINAL: ${res.measuredText}`, false);
             logResult(res);
+            updateCanvasTouchAction();
             return;
           }catch(err){
             logLine(`[AUTO] exception: ${err?.message || err}`);
             setOut(`Mode A error: ${err?.message || err}`, true);
+            updateCanvasTouchAction();
             return;
           }
         }
@@ -1053,6 +1076,7 @@
         setStage("manual_v1");
         setDisplayMode("view1");
         setOut(instructionManualView1(), false);
+        updateCanvasTouchAction();
       }
     }
 
@@ -1369,6 +1393,7 @@
         }
       }
       logLine("[clear] ROIs cleared");
+      updateCanvasTouchAction();
     }
 
     function clearLastMark(){
@@ -1464,6 +1489,7 @@
         setStage("measured_manual");
         setOut(`FINAL: ${res.measuredText}`, false);
         logResult(res);
+        updateCanvasTouchAction();
         return;
       }
 
@@ -1479,6 +1505,7 @@
         setStage("measured_ref");
         setOut(`FINAL: ${res.measuredText}`, false);
         logResult(res);
+        updateCanvasTouchAction();
         return;
       }
     }
@@ -2221,6 +2248,7 @@
       refScalePts = [];
       refObjPts = [];
       computeBtn.disabled = true;
+      updateCanvasTouchAction();
     }
 
     function cleanupFrames(){
@@ -2253,6 +2281,7 @@
 
       clearLog();
       logLine("=== RESET ===");
+      updateCanvasTouchAction();
     }
 
     updateResCount();
