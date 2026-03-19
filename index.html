@@ -207,6 +207,18 @@
     </div>
 
     <div class="pill">
+      <span>Manual click refine</span>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:6px;">
+          <input id="refineToggle" type="checkbox" checked>
+          <span>ON</span>
+        </label>
+        <span>Window (px)</span>
+        <input id="refineRadiusPx" type="number" value="18" min="4" max="60" step="1" style="width:90px;">
+      </div>
+    </div>
+
+    <div class="pill">
       <span>Reference width × height (mm)</span>
       <div style="display:flex; gap:8px;">
         <input id="refWidthMm" type="number" value="85.60" step="0.01" style="width:100px;">
@@ -217,6 +229,7 @@
     <button onclick="clearROIs()">Clear ROIs</button>
     <button onclick="clearLastMark()">Clear last mark</button>
     <button onclick="clearAllMarks()">Clear all marks</button>
+    <button id="computeBtn" onclick="finalizePendingMeasurement()" disabled>Compute</button>
     <button onclick="resetAll()">Reset all</button>
   </div>
 
@@ -247,7 +260,7 @@
       </summary>
       <div class="row">
         <button onclick="clearLog()">Clear log</button>
-        <span class="small">Manual mode: clear last mark lets you fix a mistaken click without restarting.</span>
+        <span class="small">Manual click refinement will snap to a nearby corner/edge when a reliable feature exists.</span>
       </div>
       <pre id="log"></pre>
     </details>
@@ -263,8 +276,8 @@
         <li>Capture 1.</li>
         <li>Move to position B and Capture 2.</li>
         <li>Mode A: draw object ROI in View 1 and View 2.</li>
-        <li>Mode B: draw object ROI in View 1 and View 2, then click measurement points in both views.</li>
-        <li>Mode C: draw reference ROI and object ROI in View 1, then click reference and object measurement points.</li>
+        <li>Mode B: draw object ROI in View 1 and View 2, then click measurement points in both views, then press Compute.</li>
+        <li>Mode C: draw reference ROI and object ROI in View 1, then click reference and object measurement points, then press Compute.</li>
       </ol>
     </details>
 
@@ -404,6 +417,9 @@
     let refScalePts = [];
     let refObjPts = [];
 
+    let pendingMeasureMode = null;
+    let lastTouchStamp = 0;
+
     let results = [];
 
     /********************************************************************
@@ -423,6 +439,8 @@
     const streamInfoEl = document.getElementById("streamInfo");
     const undToggle = document.getElementById("undToggle");
     const strictImuToggle = document.getElementById("strictImuToggle");
+    const refineToggle = document.getElementById("refineToggle");
+    const refineRadiusPxEl = document.getElementById("refineRadiusPx");
     const modeSel = document.getElementById("modeSel");
     const objTypeSel = document.getElementById("objType");
 
@@ -430,6 +448,7 @@
     const imuBtn = document.getElementById("imuBtn");
     const cap1Btn = document.getElementById("cap1Btn");
     const cap2Btn = document.getElementById("cap2Btn");
+    const computeBtn = document.getElementById("computeBtn");
 
     const dyawEl = document.getElementById("dyaw");
     const dpitchEl = document.getElementById("dpitch");
@@ -870,6 +889,8 @@
 
       if (mode === "reference_manual"){
         poseReady = false;
+        pendingMeasureMode = null;
+        computeBtn.disabled = true;
         setStage("ref_roi");
         setDisplayMode("view1");
         roiState = "await1";
@@ -897,6 +918,8 @@
       roiState = "await1";
       setDisplayMode("view1");
       cap2Btn.disabled = true;
+      computeBtn.disabled = true;
+      pendingMeasureMode = null;
 
       if (mode === "epipolar_auto"){
         setStage("roi1_auto");
@@ -981,6 +1004,8 @@
           logLine(`[OBJ ROI] x=${x.toFixed(1)} y=${y.toFixed(1)} w=${w.toFixed(1)} h=${h.toFixed(1)}`);
           roiState = "none";
           pointState = "ref_scale";
+          computeBtn.disabled = true;
+          pendingMeasureMode = null;
           setStage("ref_scale_pts");
           setDisplayMode("view1");
           setOut(instructionReferenceScale(), false);
@@ -1004,18 +1029,27 @@
         roiState = "none";
 
         if (mode === "epipolar_auto"){
-          const res = measureWithTwoROIs();
-          if (!res.ok){
-            setOut(res.msg, true);
+          try{
+            const res = measureWithTwoROIs();
+            if (!res.ok){
+              setOut(res.msg, true);
+              logLine(`[AUTO] failed: ${res.msg}`);
+              return;
+            }
+            setStage("measured");
+            setOut(`FINAL: ${res.measuredText}`, false);
+            logResult(res);
+            return;
+          }catch(err){
+            logLine(`[AUTO] exception: ${err?.message || err}`);
+            setOut(`Mode A error: ${err?.message || err}`, true);
             return;
           }
-          setStage("measured");
-          setOut(`FINAL: ${res.measuredText}`, false);
-          logResult(res);
-          return;
         }
 
         pointState = "epi_v1";
+        computeBtn.disabled = true;
+        pendingMeasureMode = null;
         setStage("manual_v1");
         setDisplayMode("view1");
         setOut(instructionManualView1(), false);
@@ -1025,6 +1059,7 @@
     function onCanvasClick(e){
       if (pointState === "none") return;
       if (roi.active) return;
+      if (Date.now() - lastTouchStamp < 500) return;
       e.preventDefault();
       addMark(canvasPointFromEvent(e));
     }
@@ -1032,16 +1067,18 @@
     function onCanvasTap(e){
       if (pointState === "none") return;
       if (roi.active) return;
+      lastTouchStamp = Date.now();
       e.preventDefault();
       addMark(canvasPointFromEvent(e));
     }
 
-    function addMark(p){
+    function addMark(pRaw){
+      const p = refineToggle.checked ? refinePointForCurrentStage(pRaw) : pRaw;
       const nReq = requiredPointsForObject(objTypeSel.value);
 
       if (pointState === "epi_v1"){
         manualPtsV1.push(p);
-        logLine(`[V1 MARK ${manualPtsV1.length}] x=${p.x.toFixed(1)} y=${p.y.toFixed(1)}`);
+        logLine(`[V1 MARK ${manualPtsV1.length}] raw=(${pRaw.x.toFixed(1)},${pRaw.y.toFixed(1)}) final=(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
         if (manualPtsV1.length >= nReq){
           pointState = "epi_v2";
           setStage("manual_v2");
@@ -1053,24 +1090,21 @@
 
       if (pointState === "epi_v2"){
         manualPtsV2.push(p);
-        logLine(`[V2 MARK ${manualPtsV2.length}] x=${p.x.toFixed(1)} y=${p.y.toFixed(1)}`);
+        logLine(`[V2 MARK ${manualPtsV2.length}] raw=(${pRaw.x.toFixed(1)},${pRaw.y.toFixed(1)}) final=(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
         if (manualPtsV2.length >= nReq){
-          pointState = "none";
-          const res = measureManualEpipolar();
-          if (!res.ok){
-            setOut(res.msg, true);
-            return;
-          }
-          setStage("measured_manual");
-          setOut(`FINAL: ${res.measuredText}`, false);
-          logResult(res);
+          pointState = "manual_review";
+          pendingMeasureMode = "epipolar_manual";
+          computeBtn.disabled = false;
+          setStage("manual_review");
+          setDisplayMode("view2");
+          setOut("All manual points placed. Use Clear last mark if needed, then press Compute.", false);
         }
         return;
       }
 
       if (pointState === "ref_scale"){
         refScalePts.push(p);
-        logLine(`[REF MARK ${refScalePts.length}] x=${p.x.toFixed(1)} y=${p.y.toFixed(1)}`);
+        logLine(`[REF MARK ${refScalePts.length}] raw=(${pRaw.x.toFixed(1)},${pRaw.y.toFixed(1)}) final=(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
         if (refScalePts.length >= 4){
           pointState = "ref_obj";
           setStage("ref_obj_pts");
@@ -1082,19 +1116,227 @@
 
       if (pointState === "ref_obj"){
         refObjPts.push(p);
-        logLine(`[OBJ MARK ${refObjPts.length}] x=${p.x.toFixed(1)} y=${p.y.toFixed(1)}`);
+        logLine(`[OBJ MARK ${refObjPts.length}] raw=(${pRaw.x.toFixed(1)},${pRaw.y.toFixed(1)}) final=(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
         if (refObjPts.length >= nReq){
-          pointState = "none";
-          const res = measureReferenceManual();
-          if (!res.ok){
-            setOut(res.msg, true);
-            return;
-          }
-          setStage("measured_ref");
-          setOut(`FINAL: ${res.measuredText}`, false);
-          logResult(res);
+          pointState = "ref_review";
+          pendingMeasureMode = "reference_manual";
+          computeBtn.disabled = false;
+          setStage("ref_review");
+          setDisplayMode("view1");
+          setOut("All reference/object points placed. Use Clear last mark if needed, then press Compute.", false);
         }
       }
+    }
+
+    /********************************************************************
+     * CLICK REFINEMENT
+     ********************************************************************/
+    function getRefineRadiusPx(){
+      const v = parseFloat(refineRadiusPxEl.value);
+      return clamp(Math.round(isFinite(v) ? v : 18), 4, 60);
+    }
+
+    function currentFrameGrayForPointState(){
+      if (pointState === "epi_v1" || pointState === "ref_scale" || pointState === "ref_obj" || pointState === "ref_review"){
+        return gray1;
+      }
+      if (pointState === "epi_v2" || pointState === "manual_review"){
+        return gray2;
+      }
+      return null;
+    }
+
+    function currentROIForPointState(){
+      if (pointState === "epi_v1") return roi1Box;
+      if (pointState === "epi_v2") return roi2Box;
+      if (pointState === "ref_scale") return refRoiBox;
+      if (pointState === "ref_obj" || pointState === "ref_review") return roi1Box;
+      return null;
+    }
+
+    function refinePointForCurrentStage(p){
+      try{
+        const gray = currentFrameGrayForPointState();
+        if (!gray) return p;
+
+        const roiBox = currentROIForPointState();
+        const type = objTypeSel.value;
+        const rad = getRefineRadiusPx();
+
+        const pref = preferredRefineModeForState(type, pointState);
+        const pRef = refinePointSmart(gray, p, roiBox, rad, pref);
+
+        const moved = Math.hypot(pRef.x - p.x, pRef.y - p.y);
+        if (moved > 0.5){
+          logLine(`[REFINE] ${pref} moved ${moved.toFixed(1)} px`);
+        } else {
+          logLine(`[REFINE] ${pref} kept original click`);
+        }
+        return pRef;
+      }catch(err){
+        logLine(`[REFINE] failed: ${err?.message || err}`);
+        return p;
+      }
+    }
+
+    function preferredRefineModeForState(type, state){
+      if (type === "ball") return "circle_edge";
+      if (type === "spoon") return "edge";
+      if (state === "ref_scale") return "corner_or_edge";
+      return "corner_or_edge";
+    }
+
+    function refinePointSmart(gray, p, roiBox, radius, pref){
+      const candidates = [];
+
+      if (pref === "circle_edge"){
+        const c1 = refinePointByEdge(gray, p, roiBox, radius, {preferRadial:true});
+        if (c1) candidates.push({pt:c1, score:c1.score, label:"circle-edge"});
+        const c2 = refinePointByCorner(gray, p, roiBox, radius);
+        if (c2) candidates.push({pt:c2, score:0.75*c2.score, label:"corner-fallback"});
+      } else if (pref === "edge"){
+        const c1 = refinePointByEdge(gray, p, roiBox, radius, {preferRadial:false});
+        if (c1) candidates.push({pt:c1, score:c1.score, label:"edge"});
+        const c2 = refinePointByCorner(gray, p, roiBox, radius);
+        if (c2) candidates.push({pt:c2, score:0.8*c2.score, label:"corner-fallback"});
+      } else {
+        const c1 = refinePointByCorner(gray, p, roiBox, radius);
+        if (c1) candidates.push({pt:c1, score:c1.score, label:"corner"});
+        const c2 = refinePointByEdge(gray, p, roiBox, radius, {preferRadial:false});
+        if (c2) candidates.push({pt:c2, score:0.85*c2.score, label:"edge-fallback"});
+      }
+
+      if (candidates.length === 0) return p;
+
+      candidates.sort((a,b)=>b.score-a.score);
+      const best = candidates[0];
+      logLine(`[REFINE] chose ${best.label}`);
+      return { x: best.pt.x, y: best.pt.y };
+    }
+
+    function refinePointByCorner(gray, p, roiBox, radius){
+      if (typeof cv.goodFeaturesToTrack !== "function") return null;
+
+      let patch = null, corners = null, mask = null;
+      try{
+        const W = gray.cols, H = gray.rows;
+        const x0 = clamp(Math.round(p.x - radius), 0, W-1);
+        const y0 = clamp(Math.round(p.y - radius), 0, H-1);
+        const x1 = clamp(Math.round(p.x + radius), 0, W-1);
+        const y1 = clamp(Math.round(p.y + radius), 0, H-1);
+        const w = x1 - x0 + 1;
+        const h = y1 - y0 + 1;
+        if (w < 5 || h < 5) return null;
+
+        patch = gray.roi(new cv.Rect(x0, y0, w, h));
+        mask = buildLocalMaskForROI(w, h, x0, y0, roiBox);
+
+        corners = new cv.Mat();
+        cv.goodFeaturesToTrack(patch, corners, 20, 0.01, 3, mask);
+
+        if (corners.rows < 1) return null;
+
+        let best = null;
+        for (let i=0; i<corners.rows; i++){
+          const cx = x0 + corners.data32F[i*2];
+          const cy = y0 + corners.data32F[i*2+1];
+          const d = Math.hypot(cx - p.x, cy - p.y);
+          const score = 1.0 / (1.0 + d);
+          if (!best || score > best.score){
+            best = { x: cx, y: cy, score };
+          }
+        }
+        return best;
+      } finally {
+        if (patch) patch.delete();
+        if (corners) corners.delete();
+        if (mask) mask.delete();
+      }
+    }
+
+    function refinePointByEdge(gray, p, roiBox, radius, opts={}){
+      if (typeof cv.Canny !== "function") return null;
+
+      let patch = null, blur = null, edges = null, mask = null;
+      try{
+        const W = gray.cols, H = gray.rows;
+        const x0 = clamp(Math.round(p.x - radius), 0, W-1);
+        const y0 = clamp(Math.round(p.y - radius), 0, H-1);
+        const x1 = clamp(Math.round(p.x + radius), 0, W-1);
+        const y1 = clamp(Math.round(p.y + radius), 0, H-1);
+        const w = x1 - x0 + 1;
+        const h = y1 - y0 + 1;
+        if (w < 5 || h < 5) return null;
+
+        patch = gray.roi(new cv.Rect(x0, y0, w, h));
+        blur = new cv.Mat();
+        edges = new cv.Mat();
+        cv.GaussianBlur(patch, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
+        cv.Canny(blur, edges, 40, 120);
+
+        mask = buildLocalMaskForROI(w, h, x0, y0, roiBox);
+
+        const cx0 = x0 + 0.5*(w-1);
+        const cy0 = y0 + 0.5*(h-1);
+
+        let best = null;
+        for (let yy=0; yy<h; yy++){
+          for (let xx=0; xx<w; xx++){
+            if (mask && mask.ucharPtr(yy,xx)[0] === 0) continue;
+            if (edges.ucharPtr(yy,xx)[0] === 0) continue;
+
+            const gx = x0 + xx;
+            const gy = y0 + yy;
+            const d = Math.hypot(gx - p.x, gy - p.y);
+
+            let score = 1.0 / (1.0 + d);
+
+            if (opts.preferRadial){
+              const vgClick = normalize2({x: p.x - cx0, y: p.y - cy0});
+              const vgEdge  = normalize2({x: gx - cx0, y: gy - cy0});
+              const align = Math.max(0, vgClick.x*vgEdge.x + vgClick.y*vgEdge.y);
+              score *= (1.0 + 0.75*align);
+            }
+
+            if (!best || score > best.score){
+              best = { x: gx, y: gy, score };
+            }
+          }
+        }
+        return best;
+      } finally {
+        if (patch) patch.delete();
+        if (blur) blur.delete();
+        if (edges) edges.delete();
+        if (mask) mask.delete();
+      }
+    }
+
+    function buildLocalMaskForROI(w, h, x0, y0, roiBox){
+      if (!roiBox){
+        const full = new cv.Mat(h, w, cv.CV_8U);
+        full.setTo(new cv.Scalar(255));
+        return full;
+      }
+
+      const m = new cv.Mat(h, w, cv.CV_8U);
+      m.setTo(new cv.Scalar(0));
+
+      const rx0 = roiBox.x;
+      const ry0 = roiBox.y;
+      const rx1 = roiBox.x + roiBox.w;
+      const ry1 = roiBox.y + roiBox.h;
+
+      for (let yy=0; yy<h; yy++){
+        for (let xx=0; xx<w; xx++){
+          const gx = x0 + xx;
+          const gy = y0 + yy;
+          if (gx >= rx0 && gx <= rx1 && gy >= ry0 && gy <= ry1){
+            m.ucharPtr(yy,xx)[0] = 255;
+          }
+        }
+      }
+      return m;
     }
 
     /********************************************************************
@@ -1104,6 +1346,9 @@
       roi1Box = null;
       roi2Box = null;
       refRoiBox = null;
+      pendingMeasureMode = null;
+      computeBtn.disabled = true;
+
       if (modeSel.value === "reference_manual"){
         if (streaming && frame1ImageData){
           setDisplayMode("view1");
@@ -1136,10 +1381,15 @@
         return;
       }
 
-      if (pointState === "epi_v2" || (pointState === "none" && manualPtsV2.length > 0)){
+      if (pointState === "epi_v2" || pointState === "manual_review" || (pointState === "none" && manualPtsV2.length > 0)){
         if (manualPtsV2.length > 0){
           manualPtsV2.pop();
+          pendingMeasureMode = null;
+          computeBtn.disabled = true;
+          pointState = "epi_v2";
+          setStage("manual_v2");
           setDisplayMode("view2");
+          setOut(instructionManualView2(), false);
           logLine("[clear] removed last View 2 mark");
         }
         return;
@@ -1154,10 +1404,15 @@
         return;
       }
 
-      if (pointState === "ref_obj" || (pointState === "none" && refObjPts.length > 0)){
+      if (pointState === "ref_obj" || pointState === "ref_review" || (pointState === "none" && refObjPts.length > 0)){
         if (refObjPts.length > 0){
           refObjPts.pop();
+          pendingMeasureMode = null;
+          computeBtn.disabled = true;
+          pointState = "ref_obj";
+          setStage("ref_obj_pts");
           setDisplayMode("view1");
+          setOut(instructionReferenceObject(), false);
           logLine("[clear] removed last reference-object mark");
         }
       }
@@ -1168,9 +1423,12 @@
       manualPtsV2 = [];
       refScalePts = [];
       refObjPts = [];
+      pendingMeasureMode = null;
+      computeBtn.disabled = true;
       logLine("[clear] all marks cleared");
 
-      if (pointState === "epi_v2"){
+      if (pointState === "epi_v2" || pointState === "manual_review"){
+        pointState = "epi_v2";
         setDisplayMode("view2");
         setOut(instructionManualView2(), false);
       } else if (pointState === "epi_v1"){
@@ -1179,9 +1437,49 @@
       } else if (pointState === "ref_scale"){
         setDisplayMode("view1");
         setOut(instructionReferenceScale(), false);
-      } else if (pointState === "ref_obj"){
+      } else if (pointState === "ref_obj" || pointState === "ref_review"){
+        pointState = "ref_obj";
         setDisplayMode("view1");
         setOut(instructionReferenceObject(), false);
+      }
+    }
+
+    function finalizePendingMeasurement(){
+      if (!pendingMeasureMode){
+        setOut("Nothing pending to compute.", true);
+        return;
+      }
+
+      computeBtn.disabled = true;
+
+      if (pendingMeasureMode === "epipolar_manual"){
+        const res = measureManualEpipolar();
+        if (!res.ok){
+          setOut(res.msg, true);
+          computeBtn.disabled = false;
+          return;
+        }
+        pendingMeasureMode = null;
+        pointState = "none";
+        setStage("measured_manual");
+        setOut(`FINAL: ${res.measuredText}`, false);
+        logResult(res);
+        return;
+      }
+
+      if (pendingMeasureMode === "reference_manual"){
+        const res = measureReferenceManual();
+        if (!res.ok){
+          setOut(res.msg, true);
+          computeBtn.disabled = false;
+          return;
+        }
+        pendingMeasureMode = null;
+        pointState = "none";
+        setStage("measured_ref");
+        setOut(`FINAL: ${res.measuredText}`, false);
+        logResult(res);
+        return;
       }
     }
 
@@ -1670,6 +1968,9 @@
         }
 
         const reproj = reprojErrPx(X, p1.x, p1.y, p2.x, p2.y);
+        if (!isFinite(reproj) || reproj > 8.0){
+          return { ok:false, msg:`Manual point ${i+1} has high reprojection error (${reproj.toFixed(2)} px). Re-mark that pair.` };
+        }
         reprojArr.push(reproj);
         pts3.push(X);
       }
@@ -1911,6 +2212,7 @@
     function clearMeasurementState(){
       roiState = "none";
       pointState = "none";
+      pendingMeasureMode = null;
       roi1Box = null;
       roi2Box = null;
       refRoiBox = null;
@@ -1918,6 +2220,7 @@
       manualPtsV2 = [];
       refScalePts = [];
       refObjPts = [];
+      computeBtn.disabled = true;
     }
 
     function cleanupFrames(){
@@ -1937,6 +2240,8 @@
       R = null;
       t = null;
       imuAtV1 = null;
+      pendingMeasureMode = null;
+      computeBtn.disabled = true;
 
       roi.active = false;
       roi.x0 = roi.y0 = roi.x1 = roi.y1 = 0;
@@ -2562,6 +2867,115 @@
         [c0[1], c1[1], c2[1]],
         [c0[2], c1[2], c2[2]]
       ];
+    }
+
+    /********************************************************************
+     * EXTRA HELPERS THAT WERE MISSING
+     ********************************************************************/
+    function contourDescriptors(cnt){
+      const area = Math.abs(cv.contourArea(cnt));
+      const perimeter = cv.arcLength(cnt, true);
+
+      const rect = cv.boundingRect(cnt);
+      const hull = new cv.Mat();
+
+      let hullArea = 0;
+      try{
+        cv.convexHull(cnt, hull, false, true);
+        hullArea = Math.abs(cv.contourArea(hull));
+      } finally {
+        hull.delete();
+      }
+
+      const circularity = perimeter > 1e-9 ? (4 * Math.PI * area) / (perimeter * perimeter) : 0;
+      const aspect = rect.height > 0 ? rect.width / rect.height : 0;
+      const solidity = hullArea > 1e-9 ? area / hullArea : 0;
+
+      return { area, perimeter, circularity, aspect, solidity };
+    }
+
+    function contourCentroid(cnt){
+      const m = cv.moments(cnt, false);
+      if (!m || Math.abs(m.m00) < 1e-9) return null;
+      return {
+        x: m.m10 / m.m00,
+        y: m.m01 / m.m00
+      };
+    }
+
+    function contourScore(desc, ctr, roiCtrUp){
+      const d = Math.hypot(ctr.x - roiCtrUp.x, ctr.y - roiCtrUp.y);
+      const areaScore = Math.log(Math.max(desc.area, 1));
+      const centerScore = -0.01 * d;
+      const circScore = 1.5 * desc.circularity;
+      const solidScore = 1.0 * desc.solidity;
+      return areaScore + centerScore + circScore + solidScore;
+    }
+
+    function computeExtentsPCA_covEigen(pts3){
+      if (!pts3 || pts3.length < 3) return null;
+
+      let mx = 0, my = 0, mz = 0;
+      for (const p of pts3){
+        mx += p[0];
+        my += p[1];
+        mz += p[2];
+      }
+      mx /= pts3.length;
+      my /= pts3.length;
+      mz /= pts3.length;
+
+      let c00=0, c01=0, c02=0, c11=0, c12=0, c22=0;
+      for (const p of pts3){
+        const x = p[0] - mx;
+        const y = p[1] - my;
+        const z = p[2] - mz;
+        c00 += x*x; c01 += x*y; c02 += x*z;
+        c11 += y*y; c12 += y*z; c22 += z*z;
+      }
+      c00 /= pts3.length;
+      c01 /= pts3.length;
+      c02 /= pts3.length;
+      c11 /= pts3.length;
+      c12 /= pts3.length;
+      c22 /= pts3.length;
+
+      const C = [
+        [c00, c01, c02],
+        [c01, c11, c12],
+        [c02, c12, c22]
+      ];
+
+      const ev = jacobiEigenSym(C);
+      const order = [0,1,2].sort((a,b)=>ev.values[b]-ev.values[a]);
+
+      const v1 = normalize3([ev.vectors[0][order[0]], ev.vectors[1][order[0]], ev.vectors[2][order[0]]]);
+      const v2 = normalize3([ev.vectors[0][order[1]], ev.vectors[1][order[1]], ev.vectors[2][order[1]]]);
+      const v3 = normalize3([ev.vectors[0][order[2]], ev.vectors[1][order[2]], ev.vectors[2][order[2]]]);
+
+      let aMin=Infinity, aMax=-Infinity;
+      let bMin=Infinity, bMax=-Infinity;
+      let cMin=Infinity, cMax=-Infinity;
+
+      for (const p of pts3){
+        const q = [p[0]-mx, p[1]-my, p[2]-mz];
+        const a = dot3(q, v1);
+        const b = dot3(q, v2);
+        const c = dot3(q, v3);
+
+        if (a < aMin) aMin = a;
+        if (a > aMax) aMax = a;
+        if (b < bMin) bMin = b;
+        if (b > bMax) bMax = b;
+        if (c < cMin) cMin = c;
+        if (c > cMax) cMax = c;
+      }
+
+      return {
+        e1: aMax - aMin,
+        e2: bMax - bMin,
+        e3: cMax - cMin
+      };
     }
   </script>
 </body>
