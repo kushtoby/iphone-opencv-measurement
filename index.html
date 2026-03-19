@@ -49,7 +49,7 @@
       gap: 8px;
     }
 
-    button, input, select{
+    button, input{
       border: var(--border);
       border-radius: 12px;
       padding: 10px 12px;
@@ -216,7 +216,7 @@
       </summary>
       <div class="row">
         <button onclick="clearLog()">Clear log</button>
-        <span class="small">Uses undistorted display alignment, forward-backward LK, color-aware ROI masks, and shape-dependent measurements.</span>
+        <span class="small">This version uses object masks + tracked correspondences instead of fragile axis endpoint matching.</span>
       </div>
       <pre id="log"></pre>
     </details>
@@ -231,7 +231,7 @@
         <li>Start camera.</li>
         <li>Optional: enable Sensors.</li>
         <li>Capture 1 at position A.</li>
-        <li>Move to position B. Keep IMU green if enabled.</li>
+        <li>Move to position B. Keep IMU green if you enabled it.</li>
         <li>Capture 2.</li>
         <li>Draw ROI around the target object in view 1.</li>
         <li>Draw ROI around the same target object in view 2.</li>
@@ -244,14 +244,7 @@
         <span class="small" id="resCount">0</span>
       </summary>
       <div class="row">
-        <input id="objName" type="text" placeholder="object name (optional)" style="width: 170px;">
-        <select id="objType" style="width: 150px;">
-          <option value="auto">auto detect</option>
-          <option value="ball">ball</option>
-          <option value="box">box</option>
-          <option value="phone">phone</option>
-          <option value="spoon">spoon</option>
-        </select>
+        <input id="objName" type="text" placeholder="object name (optional)" style="width: 200px;">
         <input id="gtMm" type="number" step="0.1" placeholder="GT mm (optional)" style="width: 140px;">
         <button onclick="clearResults()">Clear</button>
       </div>
@@ -262,7 +255,6 @@
             <tr>
               <th>#</th>
               <th>Object</th>
-              <th>Type</th>
               <th>Measured</th>
               <th>GT</th>
               <th>Err%</th>
@@ -295,9 +287,6 @@
   <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvScriptLoaded()"></script>
 
   <script>
-    /********************************************************************
-     * DEBUG
-     ********************************************************************/
     const logEl = document.getElementById("log");
     function logLine(s){
       console.log(s);
@@ -312,9 +301,6 @@
       logLine(`[promise.reject] ${e.reason}`);
     });
 
-    /********************************************************************
-     * CALIBRATION
-     ********************************************************************/
     const CALIB = {
       calW: 2560,
       calH: 1920,
@@ -325,17 +311,12 @@
       dist: [0.196139581, -0.79214993, 0.000251525214, -0.00647283132, 0.486071831]
     };
 
-    /********************************************************************
-     * GLOBALS
-     ********************************************************************/
     let cvReady = false;
     let streaming = false;
     let poseReady = false;
 
     let gray1 = null;
     let gray2 = null;
-    let rgba1 = null;
-    let rgba2 = null;
     let frame1ImageData = null;
     let frame2ImageData = null;
 
@@ -359,14 +340,11 @@
     const ROT_THRESH_DEG = { yaw: 3, pitch: 2, roll: 2 };
 
     const MAX_DEPTH_M = 8.0;
-    const MAX_REPROJ_ERR_PX = 3.5;
+    const MAX_REPROJ_ERR_PX = 20.0;
     const MIN_TRACKED_POSE = 120;
-    const MAX_LK_ERR_POSE = 20.0;
-    const MAX_LK_ERR_OBJ = 30.0;
-    const FB_POSE_THRESH = 1.5;
-    const FB_OBJ_THRESH = 1.5;
-    const MIN_OBJ_FEATURES = 12;
-    const MIN_VALID_3D_POINTS = 8;
+    const MAX_LK_ERR = 45.0;
+    const MIN_OBJ_FEATURES = 10;
+    const MIN_VALID_3D_POINTS = 4;
 
     let roiState = "none";
     const roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
@@ -375,9 +353,6 @@
 
     let results = [];
 
-    /********************************************************************
-     * DOM
-     ********************************************************************/
     const video = document.getElementById("video");
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently:true });
@@ -407,61 +382,27 @@
 
     const resultsBody = document.getElementById("resultsBody");
     const resCount = document.getElementById("resCount");
-    const objTypeSel = document.getElementById("objType");
 
-    /********************************************************************
-     * READY HOOK
-     ********************************************************************/
     window.__cvReadyHook = function(){
       cvReady = true;
       cvStatus.textContent = "ready ✅";
       cvStatus.className = "ok";
       startBtn.disabled = false;
       logLine("[boot] OpenCV ready ✅");
-      logLine("[boot] goodFeaturesToTrack: " + typeof cv.goodFeaturesToTrack);
-      logLine("[boot] LK: " + typeof cv.calcOpticalFlowPyrLK);
-      logLine("[boot] Canny: " + typeof cv.Canny);
-      logLine("[boot] findContours: " + typeof cv.findContours);
-      logLine("[boot] undistort: " + typeof cv.undistort);
-      logLine("[boot] page script started");
     };
 
-    /********************************************************************
-     * UI HELPERS
-     ********************************************************************/
-    function setStage(s){
-      stage = s;
-      stageStatus.textContent = s;
-    }
-    function setDisplayMode(m){
-      displayMode = m;
-      displayStatus.textContent = m;
-    }
-    function setOut(msg, isWarn=false){
-      outEl.textContent = msg;
-      outEl.className = isWarn ? "warn" : "";
-    }
-    function updateResCount(){
-      resCount.textContent = String(results.length);
-    }
+    function setStage(s){ stage = s; stageStatus.textContent = s; }
+    function setDisplayMode(m){ displayMode = m; displayStatus.textContent = m; }
+    function setOut(msg, isWarn=false){ outEl.textContent = msg; outEl.className = isWarn ? "warn" : ""; }
+    function updateResCount(){ resCount.textContent = String(results.length); }
     function escapeHtml(s){
       return String(s).replace(/[&<>"']/g, c => ({
-        "&":"&amp;",
-        "<":"&lt;",
-        ">":"&gt;",
-        "\"":"&quot;",
-        "'":"&#39;"
+        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
       }[c]));
     }
 
-    /********************************************************************
-     * CAMERA
-     ********************************************************************/
     async function startCamera(){
-      if (!cvReady){
-        setOut("Wait for OpenCV first.", true);
-        return;
-      }
+      if (!cvReady){ setOut("Wait for OpenCV first.", true); return; }
 
       try{
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -498,7 +439,6 @@
           logLine("=== START CAMERA ===");
           logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
           logLine(`K fx=${K[0][0].toFixed(2)} fy=${K[1][1].toFixed(2)} cx=${K[0][2].toFixed(2)} cy=${K[1][2].toFixed(2)}`);
-          logLine(`[calib] reference size=${CALIB.calW}x${CALIB.calH}`);
 
           setOut("Start ✅ Capture 1 at position A.", false);
           requestAnimationFrame(drawLoop);
@@ -506,7 +446,6 @@
 
         if (video.readyState >= 1 && video.videoWidth > 0) finishSetup();
         else video.onloadedmetadata = finishSetup;
-
       }catch(e){
         logLine("[camera] failed: " + e);
         setOut("Camera failed. Use HTTPS and allow camera permission.", true);
@@ -551,53 +490,6 @@
       ctx.restore();
     }
 
-    function matToImageDataRGBA(matIn){
-      let rgba = new cv.Mat();
-      try{
-        if (matIn.type() === cv.CV_8UC4){
-          matIn.copyTo(rgba);
-        } else if (matIn.type() === cv.CV_8UC3){
-          cv.cvtColor(matIn, rgba, cv.COLOR_RGB2RGBA);
-        } else {
-          cv.cvtColor(matIn, rgba, cv.COLOR_GRAY2RGBA);
-        }
-        const buf = new Uint8ClampedArray(rgba.data);
-        return new ImageData(buf, rgba.cols, rgba.rows);
-      } finally {
-        rgba.delete();
-      }
-    }
-
-    function grabFramePack(){
-      const srcRGBA = cv.imread(rawCanvas);
-      let procRGBA = new cv.Mat();
-      let gray = new cv.Mat();
-
-      try{
-        if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
-          cv.undistort(srcRGBA, procRGBA, Kcv, DISTcv);
-        } else {
-          srcRGBA.copyTo(procRGBA);
-        }
-
-        cv.cvtColor(procRGBA, gray, cv.COLOR_RGBA2GRAY);
-        const imageData = matToImageDataRGBA(procRGBA);
-
-        return {
-          gray: gray.clone(),
-          rgba: procRGBA.clone(),
-          imageData
-        };
-      } finally {
-        srcRGBA.delete();
-        procRGBA.delete();
-        gray.delete();
-      }
-    }
-
-    /********************************************************************
-     * SENSORS
-     ********************************************************************/
     async function toggleSensors(){
       if (sensorsEnabled){
         sensorsEnabled = false;
@@ -688,9 +580,32 @@
       accMagEl.textContent = accMag.toFixed(2);
     }
 
-    /********************************************************************
-     * CAPTURE
-     ********************************************************************/
+    function grayMatToImageData(grayMat){
+      const rgba = new cv.Mat();
+      cv.cvtColor(grayMat, rgba, cv.COLOR_GRAY2RGBA);
+      const imgData = new ImageData(new Uint8ClampedArray(rgba.data), rgba.cols, rgba.rows);
+      rgba.delete();
+      return imgData;
+    }
+
+    function grabGrayFrameAndDisplayCopy(){
+      const src = cv.imread(rawCanvas);
+      const gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      src.delete();
+
+      let outGray = gray;
+      if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
+        const und = new cv.Mat();
+        cv.undistort(gray, und, Kcv, DISTcv);
+        gray.delete();
+        outGray = und;
+      }
+
+      const imageData = grayMatToImageData(outGray);
+      return { gray: outGray, imageData };
+    }
+
     function captureView1(){
       if (!streaming) return;
 
@@ -698,10 +613,9 @@
       clearMeasurementState();
 
       drawCurrentFrameToRaw();
-      const cap = grabFramePack();
+      const cap = grabGrayFrameAndDisplayCopy();
 
       gray1 = cap.gray;
-      rgba1 = cap.rgba;
       frame1ImageData = cap.imageData;
       imuAtV1 = sensorsEnabled ? { ...imuNow } : null;
 
@@ -732,12 +646,10 @@
       if (!streaming || !gray1) return;
 
       drawCurrentFrameToRaw();
-      const cap = grabFramePack();
+      const cap = grabGrayFrameAndDisplayCopy();
 
       gray2 = cap.gray;
-      rgba2 = cap.rgba;
       frame2ImageData = cap.imageData;
-
       setDisplayMode("view2");
 
       logLine("=== CAPTURE 2 ===");
@@ -770,115 +682,61 @@
       cap2Btn.disabled = true;
     }
 
-    /********************************************************************
-     * POSE
-     ********************************************************************/
     function computePose_Epipolar_JS(){
-      if (!gray1 || !gray2 || !Kinv){
-        return { ok:false, reason:"Missing gray1/gray2/Kinv" };
-      }
-      if (typeof cv.goodFeaturesToTrack !== "function"){
-        return { ok:false, reason:"OpenCV missing goodFeaturesToTrack" };
-      }
-      if (typeof cv.calcOpticalFlowPyrLK !== "function"){
-        return { ok:false, reason:"OpenCV missing LK optical flow" };
-      }
-
       const corners1 = new cv.Mat();
-      cv.goodFeaturesToTrack(gray1, corners1, 1800, 0.005, 8);
+      cv.goodFeaturesToTrack(gray1, corners1, 1500, 0.005, 8);
       const nCorners = corners1.rows;
       logLine(`corners1=${nCorners}`);
-
-      if (nCorners < 100){
+      if (nCorners < 80){
         corners1.delete();
-        return { ok:false, reason:`Not enough corners (${nCorners}). Add texture/lighting.` };
+        return { ok:false, reason:`Not enough corners (${nCorners}).` };
       }
 
+      const corners2 = new cv.Mat();
+      const status = new cv.Mat();
+      const err = new cv.Mat();
       const win = new cv.Size(31,31);
       const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
 
-      const corners2 = new cv.Mat();
-      const status12 = new cv.Mat();
-      const err12 = new cv.Mat();
-      cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status12, err12, win, 4, crit);
-
-      const back1 = new cv.Mat();
-      const status21 = new cv.Mat();
-      const err21 = new cv.Mat();
-      cv.calcOpticalFlowPyrLK(gray2, gray1, corners2, back1, status21, err21, win, 4, crit);
+      cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status, err, win, 4, crit);
 
       const x1n = [];
       const x2n = [];
-
-      for (let i=0; i<status12.rows; i++){
-        if (!status12.ucharPtr(i,0)[0]) continue;
-        if (!status21.ucharPtr(i,0)[0]) continue;
-
+      for (let i=0; i<status.rows; i++){
+        if (!status.ucharPtr(i,0)[0]) continue;
         const u1 = corners1.data32F[i*2];
         const v1 = corners1.data32F[i*2 + 1];
         const u2 = corners2.data32F[i*2];
         const v2 = corners2.data32F[i*2 + 1];
-        const ub = back1.data32F[i*2];
-        const vb = back1.data32F[i*2 + 1];
-
-        const lkErr = err12.floatAt(i,0);
-        const fbErr = Math.hypot(ub - u1, vb - v1);
-
-        if (lkErr > MAX_LK_ERR_POSE) continue;
-        if (fbErr > FB_POSE_THRESH) continue;
         if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
-
         x1n.push(pixelToNorm(u1, v1));
         x2n.push(pixelToNorm(u2, v2));
       }
 
-      corners1.delete();
-      corners2.delete();
-      status12.delete();
-      err12.delete();
-      back1.delete();
-      status21.delete();
-      err21.delete();
+      corners1.delete(); corners2.delete(); status.delete(); err.delete();
 
-      logLine(`tracked_fb=${x1n.length}`);
-      if (x1n.length < MIN_TRACKED_POSE){
-        return { ok:false, reason:`Too few tracked points after FB check (${x1n.length}).` };
-      }
+      logLine(`tracked=${x1n.length}`);
+      if (x1n.length < MIN_TRACKED_POSE) return { ok:false, reason:`Too few tracked points (${x1n.length}).` };
 
       const ransac = estimateE_RANSAC(x1n, x2n);
       if (!ransac.ok) return { ok:false, reason:ransac.reason };
 
       logLine(`E inliers=${ransac.inliersIdx.length}`);
-
       const best = recoverPoseFromE(ransac.E, x1n, x2n, ransac.inliersIdx);
       if (!best.ok) return { ok:false, reason:best.reason };
 
       const baselineCm = parseFloat(document.getElementById("baselineCm").value);
-      if (!(isFinite(baselineCm) && baselineCm > 0)){
-        return { ok:false, reason:"Baseline must be > 0 cm" };
-      }
-
       const baselineM = baselineCm / 100.0;
       const tn = Math.hypot(best.t[0], best.t[1], best.t[2]);
       const s = baselineM / Math.max(tn, 1e-12);
       const t_scaled = [best.t[0]*s, best.t[1]*s, best.t[2]*s];
 
-      return {
-        ok:true,
-        R:best.R,
-        t_scaled,
-        inliers:ransac.inliersIdx.length,
-        total:x1n.length
-      };
+      return { ok:true, R:best.R, t_scaled, inliers:ransac.inliersIdx.length, total:x1n.length };
     }
 
-    /********************************************************************
-     * ROI FLOW
-     ********************************************************************/
     canvas.addEventListener("mousedown", onDown);
     canvas.addEventListener("mousemove", onMove);
     canvas.addEventListener("mouseup", onUp);
-
     canvas.addEventListener("touchstart", onDown, { passive:false });
     canvas.addEventListener("touchmove", onMove, { passive:false });
     canvas.addEventListener("touchend", onUp, { passive:false });
@@ -916,12 +774,10 @@
       e.preventDefault();
 
       roi.active = false;
-
       const x = Math.min(roi.x0, roi.x1);
       const y = Math.min(roi.y0, roi.y1);
       const w = Math.abs(roi.x1 - roi.x0);
       const h = Math.abs(roi.y1 - roi.y0);
-
       if (w < 12 || h < 12) return;
 
       if (roiState === "await1"){
@@ -940,10 +796,7 @@
         roiState = "none";
 
         const res = measureWithTwoROIs();
-        if (!res.ok){
-          setOut(res.msg, true);
-          return;
-        }
+        if (!res.ok){ setOut(res.msg, true); return; }
 
         setStage("measured");
         setOut(`FINAL: ${res.measuredText}`, false);
@@ -951,343 +804,132 @@
       }
     }
 
-    /********************************************************************
-     * OBJECT EXTRACTION
-     ********************************************************************/
+    function dilateBinaryMask(srcMask, ksize=5, iters=1){
+      const dst = new cv.Mat();
+      const k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ksize, ksize));
+      cv.dilate(srcMask, dst, k, new cv.Point(-1,-1), iters);
+      k.delete();
+      return dst;
+    }
+
     function measureWithTwoROIs(){
-      if (!poseReady || !gray1 || !gray2 || !rgba1 || !rgba2 || !roi1Box || !roi2Box){
-        return { ok:false, msg:"Need pose + two ROIs first." };
-      }
-
-      const obj1 = extractObjectFromROI(rgba1, roi1Box, "view1");
+      const obj1 = extractObjectFromROI(gray1, roi1Box, "view1");
       if (!obj1.ok) return obj1;
-
-      const obj2 = extractObjectFromROI(rgba2, roi2Box, "view2");
+      const obj2 = extractObjectFromROI(gray2, roi2Box, "view2");
       if (!obj2.ok) return obj2;
 
-      logLine(
-        `[OBJ1] area=${obj1.area.toFixed(1)} per=${obj1.perimeter.toFixed(1)} ` +
-        `circ=${obj1.circularity.toFixed(3)} aspect=${obj1.aspect.toFixed(3)} solid=${obj1.solidity.toFixed(3)}`
-      );
-      logLine(
-        `[OBJ2] area=${obj2.area.toFixed(1)} per=${obj2.perimeter.toFixed(1)} ` +
-        `circ=${obj2.circularity.toFixed(3)} aspect=${obj2.aspect.toFixed(3)} solid=${obj2.solidity.toFixed(3)}`
-      );
+      logLine(`[OBJ1] area=${obj1.area.toFixed(1)} per=${obj1.perimeter.toFixed(1)} circ=${obj1.circularity.toFixed(3)} aspect=${obj1.aspect.toFixed(3)} solid=${obj1.solidity.toFixed(3)}`);
+      logLine(`[OBJ2] area=${obj2.area.toFixed(1)} per=${obj2.perimeter.toFixed(1)} circ=${obj2.circularity.toFixed(3)} aspect=${obj2.aspect.toFixed(3)} solid=${obj2.solidity.toFixed(3)}`);
 
       return reconstructObjectCloud(obj1, obj2);
     }
 
-    function meanStd1C(mat1c){
-      const mean = new cv.Mat();
-      const std = new cv.Mat();
+    function extractObjectFromROI(gray, box, tag){
+      let roiMat=null, roiUp=null, blur=null, thresh=null, edges=null, combo=null, morph=null, contours=null, hierarchy=null, maskObj=null, maskTol=null;
       try{
-        cv.meanStdDev(mat1c, mean, std);
-        return {
-          mean: mean.data64F ? mean.data64F[0] : 0,
-          std: std.data64F ? std.data64F[0] : 0
-        };
-      } finally {
-        mean.delete();
-        std.delete();
-      }
-    }
+        const rx = clamp(Math.round(box.x), 0, gray.cols - 1);
+        const ry = clamp(Math.round(box.y), 0, gray.rows - 1);
+        const rw = clamp(Math.round(box.w), 1, gray.cols - rx);
+        const rh = clamp(Math.round(box.h), 1, gray.rows - ry);
 
-    function morphCleanBinary(mask){
-      const kOpen = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
-      const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
-      cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kOpen);
-      cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kClose);
-      kOpen.delete();
-      kClose.delete();
-    }
+        roiMat = gray.roi(new cv.Rect(rx, ry, rw, rh));
+        const UPS = 2;
+        roiUp = new cv.Mat();
+        cv.resize(roiMat, roiUp, new cv.Size(roiMat.cols * UPS, roiMat.rows * UPS), 0, 0, cv.INTER_LINEAR);
 
-    function thresholdCandidate(src1c, invert=false){
-      const blur = new cv.Mat();
-      const bw = new cv.Mat();
-      cv.GaussianBlur(src1c, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
-      cv.threshold(
-        blur,
-        bw,
-        0,
-        255,
-        (invert ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY) + cv.THRESH_OTSU
-      );
-      morphCleanBinary(bw);
-      blur.delete();
-      return bw;
-    }
+        blur = new cv.Mat();
+        cv.GaussianBlur(roiUp, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
 
-    function pickBestContourFromMask(mask, roiCtrUp){
-      const contours = new cv.MatVector();
-      const hierarchy = new cv.Mat();
+        thresh = new cv.Mat();
+        cv.threshold(blur, thresh, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
 
-      try{
-        cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
-        if (contours.size() === 0) return null;
+        const whiteFrac = cv.countNonZero(thresh) / Math.max(1, thresh.rows * thresh.cols);
+        if (whiteFrac > 0.80 || whiteFrac < 0.05){
+          cv.threshold(blur, thresh, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+        }
 
-        let bestIdx = -1;
-        let bestDesc = null;
-        let bestScore = -Infinity;
+        edges = new cv.Mat();
+        cv.Canny(blur, edges, 40, 120);
+
+        combo = new cv.Mat();
+        cv.bitwise_or(thresh, edges, combo);
+
+        morph = new cv.Mat();
+        const kOpen = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
+        const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
+        cv.morphologyEx(combo, morph, cv.MORPH_OPEN, kOpen);
+        cv.morphologyEx(morph, morph, cv.MORPH_CLOSE, kClose);
+        kOpen.delete(); kClose.delete();
+
+        contours = new cv.MatVector();
+        hierarchy = new cv.Mat();
+        cv.findContours(morph, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+        logLine(`[${tag}] contours=${contours.size()}`);
+        if (contours.size() === 0) return { ok:false, msg:`${tag}: no object contour found.` };
+
+        const roiCtrUp = { x: 0.5*morph.cols, y: 0.5*morph.rows };
+        let bestIdx = -1, bestDesc = null, bestScore = -Infinity;
 
         for (let i=0; i<contours.size(); i++){
           const cnt = contours.get(i);
           const desc = contourDescriptors(cnt);
           const ctr = contourCentroid(cnt);
-
-          if (!ctr || desc.area < 100){
-            cnt.delete();
-            continue;
-          }
-
+          if (!ctr || desc.area < 80){ cnt.delete(); continue; }
           const score = contourScore(desc, ctr, roiCtrUp);
-          if (score > bestScore){
-            bestScore = score;
-            bestIdx = i;
-            bestDesc = {
-              area: desc.area,
-              perimeter: desc.perimeter,
-              circularity: desc.circularity,
-              aspect: desc.aspect,
-              solidity: desc.solidity
-            };
-          }
+          if (score > bestScore){ bestScore = score; bestIdx = i; bestDesc = desc; }
           cnt.delete();
         }
 
-        if (bestIdx < 0) return null;
+        if (bestIdx < 0) return { ok:false, msg:`${tag}: no confident contour.` };
 
-        const outMask = new cv.Mat(mask.rows, mask.cols, cv.CV_8U);
-        outMask.setTo(new cv.Scalar(0));
-        cv.drawContours(outMask, contours, bestIdx, new cv.Scalar(255), -1);
+        maskObj = new cv.Mat(morph.rows, morph.cols, cv.CV_8U);
+        maskObj.setTo(new cv.Scalar(0));
+        cv.drawContours(maskObj, contours, bestIdx, new cv.Scalar(255), -1);
 
-        return {
-          mask: outMask,
-          desc: bestDesc,
-          score: bestScore
-        };
-      } finally {
-        contours.delete();
-        hierarchy.delete();
-      }
-    }
-
-    function extractObjectFromROI(frameRGBA, box, tag){
-      let roiRGBA = null;
-      let roiUp = null;
-      let rgb = null;
-      let gray = null;
-      let lab = null;
-      let hsv = null;
-      let labCh = null;
-      let hsvCh = null;
-      let edges = null;
-
-      try{
-        const rx = clamp(Math.round(box.x), 0, frameRGBA.cols - 1);
-        const ry = clamp(Math.round(box.y), 0, frameRGBA.rows - 1);
-        const rw = clamp(Math.round(box.w), 1, frameRGBA.cols - rx);
-        const rh = clamp(Math.round(box.h), 1, frameRGBA.rows - ry);
-
-        const roiCenter = { x: rx + 0.5*rw, y: ry + 0.5*rh };
-        if (!pointInSafeCenterRegion(roiCenter.x, roiCenter.y, frameRGBA.cols, frameRGBA.rows)){
-          logLine(`[${tag}] Warning: ROI center near image edge.`);
-        }
-
-        roiRGBA = frameRGBA.roi(new cv.Rect(rx, ry, rw, rh));
-
-        const UPS = 2;
-        roiUp = new cv.Mat();
-        cv.resize(roiRGBA, roiUp, new cv.Size(rw * UPS, rh * UPS), 0, 0, cv.INTER_LINEAR);
-
-        rgb = new cv.Mat();
-        gray = new cv.Mat();
-        lab = new cv.Mat();
-        hsv = new cv.Mat();
-
-        cv.cvtColor(roiUp, rgb, cv.COLOR_RGBA2RGB);
-        cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
-        cv.cvtColor(rgb, lab, cv.COLOR_RGB2Lab);
-        cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
-
-        labCh = new cv.MatVector();
-        hsvCh = new cv.MatVector();
-        cv.split(lab, labCh);
-        cv.split(hsv, hsvCh);
-
-        const a = labCh.get(1);
-        const b = labCh.get(2);
-        const s = hsvCh.get(1);
-
-        const aStat = meanStd1C(a);
-        const bStat = meanStd1C(b);
-        const useA = aStat.std >= bStat.std;
-        const chroma = useA ? a : b;
-
-        logLine(`[${tag}] using ${useA ? "Lab-a" : "Lab-b"} for color segmentation`);
-
-        const cand1 = thresholdCandidate(chroma, false);
-        const cand2 = thresholdCandidate(chroma, true);
-        const cand3 = thresholdCandidate(gray, false);
-        const cand4 = thresholdCandidate(gray, true);
-        const cand5 = thresholdCandidate(s, false);
-
-        edges = new cv.Mat();
-        cv.Canny(gray, edges, 40, 120);
-        morphCleanBinary(edges);
-
-        const roiCtrUp = { x: 0.5 * roiUp.cols, y: 0.5 * roiUp.rows };
-        const candidates = [cand1, cand2, cand3, cand4, cand5, edges];
-
-        let best = null;
-        let bestIdx = -1;
-
-        for (let i=0; i<candidates.length; i++){
-          const pick = pickBestContourFromMask(candidates[i], roiCtrUp);
-          if (!pick) continue;
-
-          if (!best || pick.score > best.score){
-            if (best && best.mask) best.mask.delete();
-            best = pick;
-            bestIdx = i;
-          } else {
-            pick.mask.delete();
-          }
-        }
-
-        cand1.delete();
-        cand2.delete();
-        cand3.delete();
-        cand4.delete();
-        cand5.delete();
-
-        a.delete();
-        b.delete();
-        s.delete();
-
-        if (!best){
-          return { ok:false, msg:`${tag}: no confident contour. Tighten ROI.` };
-        }
-
-        logLine(`[${tag}] maskCandidate=${bestIdx}`);
-
-        const pca2 = contourPCAFromMask(best.mask);
-        if (!pca2.ok){
-          best.mask.delete();
-          return { ok:false, msg:`${tag}: contour PCA failed.` };
-        }
+        maskTol = dilateBinaryMask(maskObj, 7, 2);
 
         return {
           ok:true,
-          area: best.desc.area,
-          perimeter: best.desc.perimeter,
-          circularity: best.desc.circularity,
-          aspect: best.desc.aspect,
-          solidity: best.desc.solidity,
+          area: bestDesc.area,
+          perimeter: bestDesc.perimeter,
+          circularity: bestDesc.circularity,
+          aspect: bestDesc.aspect,
+          solidity: bestDesc.solidity,
           rx, ry, rw, rh,
-          ups: UPS,
-          maskUp: best.mask.clone(),
-          blurUp: gray.clone(),
-          center: roiCenter,
-          majorSpanUp: pca2.majorSpan,
-          minorSpanUp: pca2.minorSpan
+          ups: 2,
+          maskUp: maskObj.clone(),
+          maskTolUp: maskTol.clone(),
+          blurUp: blur.clone()
         };
-
       } finally {
-        if (roiRGBA) roiRGBA.delete();
+        if (roiMat) roiMat.delete();
         if (roiUp) roiUp.delete();
-        if (rgb) rgb.delete();
-        if (gray) gray.delete();
-        if (lab) lab.delete();
-        if (hsv) hsv.delete();
-        if (labCh) labCh.delete();
-        if (hsvCh) hsvCh.delete();
+        if (blur) blur.delete();
+        if (thresh) thresh.delete();
         if (edges) edges.delete();
+        if (combo) combo.delete();
+        if (morph) morph.delete();
+        if (contours) contours.delete();
+        if (hierarchy) hierarchy.delete();
+        if (maskObj) maskObj.delete();
+        if (maskTol) maskTol.delete();
       }
     }
 
-    function contourPCAFromMask(mask){
-      const pts = [];
-      for (let y=0; y<mask.rows; y++){
-        for (let x=0; x<mask.cols; x++){
-          if (mask.ucharPtr(y,x)[0] !== 0){
-            pts.push({x,y});
-          }
-        }
-      }
-      if (pts.length < 30) return { ok:false };
-
-      let mx=0, my=0;
-      for (const p of pts){ mx += p.x; my += p.y; }
-      mx /= pts.length;
-      my /= pts.length;
-
-      let c00=0, c01=0, c11=0;
-      for (const p of pts){
-        const dx = p.x - mx;
-        const dy = p.y - my;
-        c00 += dx*dx;
-        c01 += dx*dy;
-        c11 += dy*dy;
-      }
-      c00 /= pts.length;
-      c01 /= pts.length;
-      c11 /= pts.length;
-
-      const ev = jacobiEigenSym([[c00,c01],[c01,c11]]);
-      const order = [0,1].sort((a,b)=>ev.values[b]-ev.values[a]);
-      const vMajor = normalize2({ x: ev.vectors[0][order[0]], y: ev.vectors[1][order[0]] });
-      const vMinor = normalize2({ x: ev.vectors[0][order[1]], y: ev.vectors[1][order[1]] });
-
-      let majorMin=Infinity, majorMax=-Infinity;
-      let minorMin=Infinity, minorMax=-Infinity;
-      for (const p of pts){
-        const dx = p.x - mx;
-        const dy = p.y - my;
-        const a = dx*vMajor.x + dy*vMajor.y;
-        const b = dx*vMinor.x + dy*vMinor.y;
-        if (a < majorMin) majorMin = a;
-        if (a > majorMax) majorMax = a;
-        if (b < minorMin) minorMin = b;
-        if (b > minorMax) minorMax = b;
-      }
-
-      return {
-        ok:true,
-        majorSpan: majorMax - majorMin,
-        minorSpan: minorMax - minorMin
-      };
-    }
-
-    /********************************************************************
-     * SHAPE-DEPENDENT 3D MEASUREMENT
-     ********************************************************************/
     function reconstructObjectCloud(obj1, obj2){
-      if (typeof cv.goodFeaturesToTrack !== "function") {
-        return { ok:false, msg:"goodFeaturesToTrack missing." };
-      }
-      if (typeof cv.calcOpticalFlowPyrLK !== "function") {
-        return { ok:false, msg:"LK optical flow missing." };
-      }
-
       const p1local = new cv.Mat();
       cv.goodFeaturesToTrack(obj1.blurUp, p1local, 350, 0.01, 6, obj1.maskUp);
       logLine(`[TRACK] features in obj1=${p1local.rows}`);
 
       if (p1local.rows < MIN_OBJ_FEATURES){
         p1local.delete();
-        obj1.maskUp.delete();
-        obj1.blurUp.delete();
-        obj2.maskUp.delete();
-        obj2.blurUp.delete();
-        return { ok:false, msg:`Too few object features (${p1local.rows}). Improve lighting/texture or tighten ROI.` };
+        return { ok:false, msg:`Too few object features (${p1local.rows}).` };
       }
 
       const p1full = new cv.Mat(p1local.rows, 1, cv.CV_32FC2);
       for (let i=0; i<p1local.rows; i++){
-        const u = obj1.rx + p1local.data32F[i*2] / obj1.ups;
-        const v = obj1.ry + p1local.data32F[i*2 + 1] / obj1.ups;
-        p1full.data32F[i*2] = u;
-        p1full.data32F[i*2 + 1] = v;
+        p1full.data32F[i*2]     = obj1.rx + p1local.data32F[i*2] / obj1.ups;
+        p1full.data32F[i*2 + 1] = obj1.ry + p1local.data32F[i*2 + 1] / obj1.ups;
       }
       p1local.delete();
 
@@ -1299,49 +941,38 @@
 
       cv.calcOpticalFlowPyrLK(gray1, gray2, p1full, p2full, status, err, win, 4, crit);
 
-      const p1back = new cv.Mat();
-      const statusBack = new cv.Mat();
-      const errBack = new cv.Mat();
-      cv.calcOpticalFlowPyrLK(gray2, gray1, p2full, p1back, statusBack, errBack, win, 4, crit);
-
       const pts3 = [];
       const reprojArr = [];
+      let surviveLK = 0, surviveMask2 = 0, surviveDepth = 0;
 
       for (let i=0; i<status.rows; i++){
         if (!status.ucharPtr(i,0)[0]) continue;
-        if (!statusBack.ucharPtr(i,0)[0]) continue;
-
         const lkErr = err.floatAt(i,0);
-        if (lkErr > MAX_LK_ERR_OBJ) continue;
+        if (lkErr > MAX_LK_ERR) continue;
+        surviveLK++;
 
         const u1 = p1full.data32F[i*2];
         const v1 = p1full.data32F[i*2 + 1];
         const u2 = p2full.data32F[i*2];
         const v2 = p2full.data32F[i*2 + 1];
 
-        const ub = p1back.data32F[i*2];
-        const vb = p1back.data32F[i*2 + 1];
-        const fbErr = Math.hypot(ub - u1, vb - v1);
-        if (fbErr > FB_OBJ_THRESH) continue;
-
         if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
 
         const x2up = Math.round((u2 - obj2.rx) * obj2.ups);
         const y2up = Math.round((v2 - obj2.ry) * obj2.ups);
 
-        if (x2up < 0 || x2up >= obj2.maskUp.cols || y2up < 0 || y2up >= obj2.maskUp.rows) continue;
-        if (obj2.maskUp.ucharPtr(y2up, x2up)[0] === 0) continue;
+        if (x2up < 0 || x2up >= obj2.maskTolUp.cols || y2up < 0 || y2up >= obj2.maskTolUp.rows) continue;
+        if (obj2.maskTolUp.ucharPtr(y2up, x2up)[0] === 0) continue;
+        surviveMask2++;
 
-        const x1n = pixelToNorm(u1, v1);
-        const x2n = pixelToNorm(u2, v2);
-
-        const X = triangulateDLT_smallestEigen(R, t, x1n, x2n);
+        const X = triangulateDLT_smallestEigen(R, t, pixelToNorm(u1,v1), pixelToNorm(u2,v2));
         if (!X) continue;
         if (!isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])) continue;
         if (X[2] <= 0 || X[2] > MAX_DEPTH_M) continue;
 
         const X2cam = add3(mulMatVec3(R, X), t);
         if (X2cam[2] <= 0) continue;
+        surviveDepth++;
 
         const reproj = reprojErrPx(X, u1, v1, u2, v2);
         if (!isFinite(reproj) || reproj > MAX_REPROJ_ERR_PX) continue;
@@ -1350,247 +981,109 @@
         reprojArr.push(reproj);
       }
 
-      p1full.delete();
-      p2full.delete();
-      status.delete();
-      err.delete();
-      p1back.delete();
-      statusBack.delete();
-      errBack.delete();
-      obj1.maskUp.delete();
-      obj1.blurUp.delete();
-      obj2.maskUp.delete();
-      obj2.blurUp.delete();
+      p1full.delete(); p2full.delete(); status.delete(); err.delete();
+      obj1.maskUp.delete(); obj1.maskTolUp.delete(); obj1.blurUp.delete();
+      obj2.maskUp.delete(); obj2.maskTolUp.delete(); obj2.blurUp.delete();
 
+      logLine(`[TRACK] survive LK=${surviveLK}`);
+      logLine(`[TRACK] survive mask2=${surviveMask2}`);
+      logLine(`[TRACK] survive depth=${surviveDepth}`);
       logLine(`[TRACK] valid 3D pts=${pts3.length}`);
 
       if (pts3.length < MIN_VALID_3D_POINTS){
-        return { ok:false, msg:`Not enough valid 3D points (${pts3.length}). Tighten ROI, improve lighting, or add texture.` };
+        return { ok:false, msg:`Not enough valid 3D points (${pts3.length}).` };
       }
 
       const ext = computeExtentsPCA_covEigen(pts3);
-      if (!ext) return { ok:false, msg:"3D extent PCA failed." };
-
-      const dims = [ext.e1 * 1000, ext.e2 * 1000, ext.e3 * 1000].sort((a,b)=>b-a);
-      const dLongRaw = dims[0];
-      const dMid = dims[1];
-      const dShort = dims[2];
+      const e1 = ext.e1 * 1000;
+      const e2 = ext.e2 * 1000;
+      const e3 = ext.e3 * 1000;
 
       const circularity = 0.5 * (obj1.circularity + obj2.circularity);
       const aspect2D = 0.5 * (obj1.aspect + obj2.aspect);
 
-      const largestLooksBad = dLongRaw > 2.5 * Math.max(dMid, 1e-9);
-      let stableLong = largestLooksBad ? dMid : dLongRaw;
-      let stableMid = largestLooksBad ? dShort : dMid;
-      let stableShort = dShort;
-
-      if (largestLooksBad){
-        logLine(`[MEASURE] rejecting largest PCA axis as unstable: ${dLongRaw.toFixed(1)} mm`);
-      }
-
-      const shapeInfo = determineObjectType(circularity, aspect2D, stableLong, stableMid);
-      const reprojMed = median(reprojArr);
-
-      logLine(
-        `[MEASURE] type=${shapeInfo.type} rawLargest=${dLongRaw.toFixed(1)} mm stableLong=${stableLong.toFixed(1)} mm stableMid=${stableMid.toFixed(1)} mm stableShort=${stableShort.toFixed(1)} mm ` +
-        `circ=${circularity.toFixed(3)} aspect2D=${aspect2D.toFixed(3)} reprojMed=${reprojMed.toFixed(2)} px`
-      );
-
-      return formatMeasurementByType(
-        shapeInfo.type,
-        stableLong,
-        stableMid,
-        stableShort,
-        circularity,
-        aspect2D,
-        reprojMed,
-        pts3.length
-      );
-    }
-
-    function determineObjectType(circularity, aspect2D, stableLong, stableMid){
-      const manual = objTypeSel.value;
-      if (manual && manual !== "auto"){
-        return { type: manual, source: "manual" };
-      }
-
-      const ratio = stableLong / Math.max(stableMid, 1e-9);
+      let mode = "length_width";
+      let primaryMm = e1;
+      let measuredText = `L≈${e1.toFixed(1)} mm, W≈${e2.toFixed(1)} mm`;
 
       if (circularity > 0.78 && aspect2D < 1.20){
-        return { type: "ball", source: "auto" };
-      }
-      if (ratio > 2.2 || aspect2D > 2.0){
-        return { type: "spoon", source: "auto" };
-      }
-      if (ratio > 1.35){
-        return { type: "phone", source: "auto" };
-      }
-      return { type: "box", source: "auto" };
-    }
-
-    function formatMeasurementByType(type, L, W, T, circularity, aspect2D, reprojMed, n3d){
-      let measuredText = "";
-      let primaryMm = L;
-      let metaText = `pts=${n3d}, circ=${circularity.toFixed(3)}, ar=${aspect2D.toFixed(3)}`;
-      let mode = type;
-      let typeLabel = type;
-
-      if (type === "ball"){
-        const D = 0.5 * (L + W);
+        const D = 0.5 * (e1 + e2);
+        mode = "diameter";
         primaryMm = D;
-        measuredText = `Diameter≈${D.toFixed(1)} mm`;
-      } else if (type === "box"){
-        const side = Math.max(L, W);
-        primaryMm = side;
-        measuredText = `Side≈${side.toFixed(1)} mm`;
-      } else if (type === "phone"){
-        primaryMm = L;
-        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
-      } else if (type === "spoon"){
-        primaryMm = L;
-        measuredText = `Length≈${L.toFixed(1)} mm`;
-      } else {
-        primaryMm = L;
-        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
-        typeLabel = "unknown";
+        measuredText = `D≈${D.toFixed(1)} mm`;
+      } else if (aspect2D > 2.0 || (e1 / Math.max(e2,1e-9)) > 2.2){
+        mode = "length";
+        primaryMm = e1;
+        measuredText = `Length≈${e1.toFixed(1)} mm`;
       }
+
+      const reprojMed = median(reprojArr);
+      logLine(`[MEASURE] mode=${mode} e1=${e1.toFixed(1)} mm e2=${e2.toFixed(1)} mm e3=${e3.toFixed(1)} mm reprojMed=${reprojMed.toFixed(2)} px`);
 
       return {
-        ok: true,
+        ok:true,
         primaryMm,
         measuredText,
-        typeLabel,
-        mode,
-        circularity,
-        aspect2D,
-        lengthMm: L,
-        widthMm: W,
-        thicknessMm: T,
         reprojMedPx: reprojMed,
-        n3d,
-        metaText
+        metaText: `pts=${pts3.length}, circ=${circularity.toFixed(3)}, ar=${aspect2D.toFixed(3)}`
       };
-    }
-
-    function quantileSorted(s, q){
-      if (s.length === 0) return 0;
-      const pos = (s.length - 1) * q;
-      const i = Math.floor(pos);
-      const j = Math.min(i + 1, s.length - 1);
-      const t = pos - i;
-      return s[i] * (1 - t) + s[j] * t;
-    }
-
-    function robustSpan(vals, qLo=0.10, qHi=0.90){
-      const s = vals.slice().sort((a,b)=>a-b);
-      return quantileSorted(s, qHi) - quantileSorted(s, qLo);
     }
 
     function computeExtentsPCA_covEigen(pts3){
       const N = pts3.length;
-      if (N < 5) return null;
+      let mx=0,my=0,mz=0;
+      for (const p of pts3){ mx+=p[0]; my+=p[1]; mz+=p[2]; }
+      mx/=N; my/=N; mz/=N;
 
-      let mx = 0, my = 0, mz = 0;
+      let c00=0,c01=0,c02=0,c11=0,c12=0,c22=0;
       for (const p of pts3){
-        mx += p[0];
-        my += p[1];
-        mz += p[2];
+        const x=p[0]-mx, y=p[1]-my, z=p[2]-mz;
+        c00+=x*x; c01+=x*y; c02+=x*z; c11+=y*y; c12+=y*z; c22+=z*z;
       }
-      mx /= N; my /= N; mz /= N;
+      c00/=N; c01/=N; c02/=N; c11/=N; c12/=N; c22/=N;
 
-      let c00 = 0, c01 = 0, c02 = 0, c11 = 0, c12 = 0, c22 = 0;
-      for (const p of pts3){
-        const x = p[0] - mx;
-        const y = p[1] - my;
-        const z = p[2] - mz;
-        c00 += x*x;
-        c01 += x*y;
-        c02 += x*z;
-        c11 += y*y;
-        c12 += y*z;
-        c22 += z*z;
-      }
-      c00 /= N; c01 /= N; c02 /= N;
-      c11 /= N; c12 /= N; c22 /= N;
-
-      const C = [
-        [c00, c01, c02],
-        [c01, c11, c12],
-        [c02, c12, c22]
-      ];
-
+      const C = [[c00,c01,c02],[c01,c11,c12],[c02,c12,c22]];
       const ev = jacobiEigenSym(C);
       const order = [0,1,2].sort((a,b)=>ev.values[b]-ev.values[a]);
-
       const V = [
         [ev.vectors[0][order[0]], ev.vectors[0][order[1]], ev.vectors[0][order[2]]],
         [ev.vectors[1][order[0]], ev.vectors[1][order[1]], ev.vectors[1][order[2]]],
         [ev.vectors[2][order[0]], ev.vectors[2][order[1]], ev.vectors[2][order[2]]]
       ];
 
-      const a0s = [];
-      const a1s = [];
-      const a2s = [];
-
+      let min0=Infinity,max0=-Infinity,min1=Infinity,max1=-Infinity,min2=Infinity,max2=-Infinity;
       for (const p of pts3){
-        const x = p[0] - mx;
-        const y = p[1] - my;
-        const z = p[2] - mz;
-
+        const x=p[0]-mx, y=p[1]-my, z=p[2]-mz;
         const a0 = V[0][0]*x + V[1][0]*y + V[2][0]*z;
         const a1 = V[0][1]*x + V[1][1]*y + V[2][1]*z;
         const a2 = V[0][2]*x + V[1][2]*y + V[2][2]*z;
-
-        a0s.push(a0);
-        a1s.push(a1);
-        a2s.push(a2);
+        if (a0<min0) min0=a0; if (a0>max0) max0=a0;
+        if (a1<min1) min1=a1; if (a1>max1) max1=a1;
+        if (a2<min2) min2=a2; if (a2>max2) max2=a2;
       }
-
-      const arr = [
-        robustSpan(a0s, 0.10, 0.90),
-        robustSpan(a1s, 0.10, 0.90),
-        robustSpan(a2s, 0.10, 0.90)
-      ].sort((a,b)=>b-a);
-
+      const arr = [max0-min0, max1-min1, max2-min2].sort((a,b)=>b-a);
       return { e1:arr[0], e2:arr[1], e3:arr[2] };
     }
 
-    /********************************************************************
-     * RESULTS
-     ********************************************************************/
     function logResult(res){
       const nameIn = (document.getElementById("objName").value || "").trim();
       const name = nameIn.length ? nameIn : `Object ${results.length + 1}`;
-
       const gtVal = parseFloat(document.getElementById("gtMm").value);
       const gtMm = (isFinite(gtVal) && gtVal > 0) ? gtVal : null;
       let errPct = null;
-      if (gtMm != null){
-        errPct = Math.abs(res.primaryMm - gtMm) / gtMm * 100.0;
-      }
+      if (gtMm != null) errPct = Math.abs(res.primaryMm - gtMm) / gtMm * 100.0;
 
-      results.push({
-        name,
-        type: res.typeLabel,
-        measuredText: res.measuredText,
-        gtMm,
-        errPct,
-        metaText: res.metaText
-      });
-
+      results.push({ name, measuredText: res.measuredText, gtMm, errPct, metaText: res.metaText });
       updateResCount();
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${results.length}</td>
         <td>${escapeHtml(name)}</td>
-        <td>${escapeHtml(res.typeLabel)}</td>
         <td>${escapeHtml(res.measuredText)}</td>
         <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
         <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
-        <td title="reprojMed=${res.reprojMedPx!=null ? res.reprojMedPx.toFixed(2) : ''} px">
-          ${escapeHtml(res.metaText)}
-        </td>
+        <td title="reprojMed=${res.reprojMedPx!=null ? res.reprojMedPx.toFixed(2) : ''} px">${escapeHtml(res.metaText)}</td>
       `;
       resultsBody.appendChild(tr);
     }
@@ -1602,9 +1095,6 @@
       setOut("Results cleared.", false);
     }
 
-    /********************************************************************
-     * RESET / CLEANUP
-     ********************************************************************/
     function clearMeasurementState(){
       roiState = "none";
       roi1Box = null;
@@ -1614,8 +1104,6 @@
     function cleanupFrames(){
       if (gray1){ gray1.delete(); gray1 = null; }
       if (gray2){ gray2.delete(); gray2 = null; }
-      if (rgba1){ rgba1.delete(); rgba1 = null; }
-      if (rgba2){ rgba2.delete(); rgba2 = null; }
       frame1ImageData = null;
       frame2ImageData = null;
     }
@@ -1623,571 +1111,20 @@
     function resetAll(){
       cleanupFrames();
       clearMeasurementState();
-
       poseReady = false;
-      R = null;
-      t = null;
-      imuAtV1 = null;
-
+      R = null; t = null; imuAtV1 = null;
       roi.active = false;
       roi.x0 = roi.y0 = roi.x1 = roi.y1 = 0;
-
       cap2Btn.disabled = true;
       setStage(streaming ? "live" : "idle");
       setDisplayMode("live");
       setOut("Reset ✅ Start over with Capture 1.", false);
-
       clearLog();
       logLine("=== RESET ===");
     }
 
     updateResCount();
-
-    /********************************************************************
-     * ESSENTIAL MATRIX / TRIANGULATION HELPERS
-     ********************************************************************/
-    function estimateE_RANSAC(x1, x2){
-      const N = x1.length;
-      if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
-
-      const ITER = 1500;
-      const TH = 1e-4;
-      let bestInliers = [];
-      let bestE = null;
-
-      const idx = [...Array(N).keys()];
-
-      for (let it=0; it<ITER; it++){
-        shuffleInPlace(idx);
-        const s = idx.slice(0,8);
-
-        let E = eightPointE_pureJS(x1, x2, s);
-        if (!E) continue;
-
-        E = enforceEssential_3x3(E);
-
-        const inl = [];
-        for (let i=0; i<N; i++){
-          const d = sampsonDistance(E, x1[i], x2[i]);
-          if (d < TH) inl.push(i);
-        }
-
-        if (inl.length > bestInliers.length){
-          bestInliers = inl;
-          bestE = E;
-        }
-      }
-
-      if (!bestE || bestInliers.length < 80){
-        return { ok:false, reason:`E RANSAC failed (best inliers=${bestInliers.length}).` };
-      }
-
-      let Erefit = eightPointE_pureJS(x1, x2, bestInliers);
-      Erefit = enforceEssential_3x3(Erefit);
-
-      return { ok:true, E:Erefit, inliersIdx:bestInliers };
-    }
-
-    function eightPointE_pureJS(x1, x2, indices){
-      const A = [];
-      for (let r=0; r<indices.length; r++){
-        const i = indices[r];
-        const X1 = x1[i][0], Y1 = x1[i][1];
-        const X2 = x2[i][0], Y2 = x2[i][1];
-
-        A.push([
-          X2*X1, X2*Y1, X2,
-          Y2*X1, Y2*Y1, Y2,
-          X1, Y1, 1
-        ]);
-      }
-
-      const ATA = matMul(matT(A), A);
-      const eig = jacobiEigenSym(ATA);
-      const k = argMin(eig.values);
-      const e = eig.vectors.map(row => row[k]);
-
-      return [
-        [e[0], e[1], e[2]],
-        [e[3], e[4], e[5]],
-        [e[6], e[7], e[8]]
-      ];
-    }
-
-    function enforceEssential_3x3(E){
-      const EtE = mul3(transpose3(E), E);
-      const ev = jacobiEigenSym(EtE);
-      const vals = ev.values.slice();
-      const V = ev.vectors;
-
-      const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
-      const lam = order.map(i=>Math.max(vals[i],0));
-
-      const Vsorted = [
-        [V[0][order[0]], V[0][order[1]], V[0][order[2]]],
-        [V[1][order[0]], V[1][order[1]], V[1][order[2]]],
-        [V[2][order[0]], V[2][order[1]], V[2][order[2]]]
-      ];
-
-      const s1 = Math.sqrt(lam[0]);
-      const s2 = Math.sqrt(lam[1]);
-      const s = 0.5*(s1+s2);
-
-      const inv = [
-        1/Math.max(s1,1e-12),
-        1/Math.max(s2,1e-12),
-        0
-      ];
-
-      const EV = mul3(E, Vsorted);
-      let U = [
-        [EV[0][0]*inv[0], EV[0][1]*inv[1], EV[0][2]*inv[2]],
-        [EV[1][0]*inv[0], EV[1][1]*inv[1], EV[1][2]*inv[2]],
-        [EV[2][0]*inv[0], EV[2][1]*inv[1], EV[2][2]*inv[2]]
-      ];
-
-      U = ortho3(U);
-
-      const S = [
-        [s,0,0],
-        [0,s,0],
-        [0,0,0]
-      ];
-
-      return mul3(mul3(U,S), transpose3(Vsorted));
-    }
-
-    function sampsonDistance(E, x1, x2){
-      const Ex1 = mulMatVec3(E, x1);
-      const Etx2 = mulMatVec3(transpose3(E), x2);
-      const x2tEx1 = dot3(x2, Ex1);
-      const denom = Ex1[0]*Ex1[0] + Ex1[1]*Ex1[1] + Etx2[0]*Etx2[0] + Etx2[1]*Etx2[1];
-      return (x2tEx1*x2tEx1) / Math.max(denom, 1e-12);
-    }
-
-    function recoverPoseFromE(E, x1, x2, inliersIdx){
-      const svd = svd3_from_EtE(E);
-      if (!svd) return { ok:false, reason:"SVD failed" };
-
-      const U = svd.U;
-      const V = svd.V;
-
-      const W = [
-        [0,-1,0],
-        [1,0,0],
-        [0,0,1]
-      ];
-
-      const R1 = mul3(mul3(U,W), transpose3(V));
-      const R2 = mul3(mul3(U,transpose3(W)), transpose3(V));
-      const tdir = [U[0][2], U[1][2], U[2][2]];
-      const tneg = [-tdir[0], -tdir[1], -tdir[2]];
-
-      const cand = [
-        {R:R1,t:tdir},
-        {R:R1,t:tneg},
-        {R:R2,t:tdir},
-        {R:R2,t:tneg}
-      ];
-
-      let best = null;
-      let bestCount = -1;
-      const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
-
-      for (const c of cand){
-        let count = 0;
-        for (const idx of subset){
-          const X = triangulateDLT_smallestEigen(c.R, c.t, x1[idx], x2[idx]);
-          if (!X) continue;
-
-          const z1 = X[2];
-          const X2 = add3(mulMatVec3(c.R, X), c.t);
-          const z2 = X2[2];
-
-          if (z1 > 0 && z2 > 0) count++;
-        }
-
-        if (count > bestCount){
-          bestCount = count;
-          best = c;
-        }
-      }
-
-      if (!best || bestCount < 10){
-        return { ok:false, reason:`Cheirality failed (bestCount=${bestCount}).` };
-      }
-
-      return { ok:true, R:best.R, t:best.t };
-    }
-
-    function svd3_from_EtE(E){
-      const EtE = mul3(transpose3(E), E);
-      const ev = jacobiEigenSym(EtE);
-      const vals = ev.values.slice();
-      const Vraw = ev.vectors;
-      const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
-      const lam = order.map(i=>Math.max(vals[i],0));
-
-      let V = [
-        [Vraw[0][order[0]], Vraw[0][order[1]], Vraw[0][order[2]]],
-        [Vraw[1][order[0]], Vraw[1][order[1]], Vraw[1][order[2]]],
-        [Vraw[2][order[0]], Vraw[2][order[1]], Vraw[2][order[2]]]
-      ];
-
-      const s = lam.map(x=>Math.sqrt(x));
-      const EV = mul3(E, V);
-
-      const inv0 = 1/Math.max(s[0],1e-12);
-      const inv1 = 1/Math.max(s[1],1e-12);
-      const inv2 = 1/Math.max(s[2],1e-12);
-
-      let U = [
-        [EV[0][0]*inv0, EV[0][1]*inv1, EV[0][2]*inv2],
-        [EV[1][0]*inv0, EV[1][1]*inv1, EV[1][2]*inv2],
-        [EV[2][0]*inv0, EV[2][1]*inv1, EV[2][2]*inv2]
-      ];
-
-      U = ortho3(U);
-
-      if (det3(U) < 0){
-        U[0][2] *= -1; U[1][2] *= -1; U[2][2] *= -1;
-      }
-      if (det3(V) < 0){
-        V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
-      }
-
-      return { U, V, s };
-    }
-
-    function triangulateDLT_smallestEigen(R, t, x1, x2){
-      const x = x1[0], y = x1[1];
-      const xp = x2[0], yp = x2[1];
-
-      const r1 = R[0], r2 = R[1], r3 = R[2];
-
-      const A = [
-        [-1, 0, x, 0],
-        [ 0,-1, y, 0],
-        [xp*r3[0]-r1[0], xp*r3[1]-r1[1], xp*r3[2]-r1[2], xp*t[2]-t[0]],
-        [yp*r3[0]-r2[0], yp*r3[1]-r2[1], yp*r3[2]-r2[2], yp*t[2]-t[1]]
-      ];
-
-      const ATA = matMul(matT(A), A);
-      const ev = jacobiEigenSym(ATA);
-      const k = argMin(ev.values);
-      const vh = ev.vectors.map(row => row[k]);
-
-      if (Math.abs(vh[3]) < 1e-12) return null;
-      return [vh[0]/vh[3], vh[1]/vh[3], vh[2]/vh[3]];
-    }
-
-    /********************************************************************
-     * GENERIC HELPERS
-     ********************************************************************/
-    function buildScaledIntrinsics(W,H){
-      const sx = W / CALIB.calW;
-      const sy = H / CALIB.calH;
-
-      const fx = CALIB.fx * sx;
-      const fy = CALIB.fy * sy;
-      const cx = CALIB.cx * sx;
-      const cy = CALIB.cy * sy;
-
-      K = [
-        [fx,0,cx],
-        [0,fy,cy],
-        [0,0,1]
-      ];
-
-      Kinv = inv3(K);
-
-      if (Kcv) Kcv.delete();
-      if (DISTcv) DISTcv.delete();
-
-      Kcv = cv.matFromArray(3,3,cv.CV_64F, [
-        fx,0,cx,
-        0,fy,cy,
-        0,0,1
-      ]);
-      DISTcv = cv.matFromArray(1,5,cv.CV_64F, CALIB.dist);
-    }
-
-    function clamp(v, lo, hi){
-      return Math.max(lo, Math.min(hi, v));
-    }
-
-    function pixelToNorm(u,v){
-      const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2];
-      const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2];
-      const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2];
-      return [x/z, y/z, 1.0];
-    }
-
-    function pointInSafeCenterRegion(x, y, W, H){
-      const bx = SAFE_BORDER_FRAC * W;
-      const by = SAFE_BORDER_FRAC * H;
-      return (x >= bx && x <= (W - bx) && y >= by && y <= (H - by));
-    }
-
-    function contourCentroid(cnt){
-      const M = cv.moments(cnt, false);
-      if (!M || Math.abs(M.m00) < 1e-9) return null;
-      return { x: M.m10 / M.m00, y: M.m01 / M.m00 };
-    }
-
-    function contourDescriptors(cnt){
-      const area = Math.abs(cv.contourArea(cnt));
-      const per = cv.arcLength(cnt, true);
-
-      let circularity = 0;
-      if (per > 1e-9){
-        circularity = 4 * Math.PI * area / (per * per);
-      }
-
-      const rect = cv.boundingRect(cnt);
-      const aspect = rect.width / Math.max(rect.height, 1e-9);
-
-      const hull = new cv.Mat();
-      cv.convexHull(cnt, hull, false, true);
-      const hullArea = Math.abs(cv.contourArea(hull));
-      hull.delete();
-
-      const solidity = hullArea > 1e-9 ? area / hullArea : 0;
-
-      return {
-        area,
-        perimeter: per,
-        circularity,
-        aspect,
-        solidity,
-        bbox: rect
-      };
-    }
-
-    function contourScore(desc, ctr, roiCenter){
-      const d = Math.hypot(ctr.x - roiCenter.x, ctr.y - roiCenter.y);
-      return 0.45*desc.area + 1200*desc.solidity + 800*desc.circularity - 8*d;
-    }
-
-    function projectCam1(X){
-      if (X[2] <= 1e-9) return null;
-      return {
-        u: K[0][0]*(X[0]/X[2]) + K[0][2],
-        v: K[1][1]*(X[1]/X[2]) + K[1][2]
-      };
-    }
-
-    function projectCam2(X){
-      const X2 = add3(mulMatVec3(R, X), t);
-      if (X2[2] <= 1e-9) return null;
-      return {
-        u: K[0][0]*(X2[0]/X2[2]) + K[0][2],
-        v: K[1][1]*(X2[1]/X2[2]) + K[1][2]
-      };
-    }
-
-    function reprojErrPx(X, u1, v1, u2, v2){
-      const p1 = projectCam1(X);
-      const p2 = projectCam2(X);
-      if (!p1 || !p2) return Infinity;
-      const e1 = Math.hypot(p1.u - u1, p1.v - v1);
-      const e2 = Math.hypot(p2.u - u2, p2.v - v2);
-      return 0.5*(e1 + e2);
-    }
-
-    function median(arr){
-      if (!arr || arr.length === 0) return null;
-      const s = arr.slice().sort((a,b)=>a-b);
-      const m = Math.floor(s.length/2);
-      return (s.length % 2) ? s[m] : 0.5*(s[m-1] + s[m]);
-    }
-
-    function jacobiEigenSym(A){
-      const n = A.length;
-      const M = Array.from({length:n}, (_,i)=>A[i].slice());
-      const V = Array.from({length:n}, (_,i)=>Array.from({length:n}, (_,j)=>i===j?1:0));
-
-      const MAX_IT = 60 * n * n;
-      for (let it=0; it<MAX_IT; it++){
-        let p=0, q=1, max=0;
-        for (let i=0; i<n; i++){
-          for (let j=i+1; j<n; j++){
-            const val = Math.abs(M[i][j]);
-            if (val > max){ max = val; p = i; q = j; }
-          }
-        }
-        if (max < 1e-12) break;
-
-        const app = M[p][p];
-        const aqq = M[q][q];
-        const apq = M[p][q];
-
-        const phi = 0.5 * Math.atan2(2*apq, (aqq - app));
-        const c = Math.cos(phi);
-        const s = Math.sin(phi);
-
-        for (let k=0; k<n; k++){
-          const mkp = M[k][p];
-          const mkq = M[k][q];
-          M[k][p] = c*mkp - s*mkq;
-          M[k][q] = s*mkp + c*mkq;
-        }
-        for (let k=0; k<n; k++){
-          const mpk = M[p][k];
-          const mqk = M[q][k];
-          M[p][k] = c*mpk - s*mqk;
-          M[q][k] = s*mpk + c*mqk;
-        }
-
-        M[p][p] = c*c*app - 2*s*c*apq + s*s*aqq;
-        M[q][q] = s*s*app + 2*s*c*apq + c*c*aqq;
-        M[p][q] = 0;
-        M[q][p] = 0;
-
-        for (let k=0; k<n; k++){
-          const vkp = V[k][p];
-          const vkq = V[k][q];
-          V[k][p] = c*vkp - s*vkq;
-          V[k][q] = s*vkp + c*vkq;
-        }
-      }
-
-      const values = Array.from({length:n}, (_,i)=>M[i][i]);
-
-      for (let j=0; j<n; j++){
-        let nn=0;
-        for (let i=0; i<n; i++) nn += V[i][j]*V[i][j];
-        nn = Math.sqrt(Math.max(nn, 1e-30));
-        for (let i=0; i<n; i++) V[i][j] /= nn;
-      }
-
-      return { values, vectors:V };
-    }
-
-    function argMin(arr){
-      let k=0, best=arr[0];
-      for (let i=1; i<arr.length; i++){
-        if (arr[i] < best){ best = arr[i]; k = i; }
-      }
-      return k;
-    }
-
-    function matMul(A, B){
-      const m=A.length, n=A[0].length, p=B[0].length;
-      const C = Array.from({length:m}, ()=>Array(p).fill(0));
-      for (let i=0; i<m; i++){
-        for (let k=0; k<n; k++){
-          const aik = A[i][k];
-          for (let j=0; j<p; j++) C[i][j] += aik * B[k][j];
-        }
-      }
-      return C;
-    }
-
-    function matT(A){
-      const m=A.length, n=A[0].length;
-      const AT = Array.from({length:n}, ()=>Array(m).fill(0));
-      for (let i=0; i<m; i++) for (let j=0; j<n; j++) AT[j][i] = A[i][j];
-      return AT;
-    }
-
-    function shuffleInPlace(a){
-      for (let i=a.length-1; i>0; i--){
-        const j = Math.floor(Math.random()*(i+1));
-        [a[i], a[j]] = [a[j], a[i]];
-      }
-    }
-
-    function dot3(a,b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    function add3(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
-    function sub3(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
-    function scale3(v,s){ return [v[0]*s, v[1]*s, v[2]*s]; }
-    function cross3(a,b){
-      return [
-        a[1]*b[2]-a[2]*b[1],
-        a[2]*b[0]-a[0]*b[2],
-        a[0]*b[1]-a[1]*b[0]
-      ];
-    }
-    function normalize3(v){
-      const n = Math.sqrt(Math.max(dot3(v,v),1e-30));
-      return [v[0]/n, v[1]/n, v[2]/n];
-    }
-    function mulMatVec3(M, v){
-      return [
-        M[0][0]*v[0] + M[0][1]*v[1] + M[0][2]*v[2],
-        M[1][0]*v[0] + M[1][1]*v[1] + M[1][2]*v[2],
-        M[2][0]*v[0] + M[2][1]*v[1] + M[2][2]*v[2]
-      ];
-    }
-
-    function normalize2(v){
-      const n = Math.hypot(v.x, v.y);
-      if (n < 1e-12) return { x:1, y:0 };
-      return { x:v.x/n, y:v.y/n };
-    }
-
-    function transpose3(M){
-      return [
-        [M[0][0], M[1][0], M[2][0]],
-        [M[0][1], M[1][1], M[2][1]],
-        [M[0][2], M[1][2], M[2][2]]
-      ];
-    }
-
-    function mul3(A, B){
-      const C = [[0,0,0],[0,0,0],[0,0,0]];
-      for (let i=0; i<3; i++){
-        for (let j=0; j<3; j++){
-          C[i][j] = A[i][0]*B[0][j] + A[i][1]*B[1][j] + A[i][2]*B[2][j];
-        }
-      }
-      return C;
-    }
-
-    function det3(M){
-      return (
-        M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1]) -
-        M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0]) +
-        M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0])
-      );
-    }
-
-    function inv3(M){
-      const d = det3(M);
-      if (Math.abs(d) < 1e-12) throw new Error("K is singular");
-      return [
-        [
-          (M[1][1]*M[2][2]-M[1][2]*M[2][1])/d,
-          (M[0][2]*M[2][1]-M[0][1]*M[2][2])/d,
-          (M[0][1]*M[1][2]-M[0][2]*M[1][1])/d
-        ],
-        [
-          (M[1][2]*M[2][0]-M[1][0]*M[2][2])/d,
-          (M[0][0]*M[2][2]-M[0][2]*M[2][0])/d,
-          (M[0][2]*M[1][0]-M[0][0]*M[1][2])/d
-        ],
-        [
-          (M[1][0]*M[2][1]-M[1][1]*M[2][0])/d,
-          (M[0][1]*M[2][0]-M[0][0]*M[2][1])/d,
-          (M[0][0]*M[1][1]-M[0][1]*M[1][0])/d
-        ]
-      ];
-    }
-
-    function ortho3(M){
-      let c0 = [M[0][0], M[1][0], M[2][0]];
-      let c1 = [M[0][1], M[1][1], M[2][1]];
-      c0 = normalize3(c0);
-      c1 = sub3(c1, scale3(c0, dot3(c0, c1)));
-      c1 = normalize3(c1);
-      const c2 = normalize3(cross3(c0, c1));
-      return [
-        [c0[0], c1[0], c2[0]],
-        [c0[1], c1[1], c2[1]],
-        [c0[2], c1[2], c2[2]]
-      ];
-    }
+    logLine("[boot] page script started");
   </script>
 </body>
 </html>
