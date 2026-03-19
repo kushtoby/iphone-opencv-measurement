@@ -1,0 +1,84 @@
+name: Build OpenCV.js (Epipolar)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+      # This action installs emsdk and puts emcc/emcmake on PATH. :contentReference[oaicite:1]{index=1}
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 cmake ninja-build build-essential git
+
+      - name: Clone OpenCV source
+        run: |
+          git clone --depth 1 --branch 4.13.0 https://github.com/opencv/opencv.git opencv
+
+      - name: Patch OpenCV.js whitelist to include epipolar functions
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          cfg = Path("opencv/platforms/js/opencv_js.config.py")
+          txt = cfg.read_text(encoding="utf-8")
+
+          # Functions we NEED for your pipeline:
+          need = [
+            "findFundamentalMat",
+            "findEssentialMat",
+            "recoverPose",
+            "triangulatePoints",
+            "undistortPoints"
+          ]
+
+          # Insert them into the calib3d whitelist block:  calib3d = { '': [ ... ], 'UsacParams': ... }
+          m = re.search(r"(calib3d\s*=\s*\{\s*'':\s*\[)(.*?)(\]\s*,\s*'UsacParams')", txt, re.S)
+          if not m:
+            raise SystemExit("Could not find calib3d whitelist block in opencv_js.config.py")
+
+          head, body, tail = m.group(1), m.group(2), m.group(3)
+
+          # If body is on one line or multi-line, we just append missing entries safely.
+          for fn in need:
+            if f"'{fn}'" not in body:
+              body = body.rstrip() + f"\n        '{fn}',"
+
+          patched = txt[:m.start()] + head + body + tail + txt[m.end():]
+          cfg.write_text(patched, encoding="utf-8")
+          print("Patched opencv_js.config.py with:", need)
+          PY
+
+      - name: Build OpenCV.js (wasm, separate .wasm file)
+        run: |
+          # OpenCV docs: build_js.py builds opencv.js; --disable_single_file outputs a separate .wasm :contentReference[oaicite:2]{index=2}
+          cd opencv
+          emcmake python3 ./platforms/js/build_js.py ../build_epipolar \
+            --build_wasm \
+            --disable_single_file \
+            --cmake_option="-DCMAKE_CXX_STANDARD=17" \
+            --cmake_option="-DBUILD_opencv_calib3d=ON" \
+            --cmake_option="-DBUILD_opencv_video=ON"
+
+      - name: Package artifacts into repo folder structure
+        run: |
+          mkdir -p assets/opencv
+          cp build_epipolar/bin/opencv.js assets/opencv/opencv.js
+          cp build_epipolar/bin/opencv_js.wasm assets/opencv/opencv_js.wasm
+          ls -lah assets/opencv
+
+      - name: Upload OpenCV.js artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencv-epipolar-build
+          path: assets/opencv
