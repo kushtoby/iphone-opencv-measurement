@@ -259,7 +259,7 @@
       </summary>
       <div class="row">
         <button onclick="clearLog()">Clear log</button>
-        <span class="small">Manual click refinement will snap to a nearby corner/edge when a reliable feature exists.</span>
+        <span class="small">Phone/box now use 4-corner rectangular-face geometry in Modes A/B/C.</span>
       </div>
       <pre id="log"></pre>
     </details>
@@ -274,10 +274,10 @@
         <li>Optional: enable sensors.</li>
         <li>Capture 1.</li>
         <li>Move to position B and Capture 2.</li>
-        <li>Mode A: draw object ROI in View 1 and View 2.</li>
-        <li>Mode B: draw object ROI in View 1 and View 2, then click measurement points in both views, then press Compute.</li>
-        <li>Mode C: draw reference ROI and object ROI in View 1, then click reference and object measurement points, then press Compute.</li>
-        <li>You should now be able to scroll the page vertically whenever you are not actively drawing an ROI.</li>
+        <li>Mode A: draw object ROI in View 1 and View 2. For phone/box, the app auto-detects the 4 face corners.</li>
+        <li>Mode B: draw object ROI in View 1 and View 2, then mark points. For phone/box, mark the 4 visible corners in the same order in both views.</li>
+        <li>Mode C: draw reference ROI and object ROI in View 1, then mark reference points and object points. For phone/box, mark the 4 visible corners of the object face.</li>
+        <li>You should be able to scroll vertically whenever you are not actively drawing an ROI.</li>
       </ol>
     </details>
 
@@ -515,13 +515,14 @@
     }
 
     function requiredPointsForObject(type){
-      return (type === "phone" || type === "box") ? 4 : 2;
+      if (type === "phone" || type === "box") return 4;   // now corners
+      return 2;
     }
 
     function instructionManualView1(){
       const t = objTypeSel.value;
       if (t === "phone" || t === "box"){
-        return `View 1: click 4 points in this order — length start, length end, width start, width end.`;
+        return `View 1: click the 4 visible corners of the same rectangular face in this order — top-left, top-right, bottom-right, bottom-left.`;
       }
       if (t === "spoon"){
         return `View 1: click 2 points in this order — spoon length start, spoon length end.`;
@@ -532,7 +533,7 @@
     function instructionManualView2(){
       const t = objTypeSel.value;
       if (t === "phone" || t === "box"){
-        return `View 2: click the SAME 4 physical points in the SAME order — length start, length end, width start, width end.`;
+        return `View 2: click the SAME 4 physical corners in the SAME order — top-left, top-right, bottom-right, bottom-left.`;
       }
       if (t === "spoon"){
         return `View 2: click the SAME 2 physical spoon endpoints in the SAME order.`;
@@ -547,7 +548,7 @@
     function instructionReferenceObject(){
       const t = objTypeSel.value;
       if (t === "phone" || t === "box"){
-        return `Object: click 4 points in View 1 — length start, length end, width start, width end.`;
+        return `Object: click the 4 visible corners of the same rectangular face in this order — top-left, top-right, bottom-right, bottom-left.`;
       }
       if (t === "spoon"){
         return `Object: click 2 points in View 1 — spoon length start, spoon length end.`;
@@ -645,16 +646,21 @@
 
       if (displayMode === "view1"){
         drawLabeledPoints(manualPtsV1, "#00ff66");
-        drawLabeledSegments(manualPtsV1, "#00ff66");
+        drawClosedQuadIf4(manualPtsV1, "#00ff66", (objTypeSel.value === "phone" || objTypeSel.value === "box"));
+        drawLabeledSegments(manualPtsV1, "#00ff66", !(objTypeSel.value === "phone" || objTypeSel.value === "box"));
+
         drawLabeledPoints(refScalePts, "#00e5ff");
-        drawLabeledSegments(refScalePts, "#00e5ff");
+        drawLabeledSegments(refScalePts, "#00e5ff", true);
+
         drawLabeledPoints(refObjPts, "#ff66ff");
-        drawLabeledSegments(refObjPts, "#ff66ff");
+        drawClosedQuadIf4(refObjPts, "#ff66ff", (objTypeSel.value === "phone" || objTypeSel.value === "box"));
+        drawLabeledSegments(refObjPts, "#ff66ff", !(objTypeSel.value === "phone" || objTypeSel.value === "box"));
       }
 
       if (displayMode === "view2"){
         drawLabeledPoints(manualPtsV2, "#ff9500");
-        drawLabeledSegments(manualPtsV2, "#ff9500");
+        drawClosedQuadIf4(manualPtsV2, "#ff9500", (objTypeSel.value === "phone" || objTypeSel.value === "box"));
+        drawLabeledSegments(manualPtsV2, "#ff9500", !(objTypeSel.value === "phone" || objTypeSel.value === "box"));
       }
 
       requestAnimationFrame(drawLoop);
@@ -685,7 +691,8 @@
       ctx.restore();
     }
 
-    function drawLabeledSegments(arr, color){
+    function drawLabeledSegments(arr, color, enabled=true){
+      if (!enabled) return;
       if (arr.length < 2) return;
       ctx.save();
       ctx.strokeStyle = color;
@@ -695,6 +702,27 @@
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawClosedQuadIf4(arr, color, enabled=true){
+      if (!enabled) return;
+      if (arr.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      for (let i=0; i+1<arr.length; i++){
+        ctx.beginPath();
+        ctx.moveTo(arr[i].x, arr[i].y);
+        ctx.lineTo(arr[i+1].x, arr[i+1].y);
+        ctx.stroke();
+      }
+      if (arr.length === 4){
+        ctx.beginPath();
+        ctx.moveTo(arr[3].x, arr[3].y);
+        ctx.lineTo(arr[0].x, arr[0].y);
         ctx.stroke();
       }
       ctx.restore();
@@ -1510,11 +1538,26 @@
     }
 
     /********************************************************************
-     * OBJECT EXTRACTION
+     * OBJECT EXTRACTION + RECTANGLE HELPERS
      ********************************************************************/
     function measureWithTwoROIs(){
       if (!poseReady || !gray1 || !gray2 || !rgba1 || !rgba2 || !roi1Box || !roi2Box){
         return { ok:false, msg:"Need pose + two ROIs first." };
+      }
+
+      const type = objTypeSel.value;
+
+      if (type === "phone" || type === "box"){
+        const q1 = detectRectangleCornersInROI(rgba1, roi1Box, "view1");
+        if (!q1.ok) return { ok:false, msg:`view1 rectangle detection failed: ${q1.msg}` };
+
+        const q2 = detectRectangleCornersInROI(rgba2, roi2Box, "view2");
+        if (!q2.ok) return { ok:false, msg:`view2 rectangle detection failed: ${q2.msg}` };
+
+        logLine(`[AUTO RECT] q1=${quadToText(q1.corners)}`);
+        logLine(`[AUTO RECT] q2=${quadToText(q2.corners)}`);
+
+        return measureRectangularFaceEpipolar(q1.corners, q2.corners, type, "epipolar_auto");
       }
 
       const obj1 = extractObjectFromROI(rgba1, roi1Box, "view1");
@@ -1816,6 +1859,164 @@
       };
     }
 
+    function detectRectangleCornersInROI(frameRGBA, box, tag){
+      let roiRGBA = null, rgb = null, gray = null, blur = null, edges = null;
+      let contours = null, hierarchy = null;
+
+      try{
+        const rx = clamp(Math.round(box.x), 0, frameRGBA.cols - 1);
+        const ry = clamp(Math.round(box.y), 0, frameRGBA.rows - 1);
+        const rw = clamp(Math.round(box.w), 1, frameRGBA.cols - rx);
+        const rh = clamp(Math.round(box.h), 1, frameRGBA.rows - ry);
+
+        roiRGBA = frameRGBA.roi(new cv.Rect(rx, ry, rw, rh));
+        rgb = new cv.Mat();
+        gray = new cv.Mat();
+        blur = new cv.Mat();
+        edges = new cv.Mat();
+
+        cv.cvtColor(roiRGBA, rgb, cv.COLOR_RGBA2RGB);
+        cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
+        cv.GaussianBlur(gray, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
+        cv.Canny(blur, edges, 40, 120);
+
+        const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3,3));
+        cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, k);
+        k.delete();
+
+        contours = new cv.MatVector();
+        hierarchy = new cv.Mat();
+        cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+        if (contours.size() === 0){
+          return { ok:false, msg:"no contour found" };
+        }
+
+        let bestQuad = null;
+        let bestScore = -Infinity;
+
+        const roiCtr = { x: rw*0.5, y: rh*0.5 };
+
+        for (let i=0; i<contours.size(); i++){
+          const cnt = contours.get(i);
+          const area = Math.abs(cv.contourArea(cnt));
+          if (area < 150) { cnt.delete(); continue; }
+
+          const peri = cv.arcLength(cnt, true);
+          const approx = new cv.Mat();
+          cv.approxPolyDP(cnt, approx, 0.03*peri, true);
+
+          if (approx.rows === 4 && cv.isContourConvex(approx)){
+            const quad = [];
+            for (let r=0; r<4; r++){
+              quad.push({
+                x: approx.intPtr(r,0)[0],
+                y: approx.intPtr(r,0)[1]
+              });
+            }
+
+            const ordered = orderQuadTLTRBRBL(quad);
+            const qArea = polygonArea2D(ordered);
+            const ctr = polygonCentroid2D(ordered);
+            const d = Math.hypot(ctr.x - roiCtr.x, ctr.y - roiCtr.y);
+            const score = qArea - 2.0*d;
+
+            if (score > bestScore){
+              bestScore = score;
+              bestQuad = ordered.map(p => ({ x: p.x + rx, y: p.y + ry }));
+            }
+          }
+
+          approx.delete();
+          cnt.delete();
+        }
+
+        if (!bestQuad){
+          return { ok:false, msg:"no 4-corner rectangle found in ROI" };
+        }
+
+        return { ok:true, corners: bestQuad };
+
+      } finally {
+        if (roiRGBA) roiRGBA.delete();
+        if (rgb) rgb.delete();
+        if (gray) gray.delete();
+        if (blur) blur.delete();
+        if (edges) edges.delete();
+        if (contours) contours.delete();
+        if (hierarchy) hierarchy.delete();
+      }
+    }
+
+    function quadToText(q){
+      return q.map(p => `(${p.x.toFixed(1)},${p.y.toFixed(1)})`).join(" ");
+    }
+
+    function orderQuadTLTRBRBL(pts){
+      const c = polygonCentroid2D(pts);
+      const withA = pts.map(p => ({...p, a: Math.atan2(p.y - c.y, p.x - c.x)}));
+      withA.sort((a,b)=>a.a-b.a);
+
+      let best = withA.map(p => ({x:p.x,y:p.y}));
+
+      let topLeftIdx = 0;
+      let bestSum = Infinity;
+      for (let i=0; i<best.length; i++){
+        const s = best[i].x + best[i].y;
+        if (s < bestSum){
+          bestSum = s;
+          topLeftIdx = i;
+        }
+      }
+      best = rotateArray(best, topLeftIdx);
+
+      const area = signedPolygonArea2D(best);
+      if (area > 0){
+        best = [best[0], best[3], best[2], best[1]];
+      }
+
+      return best; // TL, TR, BR, BL
+    }
+
+    function rotateArray(arr, k){
+      return arr.slice(k).concat(arr.slice(0,k));
+    }
+
+    function polygonCentroid2D(pts){
+      let sx=0, sy=0;
+      for (const p of pts){ sx += p.x; sy += p.y; }
+      return { x: sx/pts.length, y: sy/pts.length };
+    }
+
+    function polygonArea2D(pts){
+      return Math.abs(signedPolygonArea2D(pts));
+    }
+
+    function signedPolygonArea2D(pts){
+      let a = 0;
+      for (let i=0; i<pts.length; i++){
+        const p = pts[i];
+        const q = pts[(i+1)%pts.length];
+        a += p.x*q.y - q.x*p.y;
+      }
+      return 0.5*a;
+    }
+
+    function averageOppositeEdges2D(quad){
+      const e01 = dist2(quad[0], quad[1]);
+      const e12 = dist2(quad[1], quad[2]);
+      const e23 = dist2(quad[2], quad[3]);
+      const e30 = dist2(quad[3], quad[0]);
+
+      const lenA = 0.5*(e01 + e23);
+      const lenB = 0.5*(e12 + e30);
+
+      const L = Math.max(lenA, lenB);
+      const W = Math.min(lenA, lenB);
+
+      return { L, W };
+    }
+
     /********************************************************************
      * MODE A: AUTO 3D MEASUREMENT
      ********************************************************************/
@@ -1965,13 +2166,82 @@
       );
     }
 
+    function measureRectangularFaceEpipolar(corners1, corners2, type, modeName){
+      if (corners1.length !== 4 || corners2.length !== 4){
+        return { ok:false, msg:"Need 4 rectangle corners in both views." };
+      }
+
+      const pts3 = [];
+      const reprojArr = [];
+
+      for (let i=0; i<4; i++){
+        const p1 = corners1[i];
+        const p2 = corners2[i];
+        const X = triangulateDLT_smallestEigen(R, t, pixelToNorm(p1.x, p1.y), pixelToNorm(p2.x, p2.y));
+        if (!X || !isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])){
+          return { ok:false, msg:`Triangulation failed for corner ${i+1}.` };
+        }
+        if (X[2] <= 0 || X[2] > MAX_DEPTH_M){
+          return { ok:false, msg:`Corner ${i+1} produced invalid depth.` };
+        }
+
+        const X2cam = add3(mulMatVec3(R, X), t);
+        if (X2cam[2] <= 0){
+          return { ok:false, msg:`Corner ${i+1} failed cheirality.` };
+        }
+
+        const reproj = reprojErrPx(X, p1.x, p1.y, p2.x, p2.y);
+        if (!isFinite(reproj) || reproj > 8.0){
+          return { ok:false, msg:`Corner ${i+1} has high reprojection error (${reproj.toFixed(2)} px).` };
+        }
+
+        reprojArr.push(reproj);
+        pts3.push(X);
+      }
+
+      const e01 = 1000 * dist3(pts3[0], pts3[1]);
+      const e12 = 1000 * dist3(pts3[1], pts3[2]);
+      const e23 = 1000 * dist3(pts3[2], pts3[3]);
+      const e30 = 1000 * dist3(pts3[3], pts3[0]);
+
+      const lenA = 0.5*(e01 + e23);
+      const lenB = 0.5*(e12 + e30);
+
+      const L = Math.max(lenA, lenB);
+      const W = Math.min(lenA, lenB);
+
+      const reprojMed = median(reprojArr);
+      logLine(`[RECT EPI] e01=${e01.toFixed(1)} e12=${e12.toFixed(1)} e23=${e23.toFixed(1)} e30=${e30.toFixed(1)} reprojMed=${reprojMed.toFixed(2)} px`);
+
+      return {
+        ok:true,
+        primaryMm:L,
+        measuredText:`L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`,
+        typeLabel:type,
+        mode:modeName,
+        circularity:null,
+        aspect2D:null,
+        lengthMm:L,
+        widthMm:W,
+        thicknessMm:null,
+        reprojMedPx:reprojMed,
+        n3d:4,
+        metaText:`rect face | reprojMed=${reprojMed.toFixed(2)} px | e=[${e01.toFixed(1)},${e12.toFixed(1)},${e23.toFixed(1)},${e30.toFixed(1)}]`
+      };
+    }
+
     /********************************************************************
      * MODE B: MANUAL EPIPOLAR
      ********************************************************************/
     function measureManualEpipolar(){
-      const nReq = requiredPointsForObject(objTypeSel.value);
+      const type = objTypeSel.value;
+      const nReq = requiredPointsForObject(type);
       if (!poseReady || manualPtsV1.length !== nReq || manualPtsV2.length !== nReq){
         return { ok:false, msg:"Need all manual points in both views first." };
+      }
+
+      if (type === "phone" || type === "box"){
+        return measureRectangularFaceEpipolar(manualPtsV1, manualPtsV2, type, "epipolar_manual");
       }
 
       const pts3 = [];
@@ -2001,7 +2271,6 @@
         pts3.push(X);
       }
 
-      const type = objTypeSel.value;
       let measuredText = "";
       let primaryMm = 0;
       let lengthMm = null;
@@ -2012,24 +2281,12 @@
         lengthMm = 1000 * dist3(pts3[0], pts3[1]);
         primaryMm = lengthMm;
         measuredText = `Length≈${lengthMm.toFixed(1)} mm`;
-      } else if (type === "ball"){
+      } else {
         const D = 1000 * dist3(pts3[0], pts3[1]);
         lengthMm = D;
         widthMm = D;
         primaryMm = D;
         measuredText = `Diameter≈${D.toFixed(1)} mm`;
-      } else if (type === "phone"){
-        lengthMm = 1000 * dist3(pts3[0], pts3[1]);
-        widthMm = 1000 * dist3(pts3[2], pts3[3]);
-        primaryMm = lengthMm;
-        measuredText = `L≈${lengthMm.toFixed(1)} mm, W≈${widthMm.toFixed(1)} mm`;
-      } else {
-        const L = 1000 * dist3(pts3[0], pts3[1]);
-        const W = 1000 * dist3(pts3[2], pts3[3]);
-        lengthMm = L;
-        widthMm = W;
-        primaryMm = Math.max(L, W);
-        measuredText = `Side≈${primaryMm.toFixed(1)} mm`;
       }
 
       const reprojMed = median(reprojArr);
@@ -2060,7 +2317,8 @@
         return { ok:false, msg:"Need 4 reference points first." };
       }
 
-      const nReq = requiredPointsForObject(objTypeSel.value);
+      const type = objTypeSel.value;
+      const nReq = requiredPointsForObject(type);
       if (refObjPts.length !== nReq){
         return { ok:false, msg:"Need all object points first." };
       }
@@ -2083,35 +2341,30 @@
       const scaleH = refHeightMm / refHeightPx;
       const scaleAvg = 0.5 * (scaleW + scaleH);
 
-      const type = objTypeSel.value;
       let measuredText = "";
       let primaryMm = 0;
       let lengthMm = null;
       let widthMm = null;
       let thicknessMm = null;
 
-      if (type === "spoon"){
+      if (type === "phone" || type === "box"){
+        const dims2d = averageOppositeEdges2D(refObjPts);
+        const L = dims2d.L * scaleAvg;
+        const W = dims2d.W * scaleAvg;
+        lengthMm = L;
+        widthMm = W;
+        primaryMm = L;
+        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
+      } else if (type === "spoon"){
         lengthMm = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
         primaryMm = lengthMm;
         measuredText = `Length≈${lengthMm.toFixed(1)} mm`;
-      } else if (type === "ball"){
+      } else {
         const D = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
         lengthMm = D;
         widthMm = D;
         primaryMm = D;
         measuredText = `Diameter≈${D.toFixed(1)} mm`;
-      } else if (type === "phone"){
-        lengthMm = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
-        widthMm = dist2(refObjPts[2], refObjPts[3]) * scaleAvg;
-        primaryMm = lengthMm;
-        measuredText = `L≈${lengthMm.toFixed(1)} mm, W≈${widthMm.toFixed(1)} mm`;
-      } else {
-        const L = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
-        const W = dist2(refObjPts[2], refObjPts[3]) * scaleAvg;
-        lengthMm = L;
-        widthMm = W;
-        primaryMm = Math.max(L, W);
-        measuredText = `Side≈${primaryMm.toFixed(1)} mm`;
       }
 
       logLine(`[REF MANUAL] scaleW=${scaleW.toFixed(4)} mm/px scaleH=${scaleH.toFixed(4)} mm/px`);
@@ -2146,11 +2399,7 @@
         const D = 0.5 * (L + W);
         primaryMm = D;
         measuredText = `Diameter≈${D.toFixed(1)} mm`;
-      } else if (type === "box"){
-        const side = Math.max(L, W);
-        primaryMm = side;
-        measuredText = `Side≈${side.toFixed(1)} mm`;
-      } else if (type === "phone"){
+      } else if (type === "box" || type === "phone"){
         primaryMm = L;
         measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
       } else {
