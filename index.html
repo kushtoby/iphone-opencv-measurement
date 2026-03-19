@@ -245,13 +245,28 @@
   </div>
 
   <script>
+    // I compute an absolute base URL so GitHub Pages subfolders never break it.
+    // Example base becomes: https://USERNAME.github.io/iphone-opencv-measurement/assets/opencv/
+    const OPENCV_BASE = new URL("assets/opencv/", window.location.href).toString();
+  
     var Module = {
       locateFile: function(path) {
-        return "./assets/opencv/" + path;
+        return OPENCV_BASE + path;
       }
     };
   </script>
-  <script src="./assets/opencv/opencv.js"></script>
+  
+  <script src="assets/opencv/opencv.js"></script>
+  
+  <script>
+    // If OpenCV isn't ready after 6 seconds, something is blocking initialization.
+    setTimeout(() => {
+      const msg = (typeof window.cv === "undefined")
+        ? "cv is undefined → opencv.js did not execute"
+        : "cv exists → waiting for onRuntimeInitialized / Promise resolve";
+      document.getElementById("log").textContent += "[boot] " + msg + "\n";
+    }, 6000);
+  </script>
 
   <script>
   /********************************************************************
@@ -398,25 +413,33 @@
     const timer = setInterval(() => {
       if (typeof window.cv === "undefined") return;
   
-      // Some OpenCV.js builds export cv as a Promise (MODULARIZE builds).
+      // Case A: cv is a Promise
       if (typeof window.cv.then === "function") {
-        window.cv.then((realCv) => {
-          window.cv = realCv;  // replace Promise with actual cv object
-        });
+        window.cv.then((realCv) => { window.cv = realCv; });
         return;
       }
   
-      // Normal OpenCV.js build (cv is already the real object)
+      // Case B: cv is a factory function (MODULARIZE build)
+      if (typeof window.cv === "function" && typeof window.cv.onRuntimeInitialized === "undefined") {
+        // calling cv() returns a Promise-like module in many builds
+        try {
+          const maybe = window.cv();
+          if (maybe && typeof maybe.then === "function") {
+            maybe.then((realCv) => { window.cv = realCv; });
+          }
+        } catch (e) {}
+        return;
+      }
+  
+      // Case C: normal build
       if (window.cv && typeof window.cv.onRuntimeInitialized !== "undefined") {
         clearInterval(timer);
-  
         window.cv.onRuntimeInitialized = () => {
           cvReady = true;
           cvStatus.textContent = "ready ✅";
           cvStatus.className = "ok";
           startBtn.disabled = false;
   
-          // Quick sanity check: these MUST be "function" in your custom build
           logLine("LK: " + typeof cv.calcOpticalFlowPyrLK);
           logLine("F: " + typeof cv.findFundamentalMat);
           logLine("recoverPose: " + typeof cv.recoverPose);
