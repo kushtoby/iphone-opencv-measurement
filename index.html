@@ -349,11 +349,11 @@
     const ROT_THRESH_DEG = { yaw: 3, pitch: 2, roll: 2 };
 
     const MAX_DEPTH_M = 8.0;
-    const MAX_REPROJ_ERR_PX = 3.5;
+    const MAX_REPROJ_ERR_PX = 5.5;
     const MIN_TRACKED_POSE = 120;
-    const MAX_LK_ERR = 30.0;
-    const MIN_OBJ_FEATURES = 12;
-    const MIN_VALID_3D_POINTS = 10;
+    const MAX_LK_ERR = 45.0;
+    const MIN_OBJ_FEATURES = 10;
+    const MIN_VALID_3D_POINTS = 6;
 
     let roiState = "none";
     const roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
@@ -631,21 +631,34 @@
     /********************************************************************
      * CAPTURE
      ********************************************************************/
-    function grabGrayFrameAndDisplayCopy(){
-      const imageData = rawCtx.getImageData(0, 0, rawCanvas.width, rawCanvas.height);
+    function grayMatToImageData(grayMat){
+      const rgba = new cv.Mat();
+      cv.cvtColor(grayMat, rgba, cv.COLOR_GRAY2RGBA);
+      const imgData = new ImageData(
+        new Uint8ClampedArray(rgba.data),
+        rgba.cols,
+        rgba.rows
+      );
+      rgba.delete();
+      return imgData;
+    }
 
+    function grabGrayFrameAndDisplayCopy(){
       const src = cv.imread(rawCanvas);
       const gray = new cv.Mat();
       cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
       src.delete();
 
+      let outGray = gray;
       if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
         const und = new cv.Mat();
         cv.undistort(gray, und, Kcv, DISTcv);
         gray.delete();
-        return { gray: und, imageData };
+        outGray = und;
       }
-      return { gray, imageData };
+
+      const imageData = grayMatToImageData(outGray);
+      return { gray: outGray, imageData };
     }
 
     function captureView1(){
@@ -892,6 +905,14 @@
     /********************************************************************
      * ROBUST OBJECT MEASUREMENT
      ********************************************************************/
+    function dilateBinaryMask(srcMask, ksize=5, iters=1){
+      const dst = new cv.Mat();
+      const k = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ksize, ksize));
+      cv.dilate(srcMask, dst, k, new cv.Point(-1,-1), iters);
+      k.delete();
+      return dst;
+    }
+
     function measureWithTwoROIs(){
       if (!poseReady || !gray1 || !gray2 || !roi1Box || !roi2Box){
         return { ok:false, msg:"Need pose + two ROIs first." };
@@ -926,6 +947,7 @@
       let contours = null;
       let hierarchy = null;
       let maskObj = null;
+      let maskTol = null;
 
       try{
         const rx = clamp(Math.round(box.x), 0, gray.cols - 1);
@@ -1010,6 +1032,8 @@
         maskObj.setTo(new cv.Scalar(0));
         cv.drawContours(maskObj, contours, bestIdx, new cv.Scalar(255), -1);
 
+        maskTol = dilateBinaryMask(maskObj, 7, 2);
+
         const pca2 = contourPCAFromMask(maskObj);
         if (!pca2.ok){
           return { ok:false, msg:`${tag}: contour PCA failed.` };
@@ -1025,6 +1049,7 @@
           rx, ry, rw, rh,
           ups: 2,
           maskUp: maskObj.clone(),
+          maskTolUp: maskTol.clone(),
           blurUp: blur.clone(),
           center: roiCenter,
           majorSpanUp: pca2.majorSpan,
@@ -1042,6 +1067,7 @@
         if (contours) contours.delete();
         if (hierarchy) hierarchy.delete();
         if (maskObj) maskObj.delete();
+        if (maskTol) maskTol.delete();
       }
     }
 
@@ -1113,8 +1139,10 @@
       if (p1local.rows < MIN_OBJ_FEATURES){
         p1local.delete();
         obj1.maskUp.delete();
+        obj1.maskTolUp.delete();
         obj1.blurUp.delete();
         obj2.maskUp.delete();
+        obj2.maskTolUp.delete();
         obj2.blurUp.delete();
         return { ok:false, msg:`Too few object features (${p1local.rows}). Improve lighting/texture or tighten ROI.` };
       }
@@ -1138,12 +1166,16 @@
 
       const pts3 = [];
       const reprojArr = [];
+      let surviveLK = 0;
+      let surviveMask2 = 0;
+      let surviveDepth = 0;
 
       for (let i=0; i<status.rows; i++){
         if (!status.ucharPtr(i,0)[0]) continue;
 
         const lkErr = err.floatAt(i,0);
         if (lkErr > MAX_LK_ERR) continue;
+        surviveLK++;
 
         const u1 = p1full.data32F[i*2];
         const v1 = p1full.data32F[i*2 + 1];
@@ -1155,8 +1187,9 @@
         const x2up = Math.round((u2 - obj2.rx) * obj2.ups);
         const y2up = Math.round((v2 - obj2.ry) * obj2.ups);
 
-        if (x2up < 0 || x2up >= obj2.maskUp.cols || y2up < 0 || y2up >= obj2.maskUp.rows) continue;
-        if (obj2.maskUp.ucharPtr(y2up, x2up)[0] === 0) continue;
+        if (x2up < 0 || x2up >= obj2.maskTolUp.cols || y2up < 0 || y2up >= obj2.maskTolUp.rows) continue;
+        if (obj2.maskTolUp.ucharPtr(y2up, x2up)[0] === 0) continue;
+        surviveMask2++;
 
         const x1n = pixelToNorm(u1, v1);
         const x2n = pixelToNorm(u2, v2);
@@ -1168,6 +1201,7 @@
 
         const X2cam = add3(mulMatVec3(R, X), t);
         if (X2cam[2] <= 0) continue;
+        surviveDepth++;
 
         const reproj = reprojErrPx(X, u1, v1, u2, v2);
         if (!isFinite(reproj) || reproj > MAX_REPROJ_ERR_PX) continue;
@@ -1181,10 +1215,15 @@
       status.delete();
       err.delete();
       obj1.maskUp.delete();
+      obj1.maskTolUp.delete();
       obj1.blurUp.delete();
       obj2.maskUp.delete();
+      obj2.maskTolUp.delete();
       obj2.blurUp.delete();
 
+      logLine(`[TRACK] survive LK=${surviveLK}`);
+      logLine(`[TRACK] survive mask2=${surviveMask2}`);
+      logLine(`[TRACK] survive depth=${surviveDepth}`);
       logLine(`[TRACK] valid 3D pts=${pts3.length}`);
 
       if (pts3.length < MIN_VALID_3D_POINTS){
