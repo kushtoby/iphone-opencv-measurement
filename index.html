@@ -1343,6 +1343,10 @@
     /********************************************************************
      * NUMERIC + GEOMETRY HELPERS
      ********************************************************************/
+    function clamp(v, lo, hi){
+      return Math.max(lo, Math.min(hi, v));
+    }
+    
     function buildScaledIntrinsics(W,H){
       const sx = W / CALIB.calW;
       const sy = H / CALIB.calH;
