@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Calibration Capture</title>
+  <style>
+    :root{
+      --maxw: 920px;
+      --radius: 14px;
+      --border: 1px solid #e6e6e6;
+      --bg: #fafafa;
+      --fg: #111;
+      --muted: #666;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:12px;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:var(--fg);
+      background:var(--bg);
+      text-align:center;
+    }
+    h1{margin:4px 0 8px;font-size:22px}
+    .sub{color:var(--muted);font-size:14px;margin-bottom:10px}
+    .wrap{max-width:var(--maxw);margin:0 auto;text-align:left}
+    canvas{
+      width:100%;
+      max-width:var(--maxw);
+      display:block;
+      margin:0 auto;
+      border-radius:var(--radius);
+      border:var(--border);
+      background:#000;
+      touch-action:pan-y;
+    }
+    .toolbar{
+      margin:10px auto;
+      max-width:var(--maxw);
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:8px;
+      background:#fff;
+      border:var(--border);
+      border-radius:var(--radius);
+      padding:10px;
+    }
+    button, input, select{
+      width:100%;
+      min-width:0;
+      border:var(--border);
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:15px;
+      background:#fff;
+    }
+    button.primary{background:#111;color:#fff;border-color:#111}
+    button:disabled{opacity:.55}
+    .pill{
+      grid-column:1/-1;
+      border:var(--border);
+      border-radius:12px;
+      padding:10px 12px;
+      background:#fff;
+      font-size:14px;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+      margin-top:10px;
+    }
+    .card{
+      background:#fff;
+      border:var(--border);
+      border-radius:var(--radius);
+      padding:10px;
+    }
+    .small{font-size:12px;color:var(--muted)}
+    .gallery{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(110px,1fr));
+      gap:8px;
+      margin-top:8px;
+      max-height:420px;
+      overflow:auto;
+    }
+    .shot{
+      border:var(--border);
+      border-radius:12px;
+      padding:6px;
+      background:#fff;
+    }
+    .shot img{
+      width:100%;
+      display:block;
+      border-radius:8px;
+      border:var(--border);
+      background:#f0f0f0;
+      aspect-ratio:3/4;
+      object-fit:cover;
+    }
+    .shot .meta{
+      font-size:11px;
+      color:var(--muted);
+      margin-top:4px;
+      line-height:1.25;
+    }
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    pre{
+      margin:8px 0 0;
+      white-space:pre-wrap;
+      word-break:break-word;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px;
+      line-height:1.28;
+      max-height:240px;
+      overflow:auto;
+      background:#fbfbfb;
+      border:var(--border);
+      border-radius:12px;
+      padding:10px;
+    }
+    @media (max-width:780px){
+      .toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <h1>Calibration Capture</h1>
+  <div class="sub">Use this to capture sharp checkerboard images for calibration. Move the board around the frame, change tilt, and keep the full board visible.</div>
+
+  <div class="wrap">
+    <video id="video" autoplay playsinline style="display:none;"></video>
+    <canvas id="canvas"></canvas>
+
+    <div class="toolbar">
+      <button id="startBtn" class="primary">Start camera</button>
+      <button id="capBtn" class="primary" disabled>Capture image</button>
+      <button id="toggleBtn" disabled>Freeze preview</button>
+      <button id="clearBtn" disabled>Clear shots</button>
+
+      <div class="pill">
+        <div class="row">
+          <label>Target shots
+            <input id="targetN" type="number" min="1" step="1" value="20" style="width:88px;margin-left:6px">
+          </label>
+          <label>Filename prefix
+            <input id="prefix" type="text" value="calib" style="width:110px;margin-left:6px">
+          </label>
+          <label><input id="guideChk" type="checkbox" checked> Show guide</label>
+        </div>
+        <div id="status">Shots: 0 / 20</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div><strong>Capture checklist</strong></div>
+        <div class="small" style="margin-top:6px">
+          Take 15–25 sharp images. Change position, tilt, and distance. Keep the full checkerboard visible. Avoid blur and strong glare.
+        </div>
+        <ul class="small">
+          <li>center, then each corner of the frame</li>
+          <li>tilt left/right and up/down</li>
+          <li>some close, some medium, a few farther</li>
+          <li>same camera/lens you will use for measurement</li>
+        </ul>
+        <div class="row">
+          <button id="downloadLastBtn" disabled>Download last</button>
+          <button id="downloadAllBtn" disabled>Download all</button>
+        </div>
+        <pre id="log"></pre>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <strong>Captured images</strong>
+          <span id="countLbl" class="small">0 saved</span>
+        </div>
+        <div id="gallery" class="gallery"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const startBtn = document.getElementById('startBtn');
+  const capBtn = document.getElementById('capBtn');
+  const toggleBtn = document.getElementById('toggleBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const downloadLastBtn = document.getElementById('downloadLastBtn');
+  const downloadAllBtn = document.getElementById('downloadAllBtn');
+  const targetN = document.getElementById('targetN');
+  const prefix = document.getElementById('prefix');
+  const guideChk = document.getElementById('guideChk');
+  const status = document.getElementById('status');
+  const gallery = document.getElementById('gallery');
+  const countLbl = document.getElementById('countLbl');
+  const logEl = document.getElementById('log');
+
+  let stream = null;
+  let raf = 0;
+  let frozen = false;
+  let shots = [];
+
+  function log(msg){
+    const t = new Date().toLocaleTimeString();
+    logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
+  }
+
+  function updateStatus(){
+    const n = shots.length;
+    const goal = Math.max(1, Number(targetN.value || 20));
+    status.textContent = `Shots: ${n} / ${goal}`;
+    countLbl.textContent = `${n} saved`;
+    const has = n > 0;
+    clearBtn.disabled = !has;
+    downloadLastBtn.disabled = !has;
+    downloadAllBtn.disabled = !has;
+    capBtn.disabled = !stream;
+    toggleBtn.disabled = !stream;
+  }
+
+  function resizeCanvas(){
+    if (!video.videoWidth || !video.videoHeight) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+  }
+
+  function drawGuide(){
+    if (!guideChk.checked) return;
+    const w = canvas.width, h = canvas.height;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,255,0,0.85)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10,8]);
+    ctx.strokeRect(w*0.12, h*0.12, w*0.76, h*0.76);
+    ctx.beginPath();
+    ctx.moveTo(w/3, 0); ctx.lineTo(w/3, h);
+    ctx.moveTo(2*w/3, 0); ctx.lineTo(2*w/3, h);
+    ctx.moveTo(0, h/3); ctx.lineTo(w, h/3);
+    ctx.moveTo(0, 2*h/3); ctx.lineTo(w, 2*h/3);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(0,255,0,0.95)';
+    ctx.font = 'bold 18px system-ui';
+    ctx.fillText(`Shot ${shots.length + 1}`, 16, 28);
+    ctx.restore();
+  }
+
+  function render(){
+    if (!stream) return;
+    if (!frozen) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      drawGuide();
+    }
+    raf = requestAnimationFrame(render);
+  }
+
+  async function startCamera(){
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+      resizeCanvas();
+      frozen = false;
+      cancelAnimationFrame(raf);
+      render();
+      startBtn.disabled = true;
+      capBtn.disabled = false;
+      toggleBtn.disabled = false;
+      log('Camera started');
+      updateStatus();
+    }catch(err){
+      log('Camera start failed: ' + (err.message || err));
+    }
+  }
+
+  function currentTimestampTag(){
+    const d = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  }
+
+  function makeFilename(i){
+    const p = (prefix.value || 'calib').trim() || 'calib';
+    return `${p}_${String(i).padStart(2,'0')}_${currentTimestampTag()}.png`;
+  }
+
+  function captureImage(){
+    if (!stream) return;
+    const url = canvas.toDataURL('image/png');
+    const i = shots.length + 1;
+    const name = makeFilename(i);
+    const shot = { name, url, index: i };
+    shots.push(shot);
+
+    const div = document.createElement('div');
+    div.className = 'shot';
+    div.innerHTML = `
+      <img src="${url}" alt="${name}">
+      <div class="meta">${name}<br>shot ${i}</div>
+      <button type="button" style="margin-top:6px;width:100%">Download</button>
+    `;
+    div.querySelector('button').addEventListener('click', () => downloadOne(shot));
+    gallery.prepend(div);
+
+    log(`Captured ${name}`);
+    updateStatus();
+  }
+
+  function downloadOne(shot){
+    const a = document.createElement('a');
+    a.href = shot.url;
+    a.download = shot.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function downloadAll(){
+    if (!shots.length) return;
+    for (const shot of shots) downloadOne(shot);
+    log(`Triggered download for ${shots.length} images`);
+  }
+
+  function clearShots(){
+    shots = [];
+    gallery.innerHTML = '';
+    updateStatus();
+    log('Cleared captured shots');
+  }
+
+  startBtn.addEventListener('click', startCamera);
+  capBtn.addEventListener('click', captureImage);
+  toggleBtn.addEventListener('click', () => {
+    frozen = !frozen;
+    toggleBtn.textContent = frozen ? 'Resume preview' : 'Freeze preview';
+    log(frozen ? 'Preview frozen' : 'Preview resumed');
+  });
+  clearBtn.addEventListener('click', clearShots);
+  downloadLastBtn.addEventListener('click', () => { if (shots.length) downloadOne(shots[shots.length - 1]); });
+  downloadAllBtn.addEventListener('click', downloadAll);
+  targetN.addEventListener('input', updateStatus);
+  window.addEventListener('resize', resizeCanvas);
+
+  updateStatus();
+})();
+</script>
+</body>
+</html>
