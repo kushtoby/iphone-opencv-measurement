@@ -174,7 +174,7 @@
         </ul>
         <div class="row">
           <button id="downloadLastBtn" disabled>Download last</button>
-          <button id="downloadAllBtn" disabled>Download all</button>
+          <button id="downloadZipBtn" disabled>Download ZIP</button>
         </div>
         <pre id="log"></pre>
       </div>
@@ -189,6 +189,7 @@
     </div>
   </div>
 
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 (() => {
   const video = document.getElementById('video');
@@ -199,7 +200,7 @@
   const toggleBtn = document.getElementById('toggleBtn');
   const clearBtn = document.getElementById('clearBtn');
   const downloadLastBtn = document.getElementById('downloadLastBtn');
-  const downloadAllBtn = document.getElementById('downloadAllBtn');
+  const downloadZipBtn = document.getElementById('downloadZipBtn');
   const targetN = document.getElementById('targetN');
   const prefix = document.getElementById('prefix');
   const guideChk = document.getElementById('guideChk');
@@ -226,7 +227,7 @@
     const has = n > 0;
     clearBtn.disabled = !has;
     downloadLastBtn.disabled = !has;
-    downloadAllBtn.disabled = !has;
+    downloadZipBtn.disabled = !has;
     capBtn.disabled = !stream;
     toggleBtn.disabled = !stream;
   }
@@ -335,10 +336,29 @@
     a.remove();
   }
 
-  function downloadAll(){
+  async function downloadZip(){
     if (!shots.length) return;
-    for (const shot of shots) downloadOne(shot);
-    log(`Triggered download for ${shots.length} images`);
+    if (typeof JSZip === 'undefined') {
+      log('ZIP library not loaded');
+      return;
+    }
+
+    const zip = new JSZip();
+    for (const shot of shots){
+      const base64 = shot.url.split(',')[1];
+      zip.file(shot.name, base64, {base64: true});
+    }
+
+    const blob = await zip.generateAsync({type: 'blob'});
+    const a = document.createElement('a');
+    const zipName = `${((prefix.value || 'calib').trim() || 'calib')}_images.zip`;
+    a.href = URL.createObjectURL(blob);
+    a.download = zipName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    log(`Downloaded ZIP with ${shots.length} images`);
   }
 
   function clearShots(){
@@ -357,12 +377,13 @@
   });
   clearBtn.addEventListener('click', clearShots);
   downloadLastBtn.addEventListener('click', () => { if (shots.length) downloadOne(shots[shots.length - 1]); });
-  downloadAllBtn.addEventListener('click', downloadAll);
+  downloadZipBtn.addEventListener('click', downloadZip);
   targetN.addEventListener('input', updateStatus);
   window.addEventListener('resize', resizeCanvas);
 
   updateStatus();
 })();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 </body>
 </html>
