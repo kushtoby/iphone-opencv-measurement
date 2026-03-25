@@ -3,3257 +3,889 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>3D Object Measurement — Epipolar / Manual / Reference</title>
+  <title>index.html</title>
   <style>
     :root{
-      --maxw: 760px;
+      --maxw: 980px;
       --radius: 14px;
-      --border: 1px solid #e8e8e8;
+      --border: 1px solid #e7e7e7;
+      --bg: #fafafa;
+      --fg: #111;
+      --muted: #555;
+      --ok: #0a7a2f;
+      --warn: #b00020;
     }
-
+    *{ box-sizing:border-box; }
     body{
-      margin: 10px;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      text-align: center;
-      color:#111;
-      background:#fafafa;
+      margin:10px;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:var(--fg);
+      background:var(--bg);
+      text-align:center;
     }
-
-    h2{ margin: 6px 0 10px; font-size: 18px; }
-    .wrap{ max-width: var(--maxw); margin: 0 auto; text-align:left; }
-
+    h2{ margin:6px 0 10px; font-size:20px; }
+    .wrap{ max-width:var(--maxw); margin:0 auto; text-align:left; }
     canvas{
       width:100%;
-      max-width: var(--maxw);
-      border-radius: var(--radius);
-      border: var(--border);
-      touch-action: pan-y;
+      max-width:var(--maxw);
+      border-radius:var(--radius);
+      border:var(--border);
       background:#000;
       display:block;
       margin:0 auto;
+      touch-action:none;
     }
-
     .toolbar{
-      position: relative;
-      z-index: 1;
-      background: rgba(255,255,255,0.94);
-      backdrop-filter: blur(10px);
-      border: var(--border);
-      border-radius: var(--radius);
-      padding: 8px;
-      margin: 10px auto;
-      max-width: var(--maxw);
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 8px;
+      background:rgba(255,255,255,0.96);
+      border:var(--border);
+      border-radius:var(--radius);
+      padding:8px;
+      margin:10px auto;
+      max-width:var(--maxw);
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0,1fr));
+      gap:8px;
     }
-
-    button, input, select{
-      border: var(--border);
-      border-radius: 12px;
-      padding: 10px 12px;
-      font-size: 15px;
-      background: #fff;
-      box-sizing: border-box;
+    button,input,select{
+      border:var(--border);
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:15px;
+      background:#fff;
+      min-width:0;
     }
-
-    button.primary{
-      background:#111;
-      color:#fff;
-      border-color:#111;
-    }
-
-    button:disabled{ opacity: 0.55; }
-
+    button.primary{ background:#111; color:#fff; border-color:#111; }
+    button:disabled{ opacity:.5; }
     .pill{
-      grid-column: 1 / -1;
+      grid-column:1/-1;
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:10px;
-      border: var(--border);
-      border-radius: 12px;
-      padding: 10px 12px;
+      border:var(--border);
+      border-radius:12px;
+      padding:10px 12px;
       background:#fff;
-      font-size: 14px;
-      flex-wrap: wrap;
-    }
-
-    .pill input[type="checkbox"]{ transform: scale(1.1); }
-
-    details{
-      border: var(--border);
-      border-radius: var(--radius);
-      padding: 8px 10px;
-      margin: 8px 0;
-      background:#fff;
-    }
-
-    summary{
-      cursor: pointer;
-      font-weight: 700;
-      list-style: none;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-    }
-
-    summary::-webkit-details-marker{ display:none; }
-
-    .row{
-      display:flex;
+      font-size:14px;
       flex-wrap:wrap;
-      gap:8px;
-      align-items:center;
-      justify-content:flex-start;
-      margin-top:8px;
     }
-
-    .small{ font-size:12px; color:#444; }
-    .ok{ color:#0a7a2f; font-weight:900; }
-    .warn{ color:#b00020; font-weight:900; }
-
-    #out{
-      margin: 8px 0 0;
-      text-align:center;
-      font-weight:900;
-      font-size:16px;
-      min-height:22px;
-    }
-
-    .resultsBox{
-      max-height: 220px;
-      overflow:auto;
-      border: var(--border);
-      border-radius: 12px;
-      margin-top: 8px;
-    }
-
-    table{
-      width:100%;
-      border-collapse: collapse;
-      font-size:13px;
-    }
-
-    th, td{
-      border-bottom: 1px solid #eee;
-      padding: 8px 8px;
-      text-align:left;
-      white-space: nowrap;
-    }
-
-    th{
-      position: sticky;
-      top:0;
+    .pill .grp{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .pill input[type="checkbox"]{ transform:scale(1.1); }
+    .section{
+      border:var(--border);
+      border-radius:var(--radius);
+      padding:10px;
+      margin:10px 0;
       background:#fff;
     }
-
+    .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .small{ font-size:12px; color:var(--muted); }
+    .ok{ color:var(--ok); font-weight:800; }
+    .warn{ color:var(--warn); font-weight:800; }
+    .resultsBox{ max-height:260px; overflow:auto; border:var(--border); border-radius:12px; margin-top:8px; }
+    table{ width:100%; border-collapse:collapse; font-size:13px; }
+    th,td{ border-bottom:1px solid #eee; padding:8px; text-align:left; white-space:nowrap; }
+    th{ position:sticky; top:0; background:#fff; }
     pre{
-      margin:8px 0 0;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size:12px;
-      line-height:1.25;
+      margin:8px 0 0; white-space:pre-wrap; word-break:break-word;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px; line-height:1.25;
+      max-height:220px; overflow:auto;
+      border:var(--border); border-radius:12px; padding:10px; background:#fbfbfb;
     }
+    @media (max-width:760px){ .toolbar{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
   </style>
 </head>
-
 <body>
-  <h2>3D Object Measurement — Epipolar / Manual / Reference</h2>
+  <h2>Metric 3D Measurement — 8-marker ARUCO board</h2>
 
   <video id="video" autoplay playsinline style="display:none;"></video>
   <canvas id="canvas"></canvas>
 
   <div class="toolbar">
-    <button id="startBtn" onclick="startCamera()" disabled>Start</button>
+    <button id="startBtn" class="primary" onclick="startCamera()">Start</button>
     <button id="imuBtn" onclick="toggleSensors()" disabled>Sensors</button>
     <button id="cap1Btn" class="primary" onclick="captureView1()" disabled>Capture 1</button>
     <button id="cap2Btn" class="primary" onclick="captureView2()" disabled>Capture 2</button>
 
-    <div class="pill">
-      <span>Mode</span>
-      <select id="modeSel" style="width:240px;">
-        <option value="epipolar_auto" selected>Mode A — Epipolar Auto</option>
-        <option value="epipolar_manual">Mode B — Epipolar Manual</option>
-        <option value="reference_manual">Mode C — Fixed Reference</option>
-      </select>
-    </div>
+    <button id="showLiveBtn" onclick="setDisplay('live')" disabled>Live</button>
+    <button id="showV1Btn" onclick="setDisplay('v1')" disabled>View 1</button>
+    <button id="showV2Btn" onclick="setDisplay('v2')" disabled>View 2</button>
+    <button id="solveBtn" class="primary" onclick="solveBoard()" disabled>Solve board</button>
+
+    <button id="newObjBtn" onclick="newObjectSession()" disabled>New object</button>
+    <button id="computeBtn" class="primary" onclick="computeMeasurement()" disabled>Compute</button>
+    <button id="nextObjBtn" onclick="finishCurrentAndNext()" disabled>Measure next</button>
+    <button id="clearObjBtn" onclick="clearCurrentObject()" disabled>Clear object</button>
 
     <div class="pill">
-      <span>Object type</span>
-      <select id="objType" style="width:180px;">
-        <option value="phone">phone</option>
-        <option value="box">box</option>
-        <option value="spoon">spoon</option>
-        <option value="ball">ball</option>
-      </select>
-    </div>
-
-    <div class="pill">
-      <span>Baseline (cm) — move between preset tripod/slider positions</span>
-      <input id="baselineCm" type="number" value="20" step="1" style="width:110px;">
-    </div>
-
-    <div class="pill">
-      <span>Undistort (recommended ON)</span>
-      <input id="undToggle" type="checkbox" checked>
-    </div>
-
-    <div class="pill">
-      <span>Strict IMU gate for Capture 2</span>
-      <input id="strictImuToggle" type="checkbox" checked>
-    </div>
-
-    <div class="pill">
-      <span>Manual click refine</span>
-      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <label style="display:flex; align-items:center; gap:6px;">
-          <input id="refineToggle" type="checkbox" checked>
-          <span>ON</span>
+      <div class="grp">
+        <label>Axis
+          <select id="axisSel" onchange="render()">
+            <option value="table_parallel">Table-parallel</option>
+            <option value="table_normal">Table-normal</option>
+          </select>
         </label>
-        <span>Window (px)</span>
-        <input id="refineRadiusPx" type="number" value="18" min="4" max="60" step="1" style="width:90px;">
+        <label><input type="checkbox" id="refineChk" checked> Refine clicks</label>
+        <label>Refine px <input id="refineRad" type="number" value="16" min="4" max="40" step="1" style="width:84px"></label>
+        <label><input type="checkbox" id="overlayBoardChk" checked onchange="render()"> Show board</label>
+        <label><input type="checkbox" id="overlayEpiChk" checked onchange="render()"> Show epipolar</label>
+      </div>
+      <div class="grp small">
+        Local files required: cv.js, aruco.js, svd.js, posit1.js
       </div>
     </div>
-
-    <div class="pill">
-      <span>Reference width × height (mm)</span>
-      <div style="display:flex; gap:8px;">
-        <input id="refWidthMm" type="number" value="85.60" step="0.01" style="width:100px;">
-        <input id="refHeightMm" type="number" value="53.98" step="0.01" style="width:100px;">
-      </div>
-    </div>
-
-    <button onclick="clearROIs()">Clear ROIs</button>
-    <button onclick="clearLastMark()">Clear last mark</button>
-    <button onclick="clearAllMarks()">Clear all marks</button>
-    <button id="computeBtn" onclick="finalizePendingMeasurement()" disabled>Compute</button>
-    <button onclick="resetAll()">Reset all</button>
   </div>
 
   <div class="wrap">
-    <div class="small">
-      OpenCV: <span id="cvStatus" class="warn">Loading…</span>
-      • Stage: <span id="stageStatus">idle</span>
-      • Display: <span id="displayStatus">live</span>
-      • Stream: <span id="streamInfo">?</span>
+    <div class="section">
+      <div><b>Status</b></div>
+      <div class="row small">
+        <div id="cameraStatus">camera: idle</div>
+        <div id="sensorStatus">imu: off</div>
+        <div id="displayStatus">display: live</div>
+        <div id="boardStatus">board: unsolved</div>
+        <div id="objStatus">object: none</div>
+      </div>
+      <div class="row small">
+        <div id="captureStatus">captures: none</div>
+        <div id="boardDetail">expected ids: 12,13,14,15,16,17,18,19</div>
+        <div id="imuReadout"></div>
+      </div>
+      <div id="out" style="margin-top:8px;font-weight:800;"></div>
     </div>
 
-    <div class="small" style="margin-top:6px;">
-      Orientation Δ from Capture 1:
-      yaw <span id="dyaw">0</span>°
-      pitch <span id="dpitch">0</span>°
-      roll <span id="droll">0</span>°
-      • rotation rate <span id="rotRate">0</span>°/s
-      • accel <span id="accMag">0</span> m/s²
-      • <span id="imuGate" class="warn">Sensors off</span>
+    <div class="section">
+      <div><b>Object actions</b></div>
+      <div class="row">
+        <button onclick="beginAction('roi_v1')" id="roi1Btn" disabled>ROI V1</button>
+        <button onclick="beginAction('roi_v2')" id="roi2Btn" disabled>ROI V2</button>
+        <button onclick="beginAction('p1_v1')" id="p11Btn" disabled>P1 V1</button>
+        <button onclick="beginAction('p2_v1')" id="p21Btn" disabled>P2 V1</button>
+        <button onclick="beginAction('p1_v2')" id="p12Btn" disabled>P1 V2</button>
+        <button onclick="beginAction('p2_v2')" id="p22Btn" disabled>P2 V2</button>
+      </div>
+      <div class="row small">
+        Use View 1 / View 2 buttons to switch images, then choose ROI or point actions.
+      </div>
     </div>
 
-    <div id="out"></div>
-
-    <details open>
-      <summary>
-        <span>Debug log</span>
-        <span class="small">tap to collapse</span>
-      </summary>
-      <div class="row">
-        <button onclick="clearLog()">Clear log</button>
-        <span class="small">Phone/box now use 4-corner rectangular-face geometry in Modes A/B/C.</span>
-      </div>
-      <pre id="log"></pre>
-    </details>
-
-    <details open>
-      <summary>
-        <span>How to use</span>
-        <span class="small">tap to collapse</span>
-      </summary>
-      <ol class="small" style="margin-top:8px;">
-        <li>Start camera.</li>
-        <li>Optional: enable sensors.</li>
-        <li>Capture 1.</li>
-        <li>Move to position B and Capture 2.</li>
-        <li>Mode A: draw object ROI in View 1 and View 2. For phone/box, the app auto-detects the 4 face corners.</li>
-        <li>Mode B: draw object ROI in View 1 and View 2, then mark points. For phone/box, mark the 4 visible corners in the same order in both views.</li>
-        <li>Mode C: draw reference ROI and object ROI in View 1, then mark reference points and object points. For phone/box, mark the 4 visible corners of the object face.</li>
-        <li>You should be able to scroll vertically whenever you are not actively drawing an ROI.</li>
-      </ol>
-    </details>
-
-    <details open>
-      <summary>
-        <span>Results</span>
-        <span class="small" id="resCount">0</span>
-      </summary>
-      <div class="row">
-        <input id="objName" type="text" placeholder="object name (optional)" style="width: 170px;">
-        <input id="gtMm" type="number" step="0.1" placeholder="GT mm (optional)" style="width: 140px;">
-        <button onclick="clearResults()">Clear</button>
-      </div>
-
+    <div class="section">
+      <div><b>Results</b></div>
       <div class="resultsBox">
-        <table>
+        <table id="resTable">
           <thead>
             <tr>
-              <th>#</th>
-              <th>Object</th>
-              <th>Mode</th>
-              <th>Type</th>
-              <th>Measured</th>
-              <th>GT</th>
-              <th>Err%</th>
-              <th>Meta</th>
+              <th>#</th><th>Axis</th><th>Measured mm</th><th>Truth mm</th><th>% err</th>
+              <th>Pose V1</th><th>Pose V2</th><th>Epi px</th>
             </tr>
           </thead>
-          <tbody id="resultsBody"></tbody>
+          <tbody></tbody>
         </table>
       </div>
-    </details>
+      <div class="row">
+        <label>Ground truth mm <input id="gtMm" type="number" value="" min="0" step="0.1" style="width:110px"></label>
+        <button onclick="clearResults()">Clear results</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div><b>Log</b></div>
+      <pre id="log"></pre>
+    </div>
   </div>
 
-  <script>
-    function onOpenCvScriptLoaded() {
-      console.log("[boot] opencv.js script loaded");
-      if (typeof cv === "undefined") {
-        const el = document.getElementById("cvStatus");
-        if (el) {
-          el.textContent = "load failed";
-          el.className = "warn";
-        }
-        return;
-      }
-      cv.onRuntimeInitialized = () => {
-        if (window.__cvReadyHook) window.__cvReadyHook();
-      };
+<script src="./cv.js"></script>
+<script src="./aruco.js"></script>
+<script src="./svd.js"></script>
+<script src="./posit1.js"></script>
+<script>
+'use strict';
+
+/********************************************************************
+ * CONFIG
+ ********************************************************************/
+const CALIB = {
+  calW: 2560,
+  calH: 1920,
+  fx: 1939.22217,
+  fy: 1944.80422,
+  cx: 1250.09825,
+  cy: 947.957973,
+  dist: [0.196139581, -0.79214993, 0.000251525214, -0.00647283132, 0.486071831]
+};
+
+const BOARD = {
+  dictionary: 'ARUCO',
+  ids: [12,13,14,15,16,17,18,19],
+  markerSizeMm: 50,
+  gapMm: 10,
+  // board frame: x right, y up, z out of board
+  centersMm: {
+    12:[25,145,0], 13:[85,145,0], 14:[145,145,0],
+    15:[25,85,0],  16:[85,85,0],  17:[145,85,0],
+    18:[25,25,0],  19:[85,25,0]
+  }
+};
+
+/********************************************************************
+ * GLOBALS
+ ********************************************************************/
+let detector = null;
+let streaming = false;
+let displayMode = 'live'; // live | v1 | v2
+let boardSolved = false;
+let frame1 = null, frame2 = null; // {width,height,imageData}
+let pose1 = null, pose2 = null;   // board pose in camera coords
+let detectorInfo1 = null, detectorInfo2 = null;
+
+let currentObject = null;
+let actionMode = null;
+let drawDrag = null;
+let results = [];
+let sensorOn = false;
+let imu = { alpha:null, beta:null, gamma:null };
+let activeTouches = 0;
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently:true });
+
+/********************************************************************
+ * UTILS
+ ********************************************************************/
+function log(msg){
+  const el = document.getElementById('log');
+  const t = new Date().toLocaleTimeString();
+  el.textContent = `[${t}] ${msg}\n` + el.textContent;
+}
+function setOut(msg, cls=''){
+  const el = document.getElementById('out');
+  el.className = cls;
+  el.textContent = msg || '';
+}
+function setStatus(id, txt){ document.getElementById(id).textContent = txt; }
+function round(v, n=2){ return Number(v).toFixed(n); }
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+function clonePt(p){ return {x:p.x, y:p.y}; }
+function norm3(v){ return Math.hypot(v[0],v[1],v[2]); }
+function sub3(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function add3(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+function dot3(a,b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function matVec3(R,v){
+  return [
+    R[0][0]*v[0]+R[0][1]*v[1]+R[0][2]*v[2],
+    R[1][0]*v[0]+R[1][1]*v[1]+R[1][2]*v[2],
+    R[2][0]*v[0]+R[2][1]*v[1]+R[2][2]*v[2]
+  ];
+}
+function matT(R){
+  return [
+    [R[0][0],R[1][0],R[2][0]],
+    [R[0][1],R[1][1],R[2][1]],
+    [R[0][2],R[1][2],R[2][2]]
+  ];
+}
+function frameK(frame){
+  const sx = frame.width / CALIB.calW, sy = frame.height / CALIB.calH;
+  return {
+    fx: CALIB.fx * sx,
+    fy: CALIB.fy * sy,
+    cx: CALIB.cx * sx,
+    cy: CALIB.cy * sy
+  };
+}
+function scaleRect(r){
+  const x = Math.min(r.x1, r.x2), y = Math.min(r.y1, r.y2);
+  return { x, y, w: Math.abs(r.x2-r.x1), h: Math.abs(r.y2-r.y1) };
+}
+function pointInRect(p, r){
+  const rr = scaleRect(r);
+  return p.x >= rr.x && p.x <= rr.x + rr.w && p.y >= rr.y && p.y <= rr.y + rr.h;
+}
+function getDisplayedFrame(){
+  if (displayMode === 'v1') return frame1;
+  if (displayMode === 'v2') return frame2;
+  return null;
+}
+function imageDataToCanvasImage(frame, targetCtx){
+  const cnv = document.createElement('canvas');
+  cnv.width = frame.width; cnv.height = frame.height;
+  cnv.getContext('2d').putImageData(frame.imageData,0,0);
+  targetCtx.drawImage(cnv,0,0);
+}
+function captureCurrentFrame(){
+  const w = video.videoWidth, h = video.videoHeight;
+  const tmp = document.createElement('canvas');
+  tmp.width = w; tmp.height = h;
+  const tctx = tmp.getContext('2d', { willReadFrequently:true });
+  tctx.drawImage(video, 0, 0, w, h);
+  return { width:w, height:h, imageData:tctx.getImageData(0,0,w,h) };
+}
+function ensureCanvasSize(w,h){
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w; canvas.height = h;
+  }
+}
+
+/********************************************************************
+ * CAMERA + IMU
+ ********************************************************************/
+async function startCamera(){
+  try{
+    if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){
+      setOut('Local aruco.js not loaded correctly', 'warn');
+      log('[boot] AR.Detector missing');
+      return;
     }
-  </script>
-
-  <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvScriptLoaded()"></script>
-
-  <script>
-    /********************************************************************
-     * DEBUG
-     ********************************************************************/
-    const logEl = document.getElementById("log");
-    function logLine(s){
-      console.log(s);
-      logEl.textContent += s + "\n";
+    if(typeof POS === 'undefined' || typeof POS.Posit !== 'function'){
+      setOut('Local posit1.js not loaded correctly', 'warn');
+      log('[boot] POS.Posit missing');
+      return;
     }
-    function clearLog(){ logEl.textContent = ""; }
+    detector = new AR.Detector({ dictionaryName: BOARD.dictionary });
 
-    window.addEventListener("error", (e) => {
-      logLine(`[window.onerror] ${e.message} @ ${e.filename}:${e.lineno}`);
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
+      audio: false
     });
-    window.addEventListener("unhandledrejection", (e) => {
-      logLine(`[promise.reject] ${e.reason}`);
-    });
-
-    /********************************************************************
-     * CALIBRATION
-     ********************************************************************/
-    const CALIB = {
-      calW: 2560,
-      calH: 1920,
-      fx: 1939.22217,
-      fy: 1944.80422,
-      cx: 1250.09825,
-      cy: 947.957973,
-      dist: [0.196139581, -0.79214993, 0.000251525214, -0.00647283132, 0.486071831]
-    };
-
-    /********************************************************************
-     * GLOBALS
-     ********************************************************************/
-    let cvReady = false;
-    let streaming = false;
-    let poseReady = false;
-
-    let gray1 = null;
-    let gray2 = null;
-    let rgba1 = null;
-    let rgba2 = null;
-    let frame1ImageData = null;
-    let frame2ImageData = null;
-
-    let K = null;
-    let Kinv = null;
-    let Kcv = null;
-    let DISTcv = null;
-
-    let R = null;
-    let t = null;
-
-    let stage = "idle";
-    let displayMode = "live";
-
-    let sensorsEnabled = false;
-    let imuNow = { yaw:0, pitch:0, roll:0 };
-    let imuAtV1 = null;
-    let motionNow = { rotRate:0, accMag:0, interval:0 };
-
-    const SAFE_BORDER_FRAC = 0.18;
-    const ROT_THRESH_DEG = { yaw: 3, pitch: 2, roll: 2 };
-
-    const MAX_DEPTH_M = 8.0;
-    const MAX_REPROJ_ERR_PX = 3.5;
-    const MIN_TRACKED_POSE = 120;
-    const MAX_LK_ERR_POSE = 20.0;
-    const MAX_LK_ERR_OBJ = 30.0;
-    const FB_POSE_THRESH = 1.5;
-    const FB_OBJ_THRESH = 1.5;
-    const MIN_OBJ_FEATURES = 12;
-    const MIN_VALID_3D_POINTS = 8;
-
-    let roiState = "none";
-    const roi = { active:false, x0:0, y0:0, x1:0, y1:0 };
-    let roi1Box = null;
-    let roi2Box = null;
-    let refRoiBox = null;
-
-    let pointState = "none";
-    let manualPtsV1 = [];
-    let manualPtsV2 = [];
-    let refScalePts = [];
-    let refObjPts = [];
-
-    let pendingMeasureMode = null;
-    let lastTouchStamp = 0;
-
-    let results = [];
-
-    /********************************************************************
-     * DOM
-     ********************************************************************/
-    const video = document.getElementById("video");
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d", { willReadFrequently:true });
-
-    const rawCanvas = document.createElement("canvas");
-    const rawCtx = rawCanvas.getContext("2d", { willReadFrequently:true });
-
-    const cvStatus = document.getElementById("cvStatus");
-    const stageStatus = document.getElementById("stageStatus");
-    const displayStatus = document.getElementById("displayStatus");
-    const outEl = document.getElementById("out");
-    const streamInfoEl = document.getElementById("streamInfo");
-    const undToggle = document.getElementById("undToggle");
-    const strictImuToggle = document.getElementById("strictImuToggle");
-    const refineToggle = document.getElementById("refineToggle");
-    const refineRadiusPxEl = document.getElementById("refineRadiusPx");
-    const modeSel = document.getElementById("modeSel");
-    const objTypeSel = document.getElementById("objType");
-
-    const startBtn = document.getElementById("startBtn");
-    const imuBtn = document.getElementById("imuBtn");
-    const cap1Btn = document.getElementById("cap1Btn");
-    const cap2Btn = document.getElementById("cap2Btn");
-    const computeBtn = document.getElementById("computeBtn");
-
-    const dyawEl = document.getElementById("dyaw");
-    const dpitchEl = document.getElementById("dpitch");
-    const drollEl = document.getElementById("droll");
-    const rotRateEl = document.getElementById("rotRate");
-    const accMagEl = document.getElementById("accMag");
-    const imuGateEl = document.getElementById("imuGate");
-
-    const resultsBody = document.getElementById("resultsBody");
-    const resCount = document.getElementById("resCount");
-
-    /********************************************************************
-     * READY HOOK
-     ********************************************************************/
-    window.__cvReadyHook = function(){
-      cvReady = true;
-      cvStatus.textContent = "ready ✅";
-      cvStatus.className = "ok";
-      startBtn.disabled = false;
-      logLine("[boot] OpenCV ready ✅");
-      logLine("[boot] goodFeaturesToTrack: " + typeof cv.goodFeaturesToTrack);
-      logLine("[boot] LK: " + typeof cv.calcOpticalFlowPyrLK);
-      logLine("[boot] Canny: " + typeof cv.Canny);
-      logLine("[boot] findContours: " + typeof cv.findContours);
-      logLine("[boot] undistort: " + typeof cv.undistort);
-      logLine("[boot] page script started");
-      updateCanvasTouchAction();
-    };
-
-    /********************************************************************
-     * UI HELPERS
-     ********************************************************************/
-    function setStage(s){
-      stage = s;
-      stageStatus.textContent = s;
-      updateCanvasTouchAction();
-    }
-    function setDisplayMode(m){
-      displayMode = m;
-      displayStatus.textContent = m;
-    }
-    function setOut(msg, isWarn=false){
-      outEl.textContent = msg;
-      outEl.className = isWarn ? "warn" : "";
-    }
-    function updateResCount(){
-      resCount.textContent = String(results.length);
-    }
-    function escapeHtml(s){
-      return String(s).replace(/[&<>"']/g, c => ({
-        "&":"&amp;",
-        "<":"&lt;",
-        ">":"&gt;",
-        "\"":"&quot;",
-        "'":"&#39;"
-      }[c]));
-    }
-    function updateCanvasTouchAction(){
-      if (roiState === "await1" || roiState === "await2" || roi.active){
-        canvas.style.touchAction = "none";
-      } else {
-        canvas.style.touchAction = "pan-y";
-      }
-    }
-
-    function requiredPointsForObject(type){
-      if (type === "phone" || type === "box") return 4;   // now corners
-      return 2;
-    }
-
-    function instructionManualView1(){
-      const t = objTypeSel.value;
-      if (t === "phone" || t === "box"){
-        return `View 1: click the 4 visible corners of the same rectangular face in this order — top-left, top-right, bottom-right, bottom-left.`;
-      }
-      if (t === "spoon"){
-        return `View 1: click 2 points in this order — spoon length start, spoon length end.`;
-      }
-      return `View 1: click 2 points in this order — ball diameter endpoint 1, endpoint 2.`;
-    }
-
-    function instructionManualView2(){
-      const t = objTypeSel.value;
-      if (t === "phone" || t === "box"){
-        return `View 2: click the SAME 4 physical corners in the SAME order — top-left, top-right, bottom-right, bottom-left.`;
-      }
-      if (t === "spoon"){
-        return `View 2: click the SAME 2 physical spoon endpoints in the SAME order.`;
-      }
-      return `View 2: click the SAME 2 physical ball diameter endpoints in the SAME order.`;
-    }
-
-    function instructionReferenceScale(){
-      return `Reference: click 4 points in View 1 — card width start, width end, height start, height end.`;
-    }
-
-    function instructionReferenceObject(){
-      const t = objTypeSel.value;
-      if (t === "phone" || t === "box"){
-        return `Object: click the 4 visible corners of the same rectangular face in this order — top-left, top-right, bottom-right, bottom-left.`;
-      }
-      if (t === "spoon"){
-        return `Object: click 2 points in View 1 — spoon length start, spoon length end.`;
-      }
-      return `Object: click 2 points in View 1 — ball diameter endpoint 1, endpoint 2.`;
-    }
-
-    /********************************************************************
-     * CAMERA
-     ********************************************************************/
-    async function startCamera(){
-      if (!cvReady){
-        setOut("Wait for OpenCV first.", true);
-        return;
-      }
-
-      try{
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30, max: 30 }
-          },
-          audio: false
-        });
-
-        video.srcObject = stream;
-        await video.play();
-
-        const finishSetup = () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          rawCanvas.width = video.videoWidth;
-          rawCanvas.height = video.videoHeight;
-
-          streamInfoEl.textContent = `${video.videoWidth}×${video.videoHeight}`;
-          buildScaledIntrinsics(video.videoWidth, video.videoHeight);
-
-          streaming = true;
-          imuBtn.disabled = false;
-          cap1Btn.disabled = false;
-          cap2Btn.disabled = true;
-
-          setStage("live");
-          setDisplayMode("live");
-
-          clearLog();
-          logLine("=== START CAMERA ===");
-          logLine(`stream = ${video.videoWidth}x${video.videoHeight}`);
-          logLine(`K fx=${K[0][0].toFixed(2)} fy=${K[1][1].toFixed(2)} cx=${K[0][2].toFixed(2)} cy=${K[1][2].toFixed(2)}`);
-          logLine(`[calib] reference size=${CALIB.calW}x${CALIB.calH}`);
-
-          setOut("Start ✅ Capture 1 at position A.", false);
-          requestAnimationFrame(drawLoop);
-          updateCanvasTouchAction();
-        };
-
-        if (video.readyState >= 1 && video.videoWidth > 0) finishSetup();
-        else video.onloadedmetadata = finishSetup;
-
-      }catch(e){
-        logLine("[camera] failed: " + e);
-        setOut("Camera failed. Use HTTPS and allow camera permission.", true);
-      }
-    }
-
-    function drawCurrentFrameToRaw(){
-      rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
-    }
-
-    function drawLoop(){
-      if (!streaming) return;
-
-      if (displayMode === "live"){
-        drawCurrentFrameToRaw();
-        ctx.drawImage(rawCanvas, 0, 0, canvas.width, canvas.height);
-      } else if (displayMode === "view1" && frame1ImageData){
-        ctx.putImageData(frame1ImageData, 0, 0);
-      } else if (displayMode === "view2" && frame2ImageData){
-        ctx.putImageData(frame2ImageData, 0, 0);
-      }
-
-      if (refRoiBox && displayMode === "view1") drawBox(refRoiBox, "cyan");
-      if (roi1Box && displayMode === "view1") drawBox(roi1Box, "yellow");
-      if (roi2Box && displayMode === "view2") drawBox(roi2Box, "yellow");
-
-      if (roi.active){
-        const x = Math.min(roi.x0, roi.x1);
-        const y = Math.min(roi.y0, roi.y1);
-        const w = Math.abs(roi.x1 - roi.x0);
-        const h = Math.abs(roi.y1 - roi.y0);
-        drawBox({x,y,w,h}, "lime");
-      }
-
-      if (displayMode === "view1"){
-        drawLabeledPoints(manualPtsV1, "#00ff66");
-        drawClosedQuadIf4(manualPtsV1, "#00ff66", (objTypeSel.value === "phone" || objTypeSel.value === "box"));
-        drawLabeledSegments(manualPtsV1, "#00ff66", !(objTypeSel.value === "phone" || objTypeSel.value === "box"));
-
-        drawLabeledPoints(refScalePts, "#00e5ff");
-        drawLabeledSegments(refScalePts, "#00e5ff", true);
-
-        drawLabeledPoints(refObjPts, "#ff66ff");
-        drawClosedQuadIf4(refObjPts, "#ff66ff", (objTypeSel.value === "phone" || objTypeSel.value === "box"));
-        drawLabeledSegments(refObjPts, "#ff66ff", !(objTypeSel.value === "phone" || objTypeSel.value === "box"));
-      }
-
-      if (displayMode === "view2"){
-        drawLabeledPoints(manualPtsV2, "#ff9500");
-        drawClosedQuadIf4(manualPtsV2, "#ff9500", (objTypeSel.value === "phone" || objTypeSel.value === "box"));
-        drawLabeledSegments(manualPtsV2, "#ff9500", !(objTypeSel.value === "phone" || objTypeSel.value === "box"));
-      }
-
-      requestAnimationFrame(drawLoop);
-    }
-
-    function drawBox(b, color){
-      ctx.save();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 4;
-      ctx.strokeRect(b.x, b.y, b.w, b.h);
-      ctx.restore();
-    }
-
-    function drawLabeledPoints(arr, color){
-      ctx.save();
-      ctx.fillStyle = color;
-      ctx.strokeStyle = "#000";
-      ctx.lineWidth = 2;
-      ctx.font = "16px system-ui, sans-serif";
-      for (let i=0; i<arr.length; i++){
-        const p = arr[i];
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 6, 0, 2*Math.PI);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillText(String(i+1), p.x + 8, p.y - 8);
-      }
-      ctx.restore();
-    }
-
-    function drawLabeledSegments(arr, color, enabled=true){
-      if (!enabled) return;
-      if (arr.length < 2) return;
-      ctx.save();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      for (let i=0; i+1<arr.length; i+=2){
-        const p1 = arr[i], p2 = arr[i+1];
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    function drawClosedQuadIf4(arr, color, enabled=true){
-      if (!enabled) return;
-      if (arr.length < 2) return;
-      ctx.save();
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
-      for (let i=0; i+1<arr.length; i++){
-        ctx.beginPath();
-        ctx.moveTo(arr[i].x, arr[i].y);
-        ctx.lineTo(arr[i+1].x, arr[i+1].y);
-        ctx.stroke();
-      }
-      if (arr.length === 4){
-        ctx.beginPath();
-        ctx.moveTo(arr[3].x, arr[3].y);
-        ctx.lineTo(arr[0].x, arr[0].y);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    function matToImageDataRGBA(matIn){
-      let rgba = new cv.Mat();
-      try{
-        if (matIn.type() === cv.CV_8UC4){
-          matIn.copyTo(rgba);
-        } else if (matIn.type() === cv.CV_8UC3){
-          cv.cvtColor(matIn, rgba, cv.COLOR_RGB2RGBA);
-        } else {
-          cv.cvtColor(matIn, rgba, cv.COLOR_GRAY2RGBA);
-        }
-        const buf = new Uint8ClampedArray(rgba.data);
-        return new ImageData(buf, rgba.cols, rgba.rows);
-      } finally {
-        rgba.delete();
-      }
-    }
-
-    function grabFramePack(){
-      const srcRGBA = cv.imread(rawCanvas);
-      let procRGBA = new cv.Mat();
-      let gray = new cv.Mat();
-
-      try{
-        if (undToggle.checked && Kcv && DISTcv && typeof cv.undistort === "function"){
-          cv.undistort(srcRGBA, procRGBA, Kcv, DISTcv);
-        } else {
-          srcRGBA.copyTo(procRGBA);
-        }
-
-        cv.cvtColor(procRGBA, gray, cv.COLOR_RGBA2GRAY);
-        const imageData = matToImageDataRGBA(procRGBA);
-
-        return {
-          gray: gray.clone(),
-          rgba: procRGBA.clone(),
-          imageData
-        };
-      } finally {
-        srcRGBA.delete();
-        procRGBA.delete();
-        gray.delete();
-      }
-    }
-
-    /********************************************************************
-     * SENSORS
-     ********************************************************************/
-    async function toggleSensors(){
-      if (sensorsEnabled){
-        sensorsEnabled = false;
-        window.removeEventListener("deviceorientation", onOrientation);
-        window.removeEventListener("devicemotion", onMotion);
-        imuGateEl.textContent = "Sensors off";
-        imuGateEl.className = "warn";
-        if (stage === "v1" && !strictImuToggle.checked) cap2Btn.disabled = false;
-        return;
-      }
-
-      try{
-        if (typeof DeviceOrientationEvent !== "undefined" &&
-            typeof DeviceOrientationEvent.requestPermission === "function"){
-          const p = await DeviceOrientationEvent.requestPermission();
-          if (p !== "granted") throw new Error("Orientation denied");
-        }
-
-        if (typeof DeviceMotionEvent !== "undefined" &&
-            typeof DeviceMotionEvent.requestPermission === "function"){
-          const p2 = await DeviceMotionEvent.requestPermission();
-          if (p2 !== "granted") throw new Error("Motion denied");
-        }
-
-        sensorsEnabled = true;
-        window.addEventListener("deviceorientation", onOrientation);
-        window.addEventListener("devicemotion", onMotion);
-        imuGateEl.textContent = "Sensors on";
-        imuGateEl.className = "ok";
-        setOut("Sensors enabled.", false);
-      }catch(e){
-        sensorsEnabled = false;
-        imuGateEl.textContent = "Sensor permission denied";
-        imuGateEl.className = "warn";
-        setOut("Sensor permission denied.", true);
-        logLine("[sensors] " + e);
-      }
-    }
-
-    function angleDiffDeg(a,b){
-      let d = a - b;
-      while (d > 180) d -= 360;
-      while (d < -180) d += 360;
-      return d;
-    }
-
-    function onOrientation(e){
-      imuNow.yaw = (e.alpha ?? 0);
-      imuNow.pitch = (e.beta ?? 0);
-      imuNow.roll = (e.gamma ?? 0);
-
-      if (!imuAtV1) return;
-
-      const dy = angleDiffDeg(imuNow.yaw, imuAtV1.yaw);
-      const dp = angleDiffDeg(imuNow.pitch, imuAtV1.pitch);
-      const dr = angleDiffDeg(imuNow.roll, imuAtV1.roll);
-
-      dyawEl.textContent = dy.toFixed(1);
-      dpitchEl.textContent = dp.toFixed(1);
-      drollEl.textContent = dr.toFixed(1);
-
-      const ok = (Math.abs(dy) < ROT_THRESH_DEG.yaw &&
-                  Math.abs(dp) < ROT_THRESH_DEG.pitch &&
-                  Math.abs(dr) < ROT_THRESH_DEG.roll);
-
-      imuGateEl.textContent = ok ? "Rotation small ✅" : "Rotation high";
-      imuGateEl.className = ok ? "ok" : "warn";
-
-      if (stage === "v1" && sensorsEnabled && strictImuToggle.checked){
-        cap2Btn.disabled = !ok;
-      }
-    }
-
-    function onMotion(e){
-      const rr = e.rotationRate || {};
-      const ax = e.acceleration?.x ?? 0;
-      const ay = e.acceleration?.y ?? 0;
-      const az = e.acceleration?.z ?? 0;
-
-      const rotMag = Math.hypot(rr.alpha ?? 0, rr.beta ?? 0, rr.gamma ?? 0);
-      const accMag = Math.hypot(ax, ay, az);
-
-      motionNow.rotRate = rotMag;
-      motionNow.accMag = accMag;
-      motionNow.interval = e.interval ?? 0;
-
-      rotRateEl.textContent = rotMag.toFixed(1);
-      accMagEl.textContent = accMag.toFixed(2);
-    }
-
-    /********************************************************************
-     * CAPTURE
-     ********************************************************************/
-    function captureView1(){
-      if (!streaming) return;
-
-      cleanupFrames();
-      clearMeasurementState();
-
-      drawCurrentFrameToRaw();
-      const cap = grabFramePack();
-
-      gray1 = cap.gray;
-      rgba1 = cap.rgba;
-      frame1ImageData = cap.imageData;
-      imuAtV1 = sensorsEnabled ? { ...imuNow } : null;
-
-      dyawEl.textContent = "0";
-      dpitchEl.textContent = "0";
-      drollEl.textContent = "0";
-
-      setStage("v1");
-      setDisplayMode("view1");
-      cap2Btn.disabled = sensorsEnabled && strictImuToggle.checked;
-
-      logLine("=== CAPTURE 1 ===");
-      logLine(`undistort=${undToggle.checked}`);
-      logLine(`gray1=${gray1.rows}x${gray1.cols}`);
-      logLine(`baseline cm=${document.getElementById("baselineCm").value}`);
-      if (sensorsEnabled){
-        logLine(`capture1 rotRate=${motionNow.rotRate.toFixed(2)} deg/s acc=${motionNow.accMag.toFixed(3)} m/s^2`);
-      }
-
-      setOut("Captured View 1 ✅ Move to preset B, then Capture 2.", false);
-
-      if (!sensorsEnabled || !strictImuToggle.checked){
-        cap2Btn.disabled = false;
-      }
-      updateCanvasTouchAction();
-    }
-
-    function captureView2(){
-      if (!streaming || !gray1) return;
-
-      drawCurrentFrameToRaw();
-      const cap = grabFramePack();
-
-      gray2 = cap.gray;
-      rgba2 = cap.rgba;
-      frame2ImageData = cap.imageData;
-
-      setDisplayMode("view2");
-
-      logLine("=== CAPTURE 2 ===");
-      logLine(`gray2=${gray2.rows}x${gray2.cols}`);
-      if (sensorsEnabled){
-        logLine(`capture2 rotRate=${motionNow.rotRate.toFixed(2)} deg/s acc=${motionNow.accMag.toFixed(3)} m/s^2`);
-      }
-
-      const mode = modeSel.value;
-
-      if (mode === "reference_manual"){
-        poseReady = false;
-        pendingMeasureMode = null;
-        computeBtn.disabled = true;
-        setStage("ref_roi");
-        setDisplayMode("view1");
-        roiState = "await1";
-        setOut("Mode C ✅ Draw ROI around the fixed reference card in View 1.", false);
-        cap2Btn.disabled = true;
-        updateCanvasTouchAction();
-        return;
-      }
-
-      const res = computePose_Epipolar_JS();
-      if (!res.ok){
-        logLine("POSE FAIL: " + res.reason);
-        setOut("Pose failed: " + res.reason, true);
-        setStage("v1");
-        cap2Btn.disabled = false;
-        updateCanvasTouchAction();
-        return;
-      }
-
-      R = res.R;
-      t = res.t_scaled;
-      poseReady = true;
-      setStage("ready");
-
-      logLine(`POSE OK ✅ inliers=${res.inliers} / ${res.total}`);
-
-      roiState = "await1";
-      setDisplayMode("view1");
-      cap2Btn.disabled = true;
-      computeBtn.disabled = true;
-      pendingMeasureMode = null;
-
-      if (mode === "epipolar_auto"){
-        setStage("roi1_auto");
-        setOut("Mode A ✅ Draw ROI around the object in View 1.", false);
-      } else {
-        setStage("roi1_manual");
-        setOut("Mode B ✅ Draw ROI around the object in View 1.", false);
-      }
-      updateCanvasTouchAction();
-    }
-
-    /********************************************************************
-     * ROI + POINT EVENTS
-     ********************************************************************/
-    canvas.addEventListener("mousedown", onDown);
-    canvas.addEventListener("mousemove", onMove);
-    canvas.addEventListener("mouseup", onUp);
-
-    canvas.addEventListener("touchstart", onDown, { passive:false });
-    canvas.addEventListener("touchmove", onMove, { passive:false });
-    canvas.addEventListener("touchend", onUp, { passive:false });
-
-    canvas.addEventListener("click", onCanvasClick);
-    canvas.addEventListener("touchend", onCanvasTap, { passive:false });
-
-    function canvasPointFromEvent(e){
-      const rect = canvas.getBoundingClientRect();
-      const t0 = e.touches ? e.touches[0] : null;
-      const changed = e.changedTouches ? e.changedTouches[0] : null;
-      const src = t0 || changed || e;
-      const cx = src.clientX;
-      const cy = src.clientY;
-      return {
-        x: (cx - rect.left) * (canvas.width / rect.width),
-        y: (cy - rect.top) * (canvas.height / rect.height)
-      };
-    }
-
-    function onDown(e){
-      if (roiState !== "await1" && roiState !== "await2") return;
-      e.preventDefault();
-      const p = canvasPointFromEvent(e);
-      roi.active = true;
-      roi.x0 = roi.x1 = p.x;
-      roi.y0 = roi.y1 = p.y;
-      updateCanvasTouchAction();
-    }
-
-    function onMove(e){
-      if (!roi.active) return;
-      e.preventDefault();
-      const p = canvasPointFromEvent(e);
-      roi.x1 = p.x;
-      roi.y1 = p.y;
-    }
-
-    function onUp(e){
-      if (!roi.active) return;
-      e.preventDefault();
-
-      roi.active = false;
-      updateCanvasTouchAction();
-
-      const x = Math.min(roi.x0, roi.x1);
-      const y = Math.min(roi.y0, roi.y1);
-      const w = Math.abs(roi.x1 - roi.x0);
-      const h = Math.abs(roi.y1 - roi.y0);
-
-      if (w < 12 || h < 12) return;
-
-      const mode = modeSel.value;
-
-      if (mode === "reference_manual"){
-        if (roiState === "await1"){
-          refRoiBox = { x,y,w,h };
-          logLine(`[REF ROI] x=${x.toFixed(1)} y=${y.toFixed(1)} w=${w.toFixed(1)} h=${h.toFixed(1)}`);
-          roiState = "await2";
-          setStage("ref_obj_roi");
-          setOut("Reference ROI saved ✅ Now draw ROI around the object in View 1.", false);
-          updateCanvasTouchAction();
-          return;
-        }
-
-        if (roiState === "await2"){
-          roi1Box = { x,y,w,h };
-          logLine(`[OBJ ROI] x=${x.toFixed(1)} y=${y.toFixed(1)} w=${w.toFixed(1)} h=${h.toFixed(1)}`);
-          roiState = "none";
-          pointState = "ref_scale";
-          computeBtn.disabled = true;
-          pendingMeasureMode = null;
-          setStage("ref_scale_pts");
-          setDisplayMode("view1");
-          setOut(instructionReferenceScale(), false);
-          updateCanvasTouchAction();
-          return;
-        }
-      }
-
-      if (roiState === "await1"){
-        roi1Box = { x,y,w,h };
-        logLine(`[ROI1] x=${x.toFixed(1)} y=${y.toFixed(1)} w=${w.toFixed(1)} h=${h.toFixed(1)}`);
-        roiState = "await2";
-        setStage("roi2");
-        setDisplayMode("view2");
-        setOut("ROI 1 saved ✅ Now draw ROI around the object in View 2.", false);
-        updateCanvasTouchAction();
-        return;
-      }
-
-      if (roiState === "await2"){
-        roi2Box = { x,y,w,h };
-        logLine(`[ROI2] x=${x.toFixed(1)} y=${y.toFixed(1)} w=${w.toFixed(1)} h=${h.toFixed(1)}`);
-        roiState = "none";
-
-        if (mode === "epipolar_auto"){
-          try{
-            const res = measureWithTwoROIs();
-            if (!res.ok){
-              setOut(res.msg, true);
-              logLine(`[AUTO] failed: ${res.msg}`);
-              updateCanvasTouchAction();
-              return;
-            }
-            setStage("measured");
-            setOut(`FINAL: ${res.measuredText}`, false);
-            logResult(res);
-            updateCanvasTouchAction();
-            return;
-          }catch(err){
-            logLine(`[AUTO] exception: ${err?.message || err}`);
-            setOut(`Mode A error: ${err?.message || err}`, true);
-            updateCanvasTouchAction();
-            return;
-          }
-        }
-
-        pointState = "epi_v1";
-        computeBtn.disabled = true;
-        pendingMeasureMode = null;
-        setStage("manual_v1");
-        setDisplayMode("view1");
-        setOut(instructionManualView1(), false);
-        updateCanvasTouchAction();
-      }
-    }
-
-    function onCanvasClick(e){
-      if (pointState === "none") return;
-      if (roi.active) return;
-      if (Date.now() - lastTouchStamp < 500) return;
-      e.preventDefault();
-      addMark(canvasPointFromEvent(e));
-    }
-
-    function onCanvasTap(e){
-      if (pointState === "none") return;
-      if (roi.active) return;
-      lastTouchStamp = Date.now();
-      e.preventDefault();
-      addMark(canvasPointFromEvent(e));
-    }
-
-    function addMark(pRaw){
-      const p = refineToggle.checked ? refinePointForCurrentStage(pRaw) : pRaw;
-      const nReq = requiredPointsForObject(objTypeSel.value);
-
-      if (pointState === "epi_v1"){
-        manualPtsV1.push(p);
-        logLine(`[V1 MARK ${manualPtsV1.length}] raw=(${pRaw.x.toFixed(1)},${pRaw.y.toFixed(1)}) final=(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
-        if (manualPtsV1.length >= nReq){
-          pointState = "epi_v2";
-          setStage("manual_v2");
-          setDisplayMode("view2");
-          setOut(instructionManualView2(), false);
-        }
-        return;
-      }
-
-      if (pointState === "epi_v2"){
-        manualPtsV2.push(p);
-        logLine(`[V2 MARK ${manualPtsV2.length}] raw=(${pRaw.x.toFixed(1)},${pRaw.y.toFixed(1)}) final=(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
-        if (manualPtsV2.length >= nReq){
-          pointState = "manual_review";
-          pendingMeasureMode = "epipolar_manual";
-          computeBtn.disabled = false;
-          setStage("manual_review");
-          setDisplayMode("view2");
-          setOut("All manual points placed. Use Clear last mark if needed, then press Compute.", false);
-        }
-        return;
-      }
-
-      if (pointState === "ref_scale"){
-        refScalePts.push(p);
-        logLine(`[REF MARK ${refScalePts.length}] raw=(${pRaw.x.toFixed(1)},${pRaw.y.toFixed(1)}) final=(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
-        if (refScalePts.length >= 4){
-          pointState = "ref_obj";
-          setStage("ref_obj_pts");
-          setDisplayMode("view1");
-          setOut(instructionReferenceObject(), false);
-        }
-        return;
-      }
-
-      if (pointState === "ref_obj"){
-        refObjPts.push(p);
-        logLine(`[OBJ MARK ${refObjPts.length}] raw=(${pRaw.x.toFixed(1)},${pRaw.y.toFixed(1)}) final=(${p.x.toFixed(1)},${p.y.toFixed(1)})`);
-        if (refObjPts.length >= nReq){
-          pointState = "ref_review";
-          pendingMeasureMode = "reference_manual";
-          computeBtn.disabled = false;
-          setStage("ref_review");
-          setDisplayMode("view1");
-          setOut("All reference/object points placed. Use Clear last mark if needed, then press Compute.", false);
-        }
-      }
-    }
-
-    /********************************************************************
-     * CLICK REFINEMENT
-     ********************************************************************/
-    function getRefineRadiusPx(){
-      const v = parseFloat(refineRadiusPxEl.value);
-      return clamp(Math.round(isFinite(v) ? v : 18), 4, 60);
-    }
-
-    function currentFrameGrayForPointState(){
-      if (pointState === "epi_v1" || pointState === "ref_scale" || pointState === "ref_obj" || pointState === "ref_review"){
-        return gray1;
-      }
-      if (pointState === "epi_v2" || pointState === "manual_review"){
-        return gray2;
-      }
-      return null;
-    }
-
-    function currentROIForPointState(){
-      if (pointState === "epi_v1") return roi1Box;
-      if (pointState === "epi_v2") return roi2Box;
-      if (pointState === "ref_scale") return refRoiBox;
-      if (pointState === "ref_obj" || pointState === "ref_review") return roi1Box;
-      return null;
-    }
-
-    function refinePointForCurrentStage(p){
-      try{
-        const gray = currentFrameGrayForPointState();
-        if (!gray) return p;
-
-        const roiBox = currentROIForPointState();
-        const type = objTypeSel.value;
-        const rad = getRefineRadiusPx();
-
-        const pref = preferredRefineModeForState(type, pointState);
-        const pRef = refinePointSmart(gray, p, roiBox, rad, pref);
-
-        const moved = Math.hypot(pRef.x - p.x, pRef.y - p.y);
-        if (moved > 0.5){
-          logLine(`[REFINE] ${pref} moved ${moved.toFixed(1)} px`);
-        } else {
-          logLine(`[REFINE] ${pref} kept original click`);
-        }
-        return pRef;
-      }catch(err){
-        logLine(`[REFINE] failed: ${err?.message || err}`);
-        return p;
-      }
-    }
-
-    function preferredRefineModeForState(type, state){
-      if (type === "ball") return "circle_edge";
-      if (type === "spoon") return "edge";
-      if (state === "ref_scale") return "corner_or_edge";
-      return "corner_or_edge";
-    }
-
-    function refinePointSmart(gray, p, roiBox, radius, pref){
-      const candidates = [];
-
-      if (pref === "circle_edge"){
-        const c1 = refinePointByEdge(gray, p, roiBox, radius, {preferRadial:true});
-        if (c1) candidates.push({pt:c1, score:c1.score, label:"circle-edge"});
-        const c2 = refinePointByCorner(gray, p, roiBox, radius);
-        if (c2) candidates.push({pt:c2, score:0.75*c2.score, label:"corner-fallback"});
-      } else if (pref === "edge"){
-        const c1 = refinePointByEdge(gray, p, roiBox, radius, {preferRadial:false});
-        if (c1) candidates.push({pt:c1, score:c1.score, label:"edge"});
-        const c2 = refinePointByCorner(gray, p, roiBox, radius);
-        if (c2) candidates.push({pt:c2, score:0.8*c2.score, label:"corner-fallback"});
-      } else {
-        const c1 = refinePointByCorner(gray, p, roiBox, radius);
-        if (c1) candidates.push({pt:c1, score:c1.score, label:"corner"});
-        const c2 = refinePointByEdge(gray, p, roiBox, radius, {preferRadial:false});
-        if (c2) candidates.push({pt:c2, score:0.85*c2.score, label:"edge-fallback"});
-      }
-
-      if (candidates.length === 0) return p;
-
-      candidates.sort((a,b)=>b.score-a.score);
-      const best = candidates[0];
-      logLine(`[REFINE] chose ${best.label}`);
-      return { x: best.pt.x, y: best.pt.y };
-    }
-
-    function refinePointByCorner(gray, p, roiBox, radius){
-      if (typeof cv.goodFeaturesToTrack !== "function") return null;
-
-      let patch = null, corners = null, mask = null;
-      try{
-        const W = gray.cols, H = gray.rows;
-        const x0 = clamp(Math.round(p.x - radius), 0, W-1);
-        const y0 = clamp(Math.round(p.y - radius), 0, H-1);
-        const x1 = clamp(Math.round(p.x + radius), 0, W-1);
-        const y1 = clamp(Math.round(p.y + radius), 0, H-1);
-        const w = x1 - x0 + 1;
-        const h = y1 - y0 + 1;
-        if (w < 5 || h < 5) return null;
-
-        patch = gray.roi(new cv.Rect(x0, y0, w, h));
-        mask = buildLocalMaskForROI(w, h, x0, y0, roiBox);
-
-        corners = new cv.Mat();
-        cv.goodFeaturesToTrack(patch, corners, 20, 0.01, 3, mask);
-
-        if (corners.rows < 1) return null;
-
-        let best = null;
-        for (let i=0; i<corners.rows; i++){
-          const cx = x0 + corners.data32F[i*2];
-          const cy = y0 + corners.data32F[i*2+1];
-          const d = Math.hypot(cx - p.x, cy - p.y);
-          const score = 1.0 / (1.0 + d);
-          if (!best || score > best.score){
-            best = { x: cx, y: cy, score };
-          }
-        }
-        return best;
-      } finally {
-        if (patch) patch.delete();
-        if (corners) corners.delete();
-        if (mask) mask.delete();
-      }
-    }
-
-    function refinePointByEdge(gray, p, roiBox, radius, opts={}){
-      if (typeof cv.Canny !== "function") return null;
-
-      let patch = null, blur = null, edges = null, mask = null;
-      try{
-        const W = gray.cols, H = gray.rows;
-        const x0 = clamp(Math.round(p.x - radius), 0, W-1);
-        const y0 = clamp(Math.round(p.y - radius), 0, H-1);
-        const x1 = clamp(Math.round(p.x + radius), 0, W-1);
-        const y1 = clamp(Math.round(p.y + radius), 0, H-1);
-        const w = x1 - x0 + 1;
-        const h = y1 - y0 + 1;
-        if (w < 5 || h < 5) return null;
-
-        patch = gray.roi(new cv.Rect(x0, y0, w, h));
-        blur = new cv.Mat();
-        edges = new cv.Mat();
-        cv.GaussianBlur(patch, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
-        cv.Canny(blur, edges, 40, 120);
-
-        mask = buildLocalMaskForROI(w, h, x0, y0, roiBox);
-
-        const cx0 = x0 + 0.5*(w-1);
-        const cy0 = y0 + 0.5*(h-1);
-
-        let best = null;
-        for (let yy=0; yy<h; yy++){
-          for (let xx=0; xx<w; xx++){
-            if (mask && mask.ucharPtr(yy,xx)[0] === 0) continue;
-            if (edges.ucharPtr(yy,xx)[0] === 0) continue;
-
-            const gx = x0 + xx;
-            const gy = y0 + yy;
-            const d = Math.hypot(gx - p.x, gy - p.y);
-
-            let score = 1.0 / (1.0 + d);
-
-            if (opts.preferRadial){
-              const vgClick = normalize2({x: p.x - cx0, y: p.y - cy0});
-              const vgEdge  = normalize2({x: gx - cx0, y: gy - cy0});
-              const align = Math.max(0, vgClick.x*vgEdge.x + vgClick.y*vgEdge.y);
-              score *= (1.0 + 0.75*align);
-            }
-
-            if (!best || score > best.score){
-              best = { x: gx, y: gy, score };
-            }
-          }
-        }
-        return best;
-      } finally {
-        if (patch) patch.delete();
-        if (blur) blur.delete();
-        if (edges) edges.delete();
-        if (mask) mask.delete();
-      }
-    }
-
-    function buildLocalMaskForROI(w, h, x0, y0, roiBox){
-      if (!roiBox){
-        const full = new cv.Mat(h, w, cv.CV_8U);
-        full.setTo(new cv.Scalar(255));
-        return full;
-      }
-
-      const m = new cv.Mat(h, w, cv.CV_8U);
-      m.setTo(new cv.Scalar(0));
-
-      const rx0 = roiBox.x;
-      const ry0 = roiBox.y;
-      const rx1 = roiBox.x + roiBox.w;
-      const ry1 = roiBox.y + roiBox.h;
-
-      for (let yy=0; yy<h; yy++){
-        for (let xx=0; xx<w; xx++){
-          const gx = x0 + xx;
-          const gy = y0 + yy;
-          if (gx >= rx0 && gx <= rx1 && gy >= ry0 && gy <= ry1){
-            m.ucharPtr(yy,xx)[0] = 255;
-          }
-        }
-      }
-      return m;
-    }
-
-    /********************************************************************
-     * CLEAR HELPERS
-     ********************************************************************/
-    function clearROIs(){
-      roi1Box = null;
-      roi2Box = null;
-      refRoiBox = null;
-      pendingMeasureMode = null;
-      computeBtn.disabled = true;
-
-      if (modeSel.value === "reference_manual"){
-        if (streaming && frame1ImageData){
-          setDisplayMode("view1");
-          roiState = "await1";
-          pointState = "none";
-          refScalePts = [];
-          refObjPts = [];
-          setOut("Reference ROIs cleared. Draw the reference ROI again.", false);
-        }
-      } else {
-        if (streaming && frame1ImageData){
-          setDisplayMode("view1");
-          roiState = "await1";
-          pointState = "none";
-          manualPtsV1 = [];
-          manualPtsV2 = [];
-          setOut("Object ROIs cleared. Draw ROI in View 1 again.", false);
-        }
-      }
-      logLine("[clear] ROIs cleared");
-      updateCanvasTouchAction();
-    }
-
-    function clearLastMark(){
-      if (pointState === "epi_v1" || (pointState === "none" && manualPtsV2.length === 0 && manualPtsV1.length > 0)){
-        if (manualPtsV1.length > 0){
-          manualPtsV1.pop();
-          setDisplayMode("view1");
-          logLine("[clear] removed last View 1 mark");
-        }
-        return;
-      }
-
-      if (pointState === "epi_v2" || pointState === "manual_review" || (pointState === "none" && manualPtsV2.length > 0)){
-        if (manualPtsV2.length > 0){
-          manualPtsV2.pop();
-          pendingMeasureMode = null;
-          computeBtn.disabled = true;
-          pointState = "epi_v2";
-          setStage("manual_v2");
-          setDisplayMode("view2");
-          setOut(instructionManualView2(), false);
-          logLine("[clear] removed last View 2 mark");
-        }
-        return;
-      }
-
-      if (pointState === "ref_scale" || (pointState === "none" && refObjPts.length === 0 && refScalePts.length > 0)){
-        if (refScalePts.length > 0){
-          refScalePts.pop();
-          setDisplayMode("view1");
-          logLine("[clear] removed last reference-scale mark");
-        }
-        return;
-      }
-
-      if (pointState === "ref_obj" || pointState === "ref_review" || (pointState === "none" && refObjPts.length > 0)){
-        if (refObjPts.length > 0){
-          refObjPts.pop();
-          pendingMeasureMode = null;
-          computeBtn.disabled = true;
-          pointState = "ref_obj";
-          setStage("ref_obj_pts");
-          setDisplayMode("view1");
-          setOut(instructionReferenceObject(), false);
-          logLine("[clear] removed last reference-object mark");
-        }
-      }
-    }
-
-    function clearAllMarks(){
-      manualPtsV1 = [];
-      manualPtsV2 = [];
-      refScalePts = [];
-      refObjPts = [];
-      pendingMeasureMode = null;
-      computeBtn.disabled = true;
-      logLine("[clear] all marks cleared");
-
-      if (pointState === "epi_v2" || pointState === "manual_review"){
-        pointState = "epi_v2";
-        setDisplayMode("view2");
-        setOut(instructionManualView2(), false);
-      } else if (pointState === "epi_v1"){
-        setDisplayMode("view1");
-        setOut(instructionManualView1(), false);
-      } else if (pointState === "ref_scale"){
-        setDisplayMode("view1");
-        setOut(instructionReferenceScale(), false);
-      } else if (pointState === "ref_obj" || pointState === "ref_review"){
-        pointState = "ref_obj";
-        setDisplayMode("view1");
-        setOut(instructionReferenceObject(), false);
-      }
-    }
-
-    function finalizePendingMeasurement(){
-      if (!pendingMeasureMode){
-        setOut("Nothing pending to compute.", true);
-        return;
-      }
-
-      computeBtn.disabled = true;
-
-      if (pendingMeasureMode === "epipolar_manual"){
-        const res = measureManualEpipolar();
-        if (!res.ok){
-          setOut(res.msg, true);
-          computeBtn.disabled = false;
-          return;
-        }
-        pendingMeasureMode = null;
-        pointState = "none";
-        setStage("measured_manual");
-        setOut(`FINAL: ${res.measuredText}`, false);
-        logResult(res);
-        updateCanvasTouchAction();
-        return;
-      }
-
-      if (pendingMeasureMode === "reference_manual"){
-        const res = measureReferenceManual();
-        if (!res.ok){
-          setOut(res.msg, true);
-          computeBtn.disabled = false;
-          return;
-        }
-        pendingMeasureMode = null;
-        pointState = "none";
-        setStage("measured_ref");
-        setOut(`FINAL: ${res.measuredText}`, false);
-        logResult(res);
-        updateCanvasTouchAction();
-        return;
-      }
-    }
-
-    /********************************************************************
-     * OBJECT EXTRACTION + RECTANGLE HELPERS
-     ********************************************************************/
-    function measureWithTwoROIs(){
-      if (!poseReady || !gray1 || !gray2 || !rgba1 || !rgba2 || !roi1Box || !roi2Box){
-        return { ok:false, msg:"Need pose + two ROIs first." };
-      }
-
-      const type = objTypeSel.value;
-
-      if (type === "phone" || type === "box"){
-        const q1 = detectRectangleCornersInROI(rgba1, roi1Box, "view1");
-        if (!q1.ok) return { ok:false, msg:`view1 rectangle detection failed: ${q1.msg}` };
-
-        const q2 = detectRectangleCornersInROI(rgba2, roi2Box, "view2");
-        if (!q2.ok) return { ok:false, msg:`view2 rectangle detection failed: ${q2.msg}` };
-
-        logLine(`[AUTO RECT] q1=${quadToText(q1.corners)}`);
-        logLine(`[AUTO RECT] q2=${quadToText(q2.corners)}`);
-
-        return measureRectangularFaceEpipolar(q1.corners, q2.corners, type, "epipolar_auto");
-      }
-
-      const obj1 = extractObjectFromROI(rgba1, roi1Box, "view1");
-      if (!obj1.ok) return obj1;
-
-      const obj2 = extractObjectFromROI(rgba2, roi2Box, "view2");
-      if (!obj2.ok) return obj2;
-
-      logLine(
-        `[OBJ1] area=${obj1.area.toFixed(1)} per=${obj1.perimeter.toFixed(1)} ` +
-        `circ=${obj1.circularity.toFixed(3)} aspect=${obj1.aspect.toFixed(3)} solid=${obj1.solidity.toFixed(3)}`
-      );
-      logLine(
-        `[OBJ2] area=${obj2.area.toFixed(1)} per=${obj2.perimeter.toFixed(1)} ` +
-        `circ=${obj2.circularity.toFixed(3)} aspect=${obj2.aspect.toFixed(3)} solid=${obj2.solidity.toFixed(3)}`
-      );
-
-      return reconstructObjectCloud(obj1, obj2);
-    }
-
-    function meanStd1C(mat1c){
-      const mean = new cv.Mat();
-      const std = new cv.Mat();
-      try{
-        cv.meanStdDev(mat1c, mean, std);
-        return {
-          mean: mean.data64F ? mean.data64F[0] : 0,
-          std: std.data64F ? std.data64F[0] : 0
-        };
-      } finally {
-        mean.delete();
-        std.delete();
-      }
-    }
-
-    function morphCleanBinary(mask){
-      const kOpen = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3,3));
-      const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(7,7));
-      cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kOpen);
-      cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kClose);
-      kOpen.delete();
-      kClose.delete();
-    }
-
-    function thresholdCandidate(src1c, invert=false){
-      const blur = new cv.Mat();
-      const bw = new cv.Mat();
-      cv.GaussianBlur(src1c, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
-      cv.threshold(
-        blur,
-        bw,
-        0,
-        255,
-        (invert ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY) + cv.THRESH_OTSU
-      );
-      morphCleanBinary(bw);
-      blur.delete();
-      return bw;
-    }
-
-    function pickBestContourFromMask(mask, roiCtrUp){
-      const contours = new cv.MatVector();
-      const hierarchy = new cv.Mat();
-
-      try{
-        cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
-        if (contours.size() === 0) return null;
-
-        let bestIdx = -1;
-        let bestDesc = null;
-        let bestScore = -Infinity;
-
-        for (let i=0; i<contours.size(); i++){
-          const cnt = contours.get(i);
-          const desc = contourDescriptors(cnt);
-          const ctr = contourCentroid(cnt);
-
-          if (!ctr || desc.area < 100){
-            cnt.delete();
-            continue;
-          }
-
-          const score = contourScore(desc, ctr, roiCtrUp);
-          if (score > bestScore){
-            bestScore = score;
-            bestIdx = i;
-            bestDesc = {
-              area: desc.area,
-              perimeter: desc.perimeter,
-              circularity: desc.circularity,
-              aspect: desc.aspect,
-              solidity: desc.solidity
-            };
-          }
-          cnt.delete();
-        }
-
-        if (bestIdx < 0) return null;
-
-        const outMask = new cv.Mat(mask.rows, mask.cols, cv.CV_8U);
-        outMask.setTo(new cv.Scalar(0));
-        cv.drawContours(outMask, contours, bestIdx, new cv.Scalar(255), -1);
-
-        return {
-          mask: outMask,
-          desc: bestDesc,
-          score: bestScore
-        };
-      } finally {
-        contours.delete();
-        hierarchy.delete();
-      }
-    }
-
-    function extractObjectFromROI(frameRGBA, box, tag){
-      let roiRGBA = null;
-      let roiUp = null;
-      let rgb = null;
-      let gray = null;
-      let lab = null;
-      let hsv = null;
-      let labCh = null;
-      let hsvCh = null;
-      let edges = null;
-
-      try{
-        const rx = clamp(Math.round(box.x), 0, frameRGBA.cols - 1);
-        const ry = clamp(Math.round(box.y), 0, frameRGBA.rows - 1);
-        const rw = clamp(Math.round(box.w), 1, frameRGBA.cols - rx);
-        const rh = clamp(Math.round(box.h), 1, frameRGBA.rows - ry);
-
-        const roiCenter = { x: rx + 0.5*rw, y: ry + 0.5*rh };
-        if (!pointInSafeCenterRegion(roiCenter.x, roiCenter.y, frameRGBA.cols, frameRGBA.rows)){
-          logLine(`[${tag}] Warning: ROI center near image edge.`);
-        }
-
-        roiRGBA = frameRGBA.roi(new cv.Rect(rx, ry, rw, rh));
-
-        const UPS = 2;
-        roiUp = new cv.Mat();
-        cv.resize(roiRGBA, roiUp, new cv.Size(rw * UPS, rh * UPS), 0, 0, cv.INTER_LINEAR);
-
-        rgb = new cv.Mat();
-        gray = new cv.Mat();
-        lab = new cv.Mat();
-        hsv = new cv.Mat();
-
-        cv.cvtColor(roiUp, rgb, cv.COLOR_RGBA2RGB);
-        cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
-        cv.cvtColor(rgb, lab, cv.COLOR_RGB2Lab);
-        cv.cvtColor(rgb, hsv, cv.COLOR_RGB2HSV);
-
-        labCh = new cv.MatVector();
-        hsvCh = new cv.MatVector();
-        cv.split(lab, labCh);
-        cv.split(hsv, hsvCh);
-
-        const a = labCh.get(1);
-        const b = labCh.get(2);
-        const s = hsvCh.get(1);
-
-        const aStat = meanStd1C(a);
-        const bStat = meanStd1C(b);
-        const useA = aStat.std >= bStat.std;
-        const chroma = useA ? a : b;
-
-        logLine(`[${tag}] using ${useA ? "Lab-a" : "Lab-b"} for color segmentation`);
-
-        const cand1 = thresholdCandidate(chroma, false);
-        const cand2 = thresholdCandidate(chroma, true);
-        const cand3 = thresholdCandidate(gray, false);
-        const cand4 = thresholdCandidate(gray, true);
-        const cand5 = thresholdCandidate(s, false);
-
-        edges = new cv.Mat();
-        cv.Canny(gray, edges, 40, 120);
-        morphCleanBinary(edges);
-
-        const roiCtrUp = { x: 0.5 * roiUp.cols, y: 0.5 * roiUp.rows };
-        const candidates = [cand1, cand2, cand3, cand4, cand5, edges];
-
-        let best = null;
-        let bestIdx = -1;
-
-        for (let i=0; i<candidates.length; i++){
-          const pick = pickBestContourFromMask(candidates[i], roiCtrUp);
-          if (!pick) continue;
-
-          if (!best || pick.score > best.score){
-            if (best && best.mask) best.mask.delete();
-            best = pick;
-            bestIdx = i;
-          } else {
-            pick.mask.delete();
-          }
-        }
-
-        cand1.delete();
-        cand2.delete();
-        cand3.delete();
-        cand4.delete();
-        cand5.delete();
-
-        a.delete();
-        b.delete();
-        s.delete();
-
-        if (!best){
-          return { ok:false, msg:`${tag}: no confident contour. Tighten ROI.` };
-        }
-
-        logLine(`[${tag}] maskCandidate=${bestIdx}`);
-
-        const pca2 = contourPCAFromMask(best.mask);
-        if (!pca2.ok){
-          best.mask.delete();
-          return { ok:false, msg:`${tag}: contour PCA failed.` };
-        }
-
-        return {
-          ok:true,
-          area: best.desc.area,
-          perimeter: best.desc.perimeter,
-          circularity: best.desc.circularity,
-          aspect: best.desc.aspect,
-          solidity: best.desc.solidity,
-          rx, ry, rw, rh,
-          ups: UPS,
-          maskUp: best.mask.clone(),
-          blurUp: gray.clone(),
-          center: roiCenter,
-          majorSpanUp: pca2.majorSpan,
-          minorSpanUp: pca2.minorSpan
-        };
-
-      } finally {
-        if (roiRGBA) roiRGBA.delete();
-        if (roiUp) roiUp.delete();
-        if (rgb) rgb.delete();
-        if (gray) gray.delete();
-        if (lab) lab.delete();
-        if (hsv) hsv.delete();
-        if (labCh) labCh.delete();
-        if (hsvCh) hsvCh.delete();
-        if (edges) edges.delete();
-      }
-    }
-
-    function contourPCAFromMask(mask){
-      const pts = [];
-      for (let y=0; y<mask.rows; y++){
-        for (let x=0; x<mask.cols; x++){
-          if (mask.ucharPtr(y,x)[0] !== 0){
-            pts.push({x,y});
-          }
-        }
-      }
-      if (pts.length < 30) return { ok:false };
-
-      let mx=0, my=0;
-      for (const p of pts){ mx += p.x; my += p.y; }
-      mx /= pts.length;
-      my /= pts.length;
-
-      let c00=0, c01=0, c11=0;
-      for (const p of pts){
-        const dx = p.x - mx;
-        const dy = p.y - my;
-        c00 += dx*dx;
-        c01 += dx*dy;
-        c11 += dy*dy;
-      }
-      c00 /= pts.length;
-      c01 /= pts.length;
-      c11 /= pts.length;
-
-      const ev = jacobiEigenSym([[c00,c01],[c01,c11]]);
-      const order = [0,1].sort((a,b)=>ev.values[b]-ev.values[a]);
-      const vMajor = normalize2({ x: ev.vectors[0][order[0]], y: ev.vectors[1][order[0]] });
-      const vMinor = normalize2({ x: ev.vectors[0][order[1]], y: ev.vectors[1][order[1]] });
-
-      let majorMin=Infinity, majorMax=-Infinity;
-      let minorMin=Infinity, minorMax=-Infinity;
-      for (const p of pts){
-        const dx = p.x - mx;
-        const dy = p.y - my;
-        const a = dx*vMajor.x + dy*vMajor.y;
-        const b = dx*vMinor.x + dy*vMinor.y;
-        if (a < majorMin) majorMin = a;
-        if (a > majorMax) majorMax = a;
-        if (b < minorMin) minorMin = b;
-        if (b > minorMax) minorMax = b;
-      }
-
-      return {
-        ok:true,
-        majorSpan: majorMax - majorMin,
-        minorSpan: minorMax - minorMin
-      };
-    }
-
-    function detectRectangleCornersInROI(frameRGBA, box, tag){
-      let roiRGBA = null, rgb = null, gray = null, blur = null, edges = null;
-      let contours = null, hierarchy = null;
-
-      try{
-        const rx = clamp(Math.round(box.x), 0, frameRGBA.cols - 1);
-        const ry = clamp(Math.round(box.y), 0, frameRGBA.rows - 1);
-        const rw = clamp(Math.round(box.w), 1, frameRGBA.cols - rx);
-        const rh = clamp(Math.round(box.h), 1, frameRGBA.rows - ry);
-
-        roiRGBA = frameRGBA.roi(new cv.Rect(rx, ry, rw, rh));
-        rgb = new cv.Mat();
-        gray = new cv.Mat();
-        blur = new cv.Mat();
-        edges = new cv.Mat();
-
-        cv.cvtColor(roiRGBA, rgb, cv.COLOR_RGBA2RGB);
-        cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
-        cv.GaussianBlur(gray, blur, new cv.Size(5,5), 1.2, 1.2, cv.BORDER_DEFAULT);
-        cv.Canny(blur, edges, 40, 120);
-
-        const k = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3,3));
-        cv.morphologyEx(edges, edges, cv.MORPH_CLOSE, k);
-        k.delete();
-
-        contours = new cv.MatVector();
-        hierarchy = new cv.Mat();
-        cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-        if (contours.size() === 0){
-          return { ok:false, msg:"no contour found" };
-        }
-
-        let bestQuad = null;
-        let bestScore = -Infinity;
-
-        const roiCtr = { x: rw*0.5, y: rh*0.5 };
-
-        for (let i=0; i<contours.size(); i++){
-          const cnt = contours.get(i);
-          const area = Math.abs(cv.contourArea(cnt));
-          if (area < 150) { cnt.delete(); continue; }
-
-          const peri = cv.arcLength(cnt, true);
-          const approx = new cv.Mat();
-          cv.approxPolyDP(cnt, approx, 0.03*peri, true);
-
-          if (approx.rows === 4 && cv.isContourConvex(approx)){
-            const quad = [];
-            for (let r=0; r<4; r++){
-              quad.push({
-                x: approx.intPtr(r,0)[0],
-                y: approx.intPtr(r,0)[1]
-              });
-            }
-
-            const ordered = orderQuadTLTRBRBL(quad);
-            const qArea = polygonArea2D(ordered);
-            const ctr = polygonCentroid2D(ordered);
-            const d = Math.hypot(ctr.x - roiCtr.x, ctr.y - roiCtr.y);
-            const score = qArea - 2.0*d;
-
-            if (score > bestScore){
-              bestScore = score;
-              bestQuad = ordered.map(p => ({ x: p.x + rx, y: p.y + ry }));
-            }
-          }
-
-          approx.delete();
-          cnt.delete();
-        }
-
-        if (!bestQuad){
-          return { ok:false, msg:"no 4-corner rectangle found in ROI" };
-        }
-
-        return { ok:true, corners: bestQuad };
-
-      } finally {
-        if (roiRGBA) roiRGBA.delete();
-        if (rgb) rgb.delete();
-        if (gray) gray.delete();
-        if (blur) blur.delete();
-        if (edges) edges.delete();
-        if (contours) contours.delete();
-        if (hierarchy) hierarchy.delete();
-      }
-    }
-
-    function quadToText(q){
-      return q.map(p => `(${p.x.toFixed(1)},${p.y.toFixed(1)})`).join(" ");
-    }
-
-    function orderQuadTLTRBRBL(pts){
-      const c = polygonCentroid2D(pts);
-      const withA = pts.map(p => ({...p, a: Math.atan2(p.y - c.y, p.x - c.x)}));
-      withA.sort((a,b)=>a.a-b.a);
-
-      let best = withA.map(p => ({x:p.x,y:p.y}));
-
-      let topLeftIdx = 0;
-      let bestSum = Infinity;
-      for (let i=0; i<best.length; i++){
-        const s = best[i].x + best[i].y;
-        if (s < bestSum){
-          bestSum = s;
-          topLeftIdx = i;
-        }
-      }
-      best = rotateArray(best, topLeftIdx);
-
-      const area = signedPolygonArea2D(best);
-      if (area > 0){
-        best = [best[0], best[3], best[2], best[1]];
-      }
-
-      return best; // TL, TR, BR, BL
-    }
-
-    function rotateArray(arr, k){
-      return arr.slice(k).concat(arr.slice(0,k));
-    }
-
-    function polygonCentroid2D(pts){
-      let sx=0, sy=0;
-      for (const p of pts){ sx += p.x; sy += p.y; }
-      return { x: sx/pts.length, y: sy/pts.length };
-    }
-
-    function polygonArea2D(pts){
-      return Math.abs(signedPolygonArea2D(pts));
-    }
-
-    function signedPolygonArea2D(pts){
-      let a = 0;
-      for (let i=0; i<pts.length; i++){
-        const p = pts[i];
-        const q = pts[(i+1)%pts.length];
-        a += p.x*q.y - q.x*p.y;
-      }
-      return 0.5*a;
-    }
-
-    function averageOppositeEdges2D(quad){
-      const e01 = dist2(quad[0], quad[1]);
-      const e12 = dist2(quad[1], quad[2]);
-      const e23 = dist2(quad[2], quad[3]);
-      const e30 = dist2(quad[3], quad[0]);
-
-      const lenA = 0.5*(e01 + e23);
-      const lenB = 0.5*(e12 + e30);
-
-      const L = Math.max(lenA, lenB);
-      const W = Math.min(lenA, lenB);
-
-      return { L, W };
-    }
-
-    /********************************************************************
-     * MODE A: AUTO 3D MEASUREMENT
-     ********************************************************************/
-    function reconstructObjectCloud(obj1, obj2){
-      if (typeof cv.goodFeaturesToTrack !== "function") {
-        return { ok:false, msg:"goodFeaturesToTrack missing." };
-      }
-      if (typeof cv.calcOpticalFlowPyrLK !== "function") {
-        return { ok:false, msg:"LK optical flow missing." };
-      }
-
-      const p1local = new cv.Mat();
-      cv.goodFeaturesToTrack(obj1.blurUp, p1local, 350, 0.01, 6, obj1.maskUp);
-      logLine(`[TRACK] features in obj1=${p1local.rows}`);
-
-      if (p1local.rows < MIN_OBJ_FEATURES){
-        p1local.delete();
-        obj1.maskUp.delete();
-        obj1.blurUp.delete();
-        obj2.maskUp.delete();
-        obj2.blurUp.delete();
-        return { ok:false, msg:`Too few object features (${p1local.rows}). Improve lighting/texture or tighten ROI.` };
-      }
-
-      const p1full = new cv.Mat(p1local.rows, 1, cv.CV_32FC2);
-      for (let i=0; i<p1local.rows; i++){
-        const u = obj1.rx + p1local.data32F[i*2] / obj1.ups;
-        const v = obj1.ry + p1local.data32F[i*2 + 1] / obj1.ups;
-        p1full.data32F[i*2] = u;
-        p1full.data32F[i*2 + 1] = v;
-      }
-      p1local.delete();
-
-      const p2full = new cv.Mat();
-      const status = new cv.Mat();
-      const err = new cv.Mat();
-      const win = new cv.Size(31,31);
-      const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
-
-      cv.calcOpticalFlowPyrLK(gray1, gray2, p1full, p2full, status, err, win, 4, crit);
-
-      const p1back = new cv.Mat();
-      const statusBack = new cv.Mat();
-      const errBack = new cv.Mat();
-      cv.calcOpticalFlowPyrLK(gray2, gray1, p2full, p1back, statusBack, errBack, win, 4, crit);
-
-      const pts3 = [];
-      const reprojArr = [];
-
-      for (let i=0; i<status.rows; i++){
-        if (!status.ucharPtr(i,0)[0]) continue;
-        if (!statusBack.ucharPtr(i,0)[0]) continue;
-
-        const lkErr = err.floatAt(i,0);
-        if (lkErr > MAX_LK_ERR_OBJ) continue;
-
-        const u1 = p1full.data32F[i*2];
-        const v1 = p1full.data32F[i*2 + 1];
-        const u2 = p2full.data32F[i*2];
-        const v2 = p2full.data32F[i*2 + 1];
-
-        const ub = p1back.data32F[i*2];
-        const vb = p1back.data32F[i*2 + 1];
-        const fbErr = Math.hypot(ub - u1, vb - v1);
-        if (fbErr > FB_OBJ_THRESH) continue;
-
-        if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
-
-        const x2up = Math.round((u2 - obj2.rx) * obj2.ups);
-        const y2up = Math.round((v2 - obj2.ry) * obj2.ups);
-
-        if (x2up < 0 || x2up >= obj2.maskUp.cols || y2up < 0 || y2up >= obj2.maskUp.rows) continue;
-        if (obj2.maskUp.ucharPtr(y2up, x2up)[0] === 0) continue;
-
-        const x1n = pixelToNorm(u1, v1);
-        const x2n = pixelToNorm(u2, v2);
-
-        const X = triangulateDLT_smallestEigen(R, t, x1n, x2n);
-        if (!X) continue;
-        if (!isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])) continue;
-        if (X[2] <= 0 || X[2] > MAX_DEPTH_M) continue;
-
-        const X2cam = add3(mulMatVec3(R, X), t);
-        if (X2cam[2] <= 0) continue;
-
-        const reproj = reprojErrPx(X, u1, v1, u2, v2);
-        if (!isFinite(reproj) || reproj > MAX_REPROJ_ERR_PX) continue;
-
-        pts3.push(X);
-        reprojArr.push(reproj);
-      }
-
-      p1full.delete();
-      p2full.delete();
-      status.delete();
-      err.delete();
-      p1back.delete();
-      statusBack.delete();
-      errBack.delete();
-      obj1.maskUp.delete();
-      obj1.blurUp.delete();
-      obj2.maskUp.delete();
-      obj2.blurUp.delete();
-
-      logLine(`[TRACK] valid 3D pts=${pts3.length}`);
-
-      if (pts3.length < MIN_VALID_3D_POINTS){
-        return { ok:false, msg:`Not enough valid 3D points (${pts3.length}). Tighten ROI, improve lighting, or add texture.` };
-      }
-
-      const ext = computeExtentsPCA_covEigen(pts3);
-      if (!ext) return { ok:false, msg:"3D extent PCA failed." };
-
-      const dims = [ext.e1 * 1000, ext.e2 * 1000, ext.e3 * 1000].sort((a,b)=>b-a);
-      const dLongRaw = dims[0];
-      const dMid = dims[1];
-      const dShort = dims[2];
-
-      const circularity = 0.5 * (obj1.circularity + obj2.circularity);
-      const aspect2D = 0.5 * (obj1.aspect + obj2.aspect);
-
-      const largestLooksBad = dLongRaw > 2.5 * Math.max(dMid, 1e-9);
-      let stableLong = largestLooksBad ? dMid : dLongRaw;
-      let stableMid = largestLooksBad ? dShort : dMid;
-      let stableShort = dShort;
-
-      if (largestLooksBad){
-        logLine(`[MEASURE] rejecting largest PCA axis as unstable: ${dLongRaw.toFixed(1)} mm`);
-      }
-
-      const reprojMed = median(reprojArr);
-      logLine(
-        `[MEASURE] rawLargest=${dLongRaw.toFixed(1)} mm stableLong=${stableLong.toFixed(1)} mm stableMid=${stableMid.toFixed(1)} mm stableShort=${stableShort.toFixed(1)} mm ` +
-        `circ=${circularity.toFixed(3)} aspect2D=${aspect2D.toFixed(3)} reprojMed=${reprojMed.toFixed(2)} px`
-      );
-
-      return formatMeasurementByType(
-        objTypeSel.value,
-        stableLong,
-        stableMid,
-        stableShort,
-        circularity,
-        aspect2D,
-        reprojMed,
-        pts3.length,
-        "epipolar_auto"
-      );
-    }
-
-    function measureRectangularFaceEpipolar(corners1, corners2, type, modeName){
-      if (corners1.length !== 4 || corners2.length !== 4){
-        return { ok:false, msg:"Need 4 rectangle corners in both views." };
-      }
-
-      const pts3 = [];
-      const reprojArr = [];
-
-      for (let i=0; i<4; i++){
-        const p1 = corners1[i];
-        const p2 = corners2[i];
-        const X = triangulateDLT_smallestEigen(R, t, pixelToNorm(p1.x, p1.y), pixelToNorm(p2.x, p2.y));
-        if (!X || !isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])){
-          return { ok:false, msg:`Triangulation failed for corner ${i+1}.` };
-        }
-        if (X[2] <= 0 || X[2] > MAX_DEPTH_M){
-          return { ok:false, msg:`Corner ${i+1} produced invalid depth.` };
-        }
-
-        const X2cam = add3(mulMatVec3(R, X), t);
-        if (X2cam[2] <= 0){
-          return { ok:false, msg:`Corner ${i+1} failed cheirality.` };
-        }
-
-        const reproj = reprojErrPx(X, p1.x, p1.y, p2.x, p2.y);
-        if (!isFinite(reproj) || reproj > 8.0){
-          return { ok:false, msg:`Corner ${i+1} has high reprojection error (${reproj.toFixed(2)} px).` };
-        }
-
-        reprojArr.push(reproj);
-        pts3.push(X);
-      }
-
-      const e01 = 1000 * dist3(pts3[0], pts3[1]);
-      const e12 = 1000 * dist3(pts3[1], pts3[2]);
-      const e23 = 1000 * dist3(pts3[2], pts3[3]);
-      const e30 = 1000 * dist3(pts3[3], pts3[0]);
-
-      const lenA = 0.5*(e01 + e23);
-      const lenB = 0.5*(e12 + e30);
-
-      const L = Math.max(lenA, lenB);
-      const W = Math.min(lenA, lenB);
-
-      const reprojMed = median(reprojArr);
-      logLine(`[RECT EPI] e01=${e01.toFixed(1)} e12=${e12.toFixed(1)} e23=${e23.toFixed(1)} e30=${e30.toFixed(1)} reprojMed=${reprojMed.toFixed(2)} px`);
-
-      return {
-        ok:true,
-        primaryMm:L,
-        measuredText:`L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`,
-        typeLabel:type,
-        mode:modeName,
-        circularity:null,
-        aspect2D:null,
-        lengthMm:L,
-        widthMm:W,
-        thicknessMm:null,
-        reprojMedPx:reprojMed,
-        n3d:4,
-        metaText:`rect face | reprojMed=${reprojMed.toFixed(2)} px | e=[${e01.toFixed(1)},${e12.toFixed(1)},${e23.toFixed(1)},${e30.toFixed(1)}]`
-      };
-    }
-
-    /********************************************************************
-     * MODE B: MANUAL EPIPOLAR
-     ********************************************************************/
-    function measureManualEpipolar(){
-      const type = objTypeSel.value;
-      const nReq = requiredPointsForObject(type);
-      if (!poseReady || manualPtsV1.length !== nReq || manualPtsV2.length !== nReq){
-        return { ok:false, msg:"Need all manual points in both views first." };
-      }
-
-      if (type === "phone" || type === "box"){
-        return measureRectangularFaceEpipolar(manualPtsV1, manualPtsV2, type, "epipolar_manual");
-      }
-
-      const pts3 = [];
-      const reprojArr = [];
-
-      for (let i=0; i<nReq; i++){
-        const p1 = manualPtsV1[i];
-        const p2 = manualPtsV2[i];
-        const X = triangulateDLT_smallestEigen(R, t, pixelToNorm(p1.x, p1.y), pixelToNorm(p2.x, p2.y));
-        if (!X || !isFinite(X[0]) || !isFinite(X[1]) || !isFinite(X[2])){
-          return { ok:false, msg:`Triangulation failed for manual point ${i+1}. Re-mark the points.` };
-        }
-        if (X[2] <= 0 || X[2] > MAX_DEPTH_M){
-          return { ok:false, msg:`Manual point ${i+1} produced invalid depth. Re-mark more carefully.` };
-        }
-
-        const X2cam = add3(mulMatVec3(R, X), t);
-        if (X2cam[2] <= 0){
-          return { ok:false, msg:`Manual point ${i+1} failed cheirality. Re-mark the corresponding point.` };
-        }
-
-        const reproj = reprojErrPx(X, p1.x, p1.y, p2.x, p2.y);
-        if (!isFinite(reproj) || reproj > 8.0){
-          return { ok:false, msg:`Manual point ${i+1} has high reprojection error (${reproj.toFixed(2)} px). Re-mark that pair.` };
-        }
-        reprojArr.push(reproj);
-        pts3.push(X);
-      }
-
-      let measuredText = "";
-      let primaryMm = 0;
-      let lengthMm = null;
-      let widthMm = null;
-      let thicknessMm = null;
-
-      if (type === "spoon"){
-        lengthMm = 1000 * dist3(pts3[0], pts3[1]);
-        primaryMm = lengthMm;
-        measuredText = `Length≈${lengthMm.toFixed(1)} mm`;
-      } else {
-        const D = 1000 * dist3(pts3[0], pts3[1]);
-        lengthMm = D;
-        widthMm = D;
-        primaryMm = D;
-        measuredText = `Diameter≈${D.toFixed(1)} mm`;
-      }
-
-      const reprojMed = median(reprojArr);
-      logLine(`[MANUAL EPI] type=${type} reprojMed=${reprojMed.toFixed(2)} px`);
-
-      return {
-        ok:true,
-        primaryMm,
-        measuredText,
-        typeLabel:type,
-        mode:"epipolar_manual",
-        circularity:null,
-        aspect2D:null,
-        lengthMm,
-        widthMm,
-        thicknessMm,
-        reprojMedPx:reprojMed,
-        n3d:pts3.length,
-        metaText:`manual epipolar | pts=${pts3.length} | reprojMed=${reprojMed.toFixed(2)} px`
-      };
-    }
-
-    /********************************************************************
-     * MODE C: REFERENCE MANUAL
-     ********************************************************************/
-    function measureReferenceManual(){
-      if (refScalePts.length !== 4){
-        return { ok:false, msg:"Need 4 reference points first." };
-      }
-
-      const type = objTypeSel.value;
-      const nReq = requiredPointsForObject(type);
-      if (refObjPts.length !== nReq){
-        return { ok:false, msg:"Need all object points first." };
-      }
-
-      const refWidthMm = parseFloat(document.getElementById("refWidthMm").value);
-      const refHeightMm = parseFloat(document.getElementById("refHeightMm").value);
-
-      if (!(isFinite(refWidthMm) && refWidthMm > 0 && isFinite(refHeightMm) && refHeightMm > 0)){
-        return { ok:false, msg:"Reference width/height must be positive." };
-      }
-
-      const refWidthPx = dist2(refScalePts[0], refScalePts[1]);
-      const refHeightPx = dist2(refScalePts[2], refScalePts[3]);
-
-      if (refWidthPx < 2 || refHeightPx < 2){
-        return { ok:false, msg:"Reference points are too close. Re-mark the reference." };
-      }
-
-      const scaleW = refWidthMm / refWidthPx;
-      const scaleH = refHeightMm / refHeightPx;
-      const scaleAvg = 0.5 * (scaleW + scaleH);
-
-      let measuredText = "";
-      let primaryMm = 0;
-      let lengthMm = null;
-      let widthMm = null;
-      let thicknessMm = null;
-
-      if (type === "phone" || type === "box"){
-        const dims2d = averageOppositeEdges2D(refObjPts);
-        const L = dims2d.L * scaleAvg;
-        const W = dims2d.W * scaleAvg;
-        lengthMm = L;
-        widthMm = W;
-        primaryMm = L;
-        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
-      } else if (type === "spoon"){
-        lengthMm = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
-        primaryMm = lengthMm;
-        measuredText = `Length≈${lengthMm.toFixed(1)} mm`;
-      } else {
-        const D = dist2(refObjPts[0], refObjPts[1]) * scaleAvg;
-        lengthMm = D;
-        widthMm = D;
-        primaryMm = D;
-        measuredText = `Diameter≈${D.toFixed(1)} mm`;
-      }
-
-      logLine(`[REF MANUAL] scaleW=${scaleW.toFixed(4)} mm/px scaleH=${scaleH.toFixed(4)} mm/px`);
-
-      return {
-        ok:true,
-        primaryMm,
-        measuredText,
-        typeLabel:type,
-        mode:"reference_manual",
-        circularity:null,
-        aspect2D:null,
-        lengthMm,
-        widthMm,
-        thicknessMm,
-        reprojMedPx:null,
-        n3d:0,
-        metaText:`reference manual | sAvg=${scaleAvg.toFixed(4)} mm/px`
-      };
-    }
-
-    /********************************************************************
-     * COMMON MEASUREMENT FORMATTERS
-     ********************************************************************/
-    function formatMeasurementByType(type, L, W, T, circularity, aspect2D, reprojMed, n3d, modeName){
-      let measuredText = "";
-      let primaryMm = L;
-      let metaText = `pts=${n3d}, mode=${modeName}`;
-      let typeLabel = type;
-
-      if (type === "ball"){
-        const D = 0.5 * (L + W);
-        primaryMm = D;
-        measuredText = `Diameter≈${D.toFixed(1)} mm`;
-      } else if (type === "box" || type === "phone"){
-        primaryMm = L;
-        measuredText = `L≈${L.toFixed(1)} mm, W≈${W.toFixed(1)} mm`;
-      } else {
-        primaryMm = L;
-        measuredText = `Length≈${L.toFixed(1)} mm`;
-      }
-
-      if (reprojMed != null){
-        metaText += `, reprojMed=${reprojMed.toFixed(2)} px`;
-      }
-      if (circularity != null){
-        metaText += `, circ=${circularity.toFixed(3)}`;
-      }
-      if (aspect2D != null){
-        metaText += `, ar=${aspect2D.toFixed(3)}`;
-      }
-
-      return {
-        ok:true,
-        primaryMm,
-        measuredText,
-        typeLabel,
-        mode:modeName,
-        circularity,
-        aspect2D,
-        lengthMm:L,
-        widthMm:W,
-        thicknessMm:T,
-        reprojMedPx:reprojMed,
-        n3d,
-        metaText
-      };
-    }
-
-    /********************************************************************
-     * RESULTS
-     ********************************************************************/
-    function logResult(res){
-      const nameIn = (document.getElementById("objName").value || "").trim();
-      const name = nameIn.length ? nameIn : `Object ${results.length + 1}`;
-
-      const gtVal = parseFloat(document.getElementById("gtMm").value);
-      const gtMm = (isFinite(gtVal) && gtVal > 0) ? gtVal : null;
-      let errPct = null;
-      if (gtMm != null){
-        errPct = Math.abs(res.primaryMm - gtMm) / gtMm * 100.0;
-      }
-
-      results.push({
-        name,
-        mode: res.mode || "",
-        type: res.typeLabel || "",
-        measuredText: res.measuredText,
-        gtMm,
-        errPct,
-        metaText: res.metaText
-      });
-
-      updateResCount();
-
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${results.length}</td>
-        <td>${escapeHtml(name)}</td>
-        <td>${escapeHtml(res.mode || "")}</td>
-        <td>${escapeHtml(res.typeLabel || "")}</td>
-        <td>${escapeHtml(res.measuredText)}</td>
-        <td>${gtMm == null ? "" : gtMm.toFixed(1)}</td>
-        <td>${errPct == null ? "" : errPct.toFixed(1)}</td>
-        <td title="reprojMed=${res.reprojMedPx!=null ? res.reprojMedPx.toFixed(2) : ''} px">${escapeHtml(res.metaText)}</td>
-      `;
-      resultsBody.appendChild(tr);
-    }
-
-    function clearResults(){
-      results = [];
-      resultsBody.innerHTML = "";
-      updateResCount();
-      setOut("Results cleared.", false);
-    }
-
-    /********************************************************************
-     * RESET / CLEANUP
-     ********************************************************************/
-    function clearMeasurementState(){
-      roiState = "none";
-      pointState = "none";
-      pendingMeasureMode = null;
-      roi1Box = null;
-      roi2Box = null;
-      refRoiBox = null;
-      manualPtsV1 = [];
-      manualPtsV2 = [];
-      refScalePts = [];
-      refObjPts = [];
-      computeBtn.disabled = true;
-      updateCanvasTouchAction();
-    }
-
-    function cleanupFrames(){
-      if (gray1){ gray1.delete(); gray1 = null; }
-      if (gray2){ gray2.delete(); gray2 = null; }
-      if (rgba1){ rgba1.delete(); rgba1 = null; }
-      if (rgba2){ rgba2.delete(); rgba2 = null; }
-      frame1ImageData = null;
-      frame2ImageData = null;
-    }
-
-    function resetAll(){
-      cleanupFrames();
-      clearMeasurementState();
-
-      poseReady = false;
-      R = null;
-      t = null;
-      imuAtV1 = null;
-      pendingMeasureMode = null;
-      computeBtn.disabled = true;
-
-      roi.active = false;
-      roi.x0 = roi.y0 = roi.x1 = roi.y1 = 0;
-
-      cap2Btn.disabled = true;
-      setStage(streaming ? "live" : "idle");
-      setDisplayMode("live");
-      setOut("Reset ✅ Start over with Capture 1.", false);
-
-      clearLog();
-      logLine("=== RESET ===");
-      updateCanvasTouchAction();
-    }
-
-    updateResCount();
-
-    /********************************************************************
-     * POSE HELPERS
-     ********************************************************************/
-    function computePose_Epipolar_JS(){
-      if (!gray1 || !gray2 || !Kinv){
-        return { ok:false, reason:"Missing gray1/gray2/Kinv" };
-      }
-      if (typeof cv.goodFeaturesToTrack !== "function"){
-        return { ok:false, reason:"OpenCV missing goodFeaturesToTrack" };
-      }
-      if (typeof cv.calcOpticalFlowPyrLK !== "function"){
-        return { ok:false, reason:"OpenCV missing LK optical flow" };
-      }
-
-      const corners1 = new cv.Mat();
-      cv.goodFeaturesToTrack(gray1, corners1, 1800, 0.005, 8);
-      const nCorners = corners1.rows;
-      logLine(`corners1=${nCorners}`);
-
-      if (nCorners < 100){
-        corners1.delete();
-        return { ok:false, reason:`Not enough corners (${nCorners}). Add texture/lighting.` };
-      }
-
-      const win = new cv.Size(31,31);
-      const crit = new cv.TermCriteria(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.01);
-
-      const corners2 = new cv.Mat();
-      const status12 = new cv.Mat();
-      const err12 = new cv.Mat();
-      cv.calcOpticalFlowPyrLK(gray1, gray2, corners1, corners2, status12, err12, win, 4, crit);
-
-      const back1 = new cv.Mat();
-      const status21 = new cv.Mat();
-      const err21 = new cv.Mat();
-      cv.calcOpticalFlowPyrLK(gray2, gray1, corners2, back1, status21, err21, win, 4, crit);
-
-      const x1n = [];
-      const x2n = [];
-
-      for (let i=0; i<status12.rows; i++){
-        if (!status12.ucharPtr(i,0)[0]) continue;
-        if (!status21.ucharPtr(i,0)[0]) continue;
-
-        const u1 = corners1.data32F[i*2];
-        const v1 = corners1.data32F[i*2 + 1];
-        const u2 = corners2.data32F[i*2];
-        const v2 = corners2.data32F[i*2 + 1];
-        const ub = back1.data32F[i*2];
-        const vb = back1.data32F[i*2 + 1];
-
-        const lkErr = err12.floatAt(i,0);
-        const fbErr = Math.hypot(ub - u1, vb - v1);
-
-        if (lkErr > MAX_LK_ERR_POSE) continue;
-        if (fbErr > FB_POSE_THRESH) continue;
-        if (u2 < 0 || u2 >= gray2.cols || v2 < 0 || v2 >= gray2.rows) continue;
-
-        x1n.push(pixelToNorm(u1, v1));
-        x2n.push(pixelToNorm(u2, v2));
-      }
-
-      corners1.delete();
-      corners2.delete();
-      status12.delete();
-      err12.delete();
-      back1.delete();
-      status21.delete();
-      err21.delete();
-
-      logLine(`tracked_fb=${x1n.length}`);
-      if (x1n.length < MIN_TRACKED_POSE){
-        return { ok:false, reason:`Too few tracked points after FB check (${x1n.length}).` };
-      }
-
-      const ransac = estimateE_RANSAC(x1n, x2n);
-      if (!ransac.ok) return { ok:false, reason:ransac.reason };
-
-      logLine(`E inliers=${ransac.inliersIdx.length}`);
-
-      const best = recoverPoseFromE(ransac.E, x1n, x2n, ransac.inliersIdx);
-      if (!best.ok) return { ok:false, reason:best.reason };
-
-      const baselineCm = parseFloat(document.getElementById("baselineCm").value);
-      if (!(isFinite(baselineCm) && baselineCm > 0)){
-        return { ok:false, reason:"Baseline must be > 0 cm" };
-      }
-
-      const baselineM = baselineCm / 100.0;
-      const tn = Math.hypot(best.t[0], best.t[1], best.t[2]);
-      const s = baselineM / Math.max(tn, 1e-12);
-      const t_scaled = [best.t[0]*s, best.t[1]*s, best.t[2]*s];
-
-      return {
-        ok:true,
-        R:best.R,
-        t_scaled,
-        inliers:ransac.inliersIdx.length,
-        total:x1n.length
-      };
-    }
-
-    /********************************************************************
-     * GENERIC MATH HELPERS
-     ********************************************************************/
-    function buildScaledIntrinsics(W,H){
-      const sx = W / CALIB.calW;
-      const sy = H / CALIB.calH;
-
-      const fx = CALIB.fx * sx;
-      const fy = CALIB.fy * sy;
-      const cx = CALIB.cx * sx;
-      const cy = CALIB.cy * sy;
-
-      K = [
-        [fx,0,cx],
-        [0,fy,cy],
-        [0,0,1]
-      ];
-
-      Kinv = inv3(K);
-
-      if (Kcv) Kcv.delete();
-      if (DISTcv) DISTcv.delete();
-
-      Kcv = cv.matFromArray(3,3,cv.CV_64F, [
-        fx,0,cx,
-        0,fy,cy,
-        0,0,1
-      ]);
-      DISTcv = cv.matFromArray(1,5,cv.CV_64F, CALIB.dist);
-    }
-
-    function clamp(v, lo, hi){
-      return Math.max(lo, Math.min(hi, v));
-    }
-
-    function pixelToNorm(u,v){
-      const x = Kinv[0][0]*u + Kinv[0][1]*v + Kinv[0][2];
-      const y = Kinv[1][0]*u + Kinv[1][1]*v + Kinv[1][2];
-      const z = Kinv[2][0]*u + Kinv[2][1]*v + Kinv[2][2];
-      return [x/z, y/z, 1.0];
-    }
-
-    function pointInSafeCenterRegion(x, y, W, H){
-      const bx = SAFE_BORDER_FRAC * W;
-      const by = SAFE_BORDER_FRAC * H;
-      return (x >= bx && x <= (W - bx) && y >= by && y <= (H - by));
-    }
-
-    function dist2(p1, p2){
-      return Math.hypot(p1.x - p2.x, p1.y - p2.y);
-    }
-
-    function dist3(a,b){
-      return Math.hypot(a[0]-b[0], a[1]-b[1], a[2]-b[2]);
-    }
-
-    function projectCam1(X){
-      if (X[2] <= 1e-9) return null;
-      return {
-        u: K[0][0]*(X[0]/X[2]) + K[0][2],
-        v: K[1][1]*(X[1]/X[2]) + K[1][2]
-      };
-    }
-
-    function projectCam2(X){
-      const X2 = add3(mulMatVec3(R, X), t);
-      if (X2[2] <= 1e-9) return null;
-      return {
-        u: K[0][0]*(X2[0]/X2[2]) + K[0][2],
-        v: K[1][1]*(X2[1]/X2[2]) + K[1][2]
-      };
-    }
-
-    function reprojErrPx(X, u1, v1, u2, v2){
-      const p1 = projectCam1(X);
-      const p2 = projectCam2(X);
-      if (!p1 || !p2) return Infinity;
-      const e1 = Math.hypot(p1.u - u1, p1.v - v1);
-      const e2 = Math.hypot(p2.u - u2, p2.v - v2);
-      return 0.5*(e1 + e2);
-    }
-
-    function median(arr){
-      if (!arr || arr.length === 0) return null;
-      const s = arr.slice().sort((a,b)=>a-b);
-      const m = Math.floor(s.length/2);
-      return (s.length % 2) ? s[m] : 0.5*(s[m-1] + s[m]);
-    }
-
-    function estimateE_RANSAC(x1, x2){
-      const N = x1.length;
-      if (N < 100) return { ok:false, reason:"Too few matches for RANSAC" };
-
-      const ITER = 1500;
-      const TH = 1e-4;
-      let bestInliers = [];
-      let bestE = null;
-      const idx = [...Array(N).keys()];
-
-      for (let it=0; it<ITER; it++){
-        shuffleInPlace(idx);
-        const s = idx.slice(0,8);
-
-        let E = eightPointE_pureJS(x1, x2, s);
-        if (!E) continue;
-
-        E = enforceEssential_3x3(E);
-
-        const inl = [];
-        for (let i=0; i<N; i++){
-          const d = sampsonDistance(E, x1[i], x2[i]);
-          if (d < TH) inl.push(i);
-        }
-
-        if (inl.length > bestInliers.length){
-          bestInliers = inl;
-          bestE = E;
-        }
-      }
-
-      if (!bestE || bestInliers.length < 80){
-        return { ok:false, reason:`E RANSAC failed (best inliers=${bestInliers.length}).` };
-      }
-
-      let Erefit = eightPointE_pureJS(x1, x2, bestInliers);
-      Erefit = enforceEssential_3x3(Erefit);
-
-      return { ok:true, E:Erefit, inliersIdx:bestInliers };
-    }
-
-    function eightPointE_pureJS(x1, x2, indices){
-      const A = [];
-      for (let r=0; r<indices.length; r++){
-        const i = indices[r];
-        const X1 = x1[i][0], Y1 = x1[i][1];
-        const X2 = x2[i][0], Y2 = x2[i][1];
-
-        A.push([
-          X2*X1, X2*Y1, X2,
-          Y2*X1, Y2*Y1, Y2,
-          X1, Y1, 1
-        ]);
-      }
-
-      const ATA = matMul(matT(A), A);
-      const eig = jacobiEigenSym(ATA);
-      const k = argMin(eig.values);
-      const e = eig.vectors.map(row => row[k]);
-
-      return [
-        [e[0], e[1], e[2]],
-        [e[3], e[4], e[5]],
-        [e[6], e[7], e[8]]
-      ];
-    }
-
-    function enforceEssential_3x3(E){
-      const EtE = mul3(transpose3(E), E);
-      const ev = jacobiEigenSym(EtE);
-      const vals = ev.values.slice();
-      const V = ev.vectors;
-
-      const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
-      const lam = order.map(i=>Math.max(vals[i],0));
-
-      const Vsorted = [
-        [V[0][order[0]], V[0][order[1]], V[0][order[2]]],
-        [V[1][order[0]], V[1][order[1]], V[1][order[2]]],
-        [V[2][order[0]], V[2][order[1]], V[2][order[2]]]
-      ];
-
-      const s1 = Math.sqrt(lam[0]);
-      const s2 = Math.sqrt(lam[1]);
-      const s = 0.5*(s1+s2);
-
-      const inv = [
-        1/Math.max(s1,1e-12),
-        1/Math.max(s2,1e-12),
-        0
-      ];
-
-      const EV = mul3(E, Vsorted);
-      let U = [
-        [EV[0][0]*inv[0], EV[0][1]*inv[1], EV[0][2]*inv[2]],
-        [EV[1][0]*inv[0], EV[1][1]*inv[1], EV[1][2]*inv[2]],
-        [EV[2][0]*inv[0], EV[2][1]*inv[1], EV[2][2]*inv[2]]
-      ];
-
-      U = ortho3(U);
-
-      const S = [
-        [s,0,0],
-        [0,s,0],
-        [0,0,0]
-      ];
-
-      return mul3(mul3(U,S), transpose3(Vsorted));
-    }
-
-    function sampsonDistance(E, x1, x2){
-      const Ex1 = mulMatVec3(E, x1);
-      const Etx2 = mulMatVec3(transpose3(E), x2);
-      const x2tEx1 = dot3(x2, Ex1);
-      const denom = Ex1[0]*Ex1[0] + Ex1[1]*Ex1[1] + Etx2[0]*Etx2[0] + Etx2[1]*Etx2[1];
-      return (x2tEx1*x2tEx1) / Math.max(denom, 1e-12);
-    }
-
-    function recoverPoseFromE(E, x1, x2, inliersIdx){
-      const svd = svd3_from_EtE(E);
-      if (!svd) return { ok:false, reason:"SVD failed" };
-
-      const U = svd.U;
-      const V = svd.V;
-
-      const W = [
-        [0,-1,0],
-        [1,0,0],
-        [0,0,1]
-      ];
-
-      const R1 = mul3(mul3(U,W), transpose3(V));
-      const R2 = mul3(mul3(U,transpose3(W)), transpose3(V));
-      const tdir = [U[0][2], U[1][2], U[2][2]];
-      const tneg = [-tdir[0], -tdir[1], -tdir[2]];
-
-      const cand = [
-        {R:R1,t:tdir},
-        {R:R1,t:tneg},
-        {R:R2,t:tdir},
-        {R:R2,t:tneg}
-      ];
-
-      let best = null;
-      let bestCount = -1;
-      const subset = inliersIdx.slice(0, Math.min(120, inliersIdx.length));
-
-      for (const c of cand){
-        let count = 0;
-        for (const idx of subset){
-          const X = triangulateDLT_smallestEigen(c.R, c.t, x1[idx], x2[idx]);
-          if (!X) continue;
-
-          const z1 = X[2];
-          const X2 = add3(mulMatVec3(c.R, X), c.t);
-          const z2 = X2[2];
-
-          if (z1 > 0 && z2 > 0) count++;
-        }
-
-        if (count > bestCount){
-          bestCount = count;
-          best = c;
-        }
-      }
-
-      if (!best || bestCount < 10){
-        return { ok:false, reason:`Cheirality failed (bestCount=${bestCount}).` };
-      }
-
-      return { ok:true, R:best.R, t:best.t };
-    }
-
-    function svd3_from_EtE(E){
-      const EtE = mul3(transpose3(E), E);
-      const ev = jacobiEigenSym(EtE);
-      const vals = ev.values.slice();
-      const Vraw = ev.vectors;
-      const order = [0,1,2].sort((a,b)=>vals[b]-vals[a]);
-      const lam = order.map(i=>Math.max(vals[i],0));
-
-      let V = [
-        [Vraw[0][order[0]], Vraw[0][order[1]], Vraw[0][order[2]]],
-        [Vraw[1][order[0]], Vraw[1][order[1]], Vraw[1][order[2]]],
-        [Vraw[2][order[0]], Vraw[2][order[1]], Vraw[2][order[2]]]
-      ];
-
-      const s = lam.map(x=>Math.sqrt(x));
-      const EV = mul3(E, V);
-
-      const inv0 = 1/Math.max(s[0],1e-12);
-      const inv1 = 1/Math.max(s[1],1e-12);
-      const inv2 = 1/Math.max(s[2],1e-12);
-
-      let U = [
-        [EV[0][0]*inv0, EV[0][1]*inv1, EV[0][2]*inv2],
-        [EV[1][0]*inv0, EV[1][1]*inv1, EV[1][2]*inv2],
-        [EV[2][0]*inv0, EV[2][1]*inv1, EV[2][2]*inv2]
-      ];
-
-      U = ortho3(U);
-
-      if (det3(U) < 0){
-        U[0][2] *= -1; U[1][2] *= -1; U[2][2] *= -1;
-      }
-      if (det3(V) < 0){
-        V[0][2] *= -1; V[1][2] *= -1; V[2][2] *= -1;
-      }
-
-      return { U, V, s };
-    }
-
-    function triangulateDLT_smallestEigen(R, t, x1, x2){
-      const x = x1[0], y = x1[1];
-      const xp = x2[0], yp = x2[1];
-
-      const r1 = R[0], r2 = R[1], r3 = R[2];
-
-      const A = [
-        [-1, 0, x, 0],
-        [ 0,-1, y, 0],
-        [xp*r3[0]-r1[0], xp*r3[1]-r1[1], xp*r3[2]-r1[2], xp*t[2]-t[0]],
-        [yp*r3[0]-r2[0], yp*r3[1]-r2[1], yp*r3[2]-r2[2], yp*t[2]-t[1]]
-      ];
-
-      const ATA = matMul(matT(A), A);
-      const ev = jacobiEigenSym(ATA);
-      const k = argMin(ev.values);
-      const vh = ev.vectors.map(row => row[k]);
-
-      if (Math.abs(vh[3]) < 1e-12) return null;
-      return [vh[0]/vh[3], vh[1]/vh[3], vh[2]/vh[3]];
-    }
-
-    function jacobiEigenSym(A){
-      const n = A.length;
-      const M = Array.from({length:n}, (_,i)=>A[i].slice());
-      const V = Array.from({length:n}, (_,i)=>Array.from({length:n}, (_,j)=>i===j?1:0));
-
-      const MAX_IT = 60 * n * n;
-      for (let it=0; it<MAX_IT; it++){
-        let p=0, q=1, max=0;
-        for (let i=0; i<n; i++){
-          for (let j=i+1; j<n; j++){
-            const val = Math.abs(M[i][j]);
-            if (val > max){ max = val; p = i; q = j; }
-          }
-        }
-        if (max < 1e-12) break;
-
-        const app = M[p][p];
-        const aqq = M[q][q];
-        const apq = M[p][q];
-
-        const phi = 0.5 * Math.atan2(2*apq, (aqq - app));
-        const c = Math.cos(phi);
-        const s = Math.sin(phi);
-
-        for (let k=0; k<n; k++){
-          const mkp = M[k][p];
-          const mkq = M[k][q];
-          M[k][p] = c*mkp - s*mkq;
-          M[k][q] = s*mkp + c*mkq;
-        }
-        for (let k=0; k<n; k++){
-          const mpk = M[p][k];
-          const mqk = M[q][k];
-          M[p][k] = c*mpk - s*mqk;
-          M[q][k] = s*mpk + c*mqk;
-        }
-
-        M[p][p] = c*c*app - 2*s*c*apq + s*s*aqq;
-        M[q][q] = s*s*app + 2*s*c*apq + c*c*aqq;
-        M[p][q] = 0;
-        M[q][p] = 0;
-
-        for (let k=0; k<n; k++){
-          const vkp = V[k][p];
-          const vkq = V[k][q];
-          V[k][p] = c*vkp - s*vkq;
-          V[k][q] = s*vkp + c*vkq;
-        }
-      }
-
-      const values = Array.from({length:n}, (_,i)=>M[i][i]);
-
-      for (let j=0; j<n; j++){
-        let nn=0;
-        for (let i=0; i<n; i++) nn += V[i][j]*V[i][j];
-        nn = Math.sqrt(Math.max(nn, 1e-30));
-        for (let i=0; i<n; i++) V[i][j] /= nn;
-      }
-
-      return { values, vectors:V };
-    }
-
-    function argMin(arr){
-      let k=0, best=arr[0];
-      for (let i=1; i<arr.length; i++){
-        if (arr[i] < best){ best = arr[i]; k = i; }
-      }
-      return k;
-    }
-
-    function matMul(A, B){
-      const m=A.length, n=A[0].length, p=B[0].length;
-      const C = Array.from({length:m}, ()=>Array(p).fill(0));
-      for (let i=0; i<m; i++){
-        for (let k=0; k<n; k++){
-          const aik = A[i][k];
-          for (let j=0; j<p; j++) C[i][j] += aik * B[k][j];
-        }
-      }
-      return C;
-    }
-
-    function matT(A){
-      const m=A.length, n=A[0].length;
-      const AT = Array.from({length:n}, ()=>Array(m).fill(0));
-      for (let i=0; i<m; i++) for (let j=0; j<n; j++) AT[j][i] = A[i][j];
-      return AT;
-    }
-
-    function shuffleInPlace(a){
-      for (let i=a.length-1; i>0; i--){
-        const j = Math.floor(Math.random()*(i+1));
-        [a[i], a[j]] = [a[j], a[i]];
-      }
-    }
-
-    function dot3(a,b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-    function add3(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
-    function sub3(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
-    function scale3(v,s){ return [v[0]*s, v[1]*s, v[2]*s]; }
-    function cross3(a,b){
-      return [
-        a[1]*b[2]-a[2]*b[1],
-        a[2]*b[0]-a[0]*b[2],
-        a[0]*b[1]-a[1]*b[0]
-      ];
-    }
-    function normalize3(v){
-      const n = Math.sqrt(Math.max(dot3(v,v),1e-30));
-      return [v[0]/n, v[1]/n, v[2]/n];
-    }
-    function mulMatVec3(M, v){
-      return [
-        M[0][0]*v[0] + M[0][1]*v[1] + M[0][2]*v[2],
-        M[1][0]*v[0] + M[1][1]*v[1] + M[1][2]*v[2],
-        M[2][0]*v[0] + M[2][1]*v[1] + M[2][2]*v[2]
-      ];
-    }
-
-    function normalize2(v){
-      const n = Math.hypot(v.x, v.y);
-      if (n < 1e-12) return { x:1, y:0 };
-      return { x:v.x/n, y:v.y/n };
-    }
-
-    function transpose3(M){
-      return [
-        [M[0][0], M[1][0], M[2][0]],
-        [M[0][1], M[1][1], M[2][1]],
-        [M[0][2], M[1][2], M[2][2]]
-      ];
-    }
-
-    function mul3(A, B){
-      const C = [[0,0,0],[0,0,0],[0,0,0]];
-      for (let i=0; i<3; i++){
-        for (let j=0; j<3; j++){
-          C[i][j] = A[i][0]*B[0][j] + A[i][1]*B[1][j] + A[i][2]*B[2][j];
-        }
-      }
-      return C;
-    }
-
-    function det3(M){
-      return (
-        M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1]) -
-        M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0]) +
-        M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0])
-      );
-    }
-
-    function inv3(M){
-      const d = det3(M);
-      if (Math.abs(d) < 1e-12) throw new Error("K is singular");
-      return [
-        [
-          (M[1][1]*M[2][2]-M[1][2]*M[2][1])/d,
-          (M[0][2]*M[2][1]-M[0][1]*M[2][2])/d,
-          (M[0][1]*M[1][2]-M[0][2]*M[1][1])/d
-        ],
-        [
-          (M[1][2]*M[2][0]-M[1][0]*M[2][2])/d,
-          (M[0][0]*M[2][2]-M[0][2]*M[2][0])/d,
-          (M[0][2]*M[1][0]-M[0][0]*M[1][2])/d
-        ],
-        [
-          (M[1][0]*M[2][1]-M[1][1]*M[2][0])/d,
-          (M[0][1]*M[2][0]-M[0][0]*M[2][1])/d,
-          (M[0][0]*M[1][1]-M[0][1]*M[1][0])/d
-        ]
-      ];
-    }
-
-    function ortho3(M){
-      let c0 = [M[0][0], M[1][0], M[2][0]];
-      let c1 = [M[0][1], M[1][1], M[2][1]];
-      c0 = normalize3(c0);
-      c1 = sub3(c1, scale3(c0, dot3(c0, c1)));
-      c1 = normalize3(c1);
-      const c2 = normalize3(cross3(c0, c1));
-      return [
-        [c0[0], c1[0], c2[0]],
-        [c0[1], c1[1], c2[1]],
-        [c0[2], c1[2], c2[2]]
-      ];
-    }
-
-    /********************************************************************
-     * EXTRA HELPERS THAT WERE MISSING
-     ********************************************************************/
-    function contourDescriptors(cnt){
-      const area = Math.abs(cv.contourArea(cnt));
-      const perimeter = cv.arcLength(cnt, true);
-
-      const rect = cv.boundingRect(cnt);
-      const hull = new cv.Mat();
-
-      let hullArea = 0;
-      try{
-        cv.convexHull(cnt, hull, false, true);
-        hullArea = Math.abs(cv.contourArea(hull));
-      } finally {
-        hull.delete();
-      }
-
-      const circularity = perimeter > 1e-9 ? (4 * Math.PI * area) / (perimeter * perimeter) : 0;
-      const aspect = rect.height > 0 ? rect.width / rect.height : 0;
-      const solidity = hullArea > 1e-9 ? area / hullArea : 0;
-
-      return { area, perimeter, circularity, aspect, solidity };
-    }
-
-    function contourCentroid(cnt){
-      const m = cv.moments(cnt, false);
-      if (!m || Math.abs(m.m00) < 1e-9) return null;
-      return {
-        x: m.m10 / m.m00,
-        y: m.m01 / m.m00
-      };
-    }
-
-    function contourScore(desc, ctr, roiCtrUp){
-      const d = Math.hypot(ctr.x - roiCtrUp.x, ctr.y - roiCtrUp.y);
-      const areaScore = Math.log(Math.max(desc.area, 1));
-      const centerScore = -0.01 * d;
-      const circScore = 1.5 * desc.circularity;
-      const solidScore = 1.0 * desc.solidity;
-      return areaScore + centerScore + circScore + solidScore;
-    }
-
-    function computeExtentsPCA_covEigen(pts3){
-      if (!pts3 || pts3.length < 3) return null;
-
-      let mx = 0, my = 0, mz = 0;
-      for (const p of pts3){
-        mx += p[0];
-        my += p[1];
-        mz += p[2];
-      }
-      mx /= pts3.length;
-      my /= pts3.length;
-      mz /= pts3.length;
-
-      let c00=0, c01=0, c02=0, c11=0, c12=0, c22=0;
-      for (const p of pts3){
-        const x = p[0] - mx;
-        const y = p[1] - my;
-        const z = p[2] - mz;
-        c00 += x*x; c01 += x*y; c02 += x*z;
-        c11 += y*y; c12 += y*z; c22 += z*z;
-      }
-      c00 /= pts3.length;
-      c01 /= pts3.length;
-      c02 /= pts3.length;
-      c11 /= pts3.length;
-      c12 /= pts3.length;
-      c22 /= pts3.length;
-
-      const C = [
-        [c00, c01, c02],
-        [c01, c11, c12],
-        [c02, c12, c22]
-      ];
-
-      const ev = jacobiEigenSym(C);
-      const order = [0,1,2].sort((a,b)=>ev.values[b]-ev.values[a]);
-
-      const v1 = normalize3([ev.vectors[0][order[0]], ev.vectors[1][order[0]], ev.vectors[2][order[0]]]);
-      const v2 = normalize3([ev.vectors[0][order[1]], ev.vectors[1][order[1]], ev.vectors[2][order[1]]]);
-      const v3 = normalize3([ev.vectors[0][order[2]], ev.vectors[1][order[2]], ev.vectors[2][order[2]]]);
-
-      let aMin=Infinity, aMax=-Infinity;
-      let bMin=Infinity, bMax=-Infinity;
-      let cMin=Infinity, cMax=-Infinity;
-
-      for (const p of pts3){
-        const q = [p[0]-mx, p[1]-my, p[2]-mz];
-        const a = dot3(q, v1);
-        const b = dot3(q, v2);
-        const c = dot3(q, v3);
-
-        if (a < aMin) aMin = a;
-        if (a > aMax) aMax = a;
-        if (b < bMin) bMin = b;
-        if (b > bMax) bMax = b;
-        if (c < cMin) cMin = c;
-        if (c > cMax) cMax = c;
-      }
-
-      return {
-        e1: aMax - aMin,
-        e2: bMax - bMin,
-        e3: cMax - cMin
-      };
-    }
-  </script>
+    video.srcObject = stream;
+    await video.play();
+    ensureCanvasSize(video.videoWidth, video.videoHeight);
+    streaming = true;
+    setStatus('cameraStatus', `camera: ${video.videoWidth}x${video.videoHeight}`);
+    document.getElementById('imuBtn').disabled = false;
+    document.getElementById('cap1Btn').disabled = false;
+    document.getElementById('showLiveBtn').disabled = false;
+    renderLoop();
+    log('[cam] started');
+  }catch(err){
+    setOut('Camera start failed', 'warn');
+    log('[cam] ' + (err.message || err));
+  }
+}
+
+function toggleSensors(){
+  if(sensorOn){
+    window.removeEventListener('deviceorientation', onDeviceOrientation);
+    sensorOn = false;
+    setStatus('sensorStatus', 'imu: off');
+    document.getElementById('imuBtn').textContent = 'Sensors';
+    return;
+  }
+  if (typeof DeviceOrientationEvent === 'undefined'){
+    setOut('IMU not available', 'warn'); return;
+  }
+  const start = () => {
+    window.addEventListener('deviceorientation', onDeviceOrientation);
+    sensorOn = true;
+    setStatus('sensorStatus', 'imu: on');
+    document.getElementById('imuBtn').textContent = 'Sensors on';
+  };
+  if (typeof DeviceOrientationEvent.requestPermission === 'function'){
+    DeviceOrientationEvent.requestPermission().then(state=>{
+      if(state === 'granted') start();
+      else setOut('IMU permission denied', 'warn');
+    }).catch(()=>setOut('IMU permission denied', 'warn'));
+  }else start();
+}
+function onDeviceOrientation(e){
+  imu.alpha = e.alpha; imu.beta = e.beta; imu.gamma = e.gamma;
+  document.getElementById('imuReadout').textContent =
+    `imu α ${imu.alpha==null?'?':round(imu.alpha,1)} β ${imu.beta==null?'?':round(imu.beta,1)} γ ${imu.gamma==null?'?':round(imu.gamma,1)}`;
+}
+
+/********************************************************************
+ * BOARD DETECTION + POSE
+ ********************************************************************/
+function markerCornersCentered(marker, width, height){
+  return marker.corners.map(c => ({
+    x: c.x - width/2,
+    y: height/2 - c.y
+  }));
+}
+
+function computeMarkerBoardPose(marker, frame){
+  const posit = new POS.Posit(BOARD.markerSizeMm, Math.max(frame.width, frame.height));
+  const corners = markerCornersCentered(marker, frame.width, frame.height);
+  const pose = posit.pose(corners);
+  const Rm = pose.bestRotation;
+  const tm = pose.bestTranslation;
+  const center = BOARD.centersMm[marker.id];
+  if(!center) return null;
+  const tBoard = sub3(tm, matVec3(Rm, center));
+  return {
+    id: marker.id,
+    bestError: pose.bestError,
+    rotation: Rm,
+    translation: tBoard,
+    rawTranslation: tm
+  };
+}
+
+function detectBoardInFrame(frame){
+  const markers = detector.detect(frame.imageData) || [];
+  const filtered = markers.filter(m => BOARD.ids.includes(Number(m.id)));
+  const poses = [];
+  for(const m of filtered){
+    try{
+      const p = computeMarkerBoardPose(m, frame);
+      if(p) poses.push(p);
+    }catch(err){
+      log(`[board] marker ${m.id} pose error: ${err.message || err}`);
+    }
+  }
+  poses.sort((a,b)=>a.bestError - b.bestError);
+  const best = poses[0] || null;
+  return { allMarkers: markers, matchedMarkers: filtered, poses, best };
+}
+
+function solveBoard(){
+  if(!frame1 || !frame2){
+    setOut('Capture both views first', 'warn'); return;
+  }
+  detectorInfo1 = detectBoardInFrame(frame1);
+  detectorInfo2 = detectBoardInFrame(frame2);
+  pose1 = detectorInfo1.best;
+  pose2 = detectorInfo2.best;
+
+  const ok1 = pose1 && detectorInfo1.matchedMarkers.length >= 1;
+  const ok2 = pose2 && detectorInfo2.matchedMarkers.length >= 1;
+  boardSolved = !!(ok1 && ok2);
+
+  setStatus('boardStatus', boardSolved ? 'board: solved' : 'board: not solved');
+  setStatus('boardDetail',
+    `v1 ids ${detectorInfo1.matchedMarkers.map(m=>m.id).join(',') || 'none'} | v2 ids ${detectorInfo2.matchedMarkers.map(m=>m.id).join(',') || 'none'}`);
+  if(boardSolved){
+    setOut(`Board solved. best v1 id ${pose1.id}, v2 id ${pose2.id}`, 'ok');
+    log(`[board] v1 matched ids: ${detectorInfo1.matchedMarkers.map(m=>m.id).join(', ')}`);
+    log(`[board] v2 matched ids: ${detectorInfo2.matchedMarkers.map(m=>m.id).join(', ')}`);
+    log(`[board] using v1 marker ${pose1.id} err ${round(pose1.bestError,2)}, v2 marker ${pose2.id} err ${round(pose2.bestError,2)}`);
+    enableObjectControls(true);
+  }else{
+    setOut('Board solve failed. Make sure at least one known marker is detected in both views.', 'warn');
+    enableObjectControls(false);
+  }
+  render();
+}
+
+/********************************************************************
+ * CAPTURES
+ ********************************************************************/
+function captureView1(){
+  if(!streaming){ setOut('Start camera first', 'warn'); return; }
+  frame1 = captureCurrentFrame();
+  displayMode = 'v1';
+  document.getElementById('showV1Btn').disabled = false;
+  document.getElementById('cap2Btn').disabled = false;
+  setStatus('captureStatus', frame2 ? 'captures: view1 + view2' : 'captures: view1 only');
+  setOut('Captured view 1', 'ok');
+  log('[capture] view1');
+  render();
+}
+function captureView2(){
+  if(!streaming){ setOut('Start camera first', 'warn'); return; }
+  frame2 = captureCurrentFrame();
+  displayMode = 'v2';
+  document.getElementById('showV2Btn').disabled = false;
+  document.getElementById('solveBtn').disabled = false;
+  setStatus('captureStatus', frame1 ? 'captures: view1 + view2' : 'captures: view2 only');
+  setOut('Captured view 2', 'ok');
+  log('[capture] view2');
+  render();
+}
+function setDisplay(mode){
+  displayMode = mode;
+  setStatus('displayStatus', `display: ${mode}`);
+  render();
+}
+
+/********************************************************************
+ * OBJECT SESSION
+ ********************************************************************/
+function enableObjectControls(on){
+  ['newObjBtn','clearObjBtn','roi1Btn','roi2Btn','p11Btn','p21Btn','p12Btn','p22Btn','computeBtn','nextObjBtn']
+    .forEach(id => document.getElementById(id).disabled = !on);
+}
+function newObjectSession(){
+  if(!boardSolved){ setOut('Solve board first', 'warn'); return; }
+  currentObject = {
+    roi1:null, roi2:null,
+    p1_v1:null, p2_v1:null, p1_v2:null, p2_v2:null,
+    refined:{}
+  };
+  actionMode = null;
+  setStatus('objStatus', 'object: active');
+  setOut('New object session started', 'ok');
+  render();
+}
+function clearCurrentObject(){
+  currentObject = null;
+  actionMode = null;
+  drawDrag = null;
+  setStatus('objStatus', 'object: none');
+  setOut('Current object cleared', '');
+  render();
+}
+function finishCurrentAndNext(){
+  newObjectSession();
+}
+function beginAction(mode){
+  if(!currentObject){ setOut('Start a new object first', 'warn'); return; }
+  if((mode.endsWith('_v1') && displayMode !== 'v1') || (mode.endsWith('_v2') && displayMode !== 'v2')){
+    setOut(`Switch display to ${mode.endsWith('_v1')?'View 1':'View 2'} first`, 'warn');
+    return;
+  }
+  actionMode = mode;
+  setOut(`Action: ${mode}`, 'ok');
+}
+
+/********************************************************************
+ * CLICK REFINEMENT
+ ********************************************************************/
+function grayscaleArray(frame){
+  const src = frame.imageData.data;
+  const g = new Float32Array(frame.width * frame.height);
+  for(let i=0,j=0;i<src.length;i+=4,j++){
+    g[j] = 0.299*src[i] + 0.587*src[i+1] + 0.114*src[i+2];
+  }
+  return g;
+}
+function refinePoint(frame, pt, roi){
+  if(!document.getElementById('refineChk').checked) return clonePt(pt);
+  const rad = clamp(parseInt(document.getElementById('refineRad').value || '16',10), 4, 40);
+  const gray = grayscaleArray(frame);
+  const w = frame.width, h = frame.height;
+  const rr = roi ? scaleRect(roi) : {x:0,y:0,w:w,h:h};
+  let best = {score:-1, x:pt.x, y:pt.y};
+  const x0 = Math.max(1, Math.floor(pt.x-rad)), x1 = Math.min(w-2, Math.ceil(pt.x+rad));
+  const y0 = Math.max(1, Math.floor(pt.y-rad)), y1 = Math.min(h-2, Math.ceil(pt.y+rad));
+
+  for(let y=y0; y<=y1; y++){
+    if(y < rr.y || y > rr.y + rr.h) continue;
+    for(let x=x0; x<=x1; x++){
+      if(x < rr.x || x > rr.x + rr.w) continue;
+      const idx = y*w + x;
+      const gx = gray[idx+1] - gray[idx-1];
+      const gy = gray[idx+w] - gray[idx-w];
+      const mag = gx*gx + gy*gy;
+      const dist2 = (x-pt.x)*(x-pt.x) + (y-pt.y)*(y-pt.y);
+      const score = mag - 0.2*dist2;
+      if(score > best.score){
+        best = {score, x, y};
+      }
+    }
+  }
+  return {x:best.x, y:best.y};
+}
+
+/********************************************************************
+ * TRIANGULATION + EPIPOLAR
+ ********************************************************************/
+function projectionMatrix(frame, pose){
+  const K = frameK(frame);
+  const Rt = [
+    [pose.rotation[0][0], pose.rotation[0][1], pose.rotation[0][2], pose.translation[0]],
+    [pose.rotation[1][0], pose.rotation[1][1], pose.rotation[1][2], pose.translation[1]],
+    [pose.rotation[2][0], pose.rotation[2][1], pose.rotation[2][2], pose.translation[2]]
+  ];
+  const P = Array.from({length:3}, ()=>Array(4).fill(0));
+  const Kmat = [
+    [K.fx, 0, K.cx],
+    [0, K.fy, K.cy],
+    [0, 0, 1]
+  ];
+  for(let r=0;r<3;r++){
+    for(let c=0;c<4;c++){
+      P[r][c] = Kmat[r][0]*Rt[0][c] + Kmat[r][1]*Rt[1][c] + Kmat[r][2]*Rt[2][c];
+    }
+  }
+  return {K, P};
+}
+function svdSolveHomogeneous4(A){
+  const svd = SVD.svdcmp(A.map(r=>r.slice()), A.length, 4, [], []);
+  const V = svd.v;
+  return [V[0][3], V[1][3], V[2][3], V[3][3]];
+}
+function triangulatePoint(p1, p2){
+  const {P: P1} = projectionMatrix(frame1, pose1);
+  const {P: P2} = projectionMatrix(frame2, pose2);
+  const A = [
+    [p1.x*P1[2][0]-P1[0][0], p1.x*P1[2][1]-P1[0][1], p1.x*P1[2][2]-P1[0][2], p1.x*P1[2][3]-P1[0][3]],
+    [p1.y*P1[2][0]-P1[1][0], p1.y*P1[2][1]-P1[1][1], p1.y*P1[2][2]-P1[1][2], p1.y*P1[2][3]-P1[1][3]],
+    [p2.x*P2[2][0]-P2[0][0], p2.x*P2[2][1]-P2[0][1], p2.x*P2[2][2]-P2[0][2], p2.x*P2[2][3]-P2[0][3]],
+    [p2.y*P2[2][0]-P2[1][0], p2.y*P2[2][1]-P2[1][1], p2.y*P2[2][2]-P2[1][2], p2.y*P2[2][3]-P2[1][3]]
+  ];
+  const X = svdSolveHomogeneous4(A);
+  return [X[0]/X[3], X[1]/X[3], X[2]/X[3]];
+}
+function skew(v){
+  return [[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]];
+}
+function fundamentalMatrix(){
+  const {K:K1} = projectionMatrix(frame1, pose1);
+  const {K:K2} = projectionMatrix(frame2, pose2);
+  const Rrel = [
+    [
+      pose2.rotation[0][0]*pose1.rotation[0][0] + pose2.rotation[0][1]*pose1.rotation[0][1] + pose2.rotation[0][2]*pose1.rotation[0][2],
+      pose2.rotation[0][0]*pose1.rotation[1][0] + pose2.rotation[0][1]*pose1.rotation[1][1] + pose2.rotation[0][2]*pose1.rotation[1][2],
+      pose2.rotation[0][0]*pose1.rotation[2][0] + pose2.rotation[0][1]*pose1.rotation[2][1] + pose2.rotation[0][2]*pose1.rotation[2][2]
+    ],
+    [
+      pose2.rotation[1][0]*pose1.rotation[0][0] + pose2.rotation[1][1]*pose1.rotation[0][1] + pose2.rotation[1][2]*pose1.rotation[0][2],
+      pose2.rotation[1][0]*pose1.rotation[1][0] + pose2.rotation[1][1]*pose1.rotation[1][1] + pose2.rotation[1][2]*pose1.rotation[1][2],
+      pose2.rotation[1][0]*pose1.rotation[2][0] + pose2.rotation[1][1]*pose1.rotation[2][1] + pose2.rotation[1][2]*pose1.rotation[2][2]
+    ],
+    [
+      pose2.rotation[2][0]*pose1.rotation[0][0] + pose2.rotation[2][1]*pose1.rotation[0][1] + pose2.rotation[2][2]*pose1.rotation[0][2],
+      pose2.rotation[2][0]*pose1.rotation[1][0] + pose2.rotation[2][1]*pose1.rotation[1][1] + pose2.rotation[2][2]*pose1.rotation[1][2],
+      pose2.rotation[2][0]*pose1.rotation[2][0] + pose2.rotation[2][1]*pose1.rotation[2][1] + pose2.rotation[2][2]*pose1.rotation[2][2]
+    ]
+  ];
+  const trel = sub3(pose2.translation, matVec3(Rrel, pose1.translation));
+  const E = multiply3(skew(trel), Rrel);
+  const K1inv = invK(K1), K2invT = transpose3(invK(K2));
+  return multiply3(K2invT, multiply3(E, K1inv));
+}
+function multiply3(A,B){
+  const C = Array.from({length:3}, ()=>Array(3).fill(0));
+  for(let r=0;r<3;r++) for(let c=0;c<3;c++) C[r][c] = A[r][0]*B[0][c]+A[r][1]*B[1][c]+A[r][2]*B[2][c];
+  return C;
+}
+function transpose3(A){ return [[A[0][0],A[1][0],A[2][0]],[A[0][1],A[1][1],A[2][1]],[A[0][2],A[1][2],A[2][2]]]; }
+function invK(K){
+  return [[1/K.fx,0,-K.cx/K.fx],[0,1/K.fy,-K.cy/K.fy],[0,0,1]];
+}
+function lineFromF(F, p){
+  return [
+    F[0][0]*p.x + F[0][1]*p.y + F[0][2],
+    F[1][0]*p.x + F[1][1]*p.y + F[1][2],
+    F[2][0]*p.x + F[2][1]*p.y + F[2][2]
+  ];
+}
+function pointLineDistance(line, p){
+  return Math.abs(line[0]*p.x + line[1]*p.y + line[2]) / Math.hypot(line[0], line[1]);
+}
+
+/********************************************************************
+ * MEASUREMENT
+ ********************************************************************/
+function computeMeasurement(){
+  if(!boardSolved || !currentObject){
+    setOut('Need solved board and active object', 'warn'); return;
+  }
+  const p1v1 = currentObject.p1_v1, p2v1 = currentObject.p2_v1, p1v2 = currentObject.p1_v2, p2v2 = currentObject.p2_v2;
+  if(!(p1v1 && p2v1 && p1v2 && p2v2)){
+    setOut('Need both endpoints in both views', 'warn'); return;
+  }
+
+  const X1 = triangulatePoint(p1v1, p1v2);
+  const X2 = triangulatePoint(p2v1, p2v2);
+  const d = sub3(X2, X1);
+
+  let measured;
+  if(document.getElementById('axisSel').value === 'table_normal'){
+    measured = Math.abs(d[2]);
+  }else{
+    measured = Math.hypot(d[0], d[1]);
+  }
+
+  const F = fundamentalMatrix();
+  const e1 = pointLineDistance(lineFromF(F, p1v1), p1v2);
+  const e2 = pointLineDistance(lineFromF(F, p2v1), p2v2);
+  const epi = 0.5*(e1+e2);
+
+  const gt = parseFloat(document.getElementById('gtMm').value);
+  const pct = Number.isFinite(gt) && gt > 0 ? Math.abs(measured-gt)/gt*100 : null;
+
+  results.push({
+    axis: document.getElementById('axisSel').value,
+    measured,
+    truth: Number.isFinite(gt) ? gt : null,
+    pct,
+    pose1: pose1.id,
+    pose2: pose2.id,
+    epi
+  });
+  refreshResults();
+  setOut(`Measured ${round(measured,2)} mm`, 'ok');
+  log(`[measure] ${document.getElementById('axisSel').value} = ${round(measured,2)} mm | epi ${round(epi,2)} px`);
+}
+function refreshResults(){
+  const tb = document.querySelector('#resTable tbody');
+  tb.innerHTML = '';
+  results.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td><td>${r.axis}</td><td>${round(r.measured,2)}</td>
+      <td>${r.truth==null?'':round(r.truth,2)}</td><td>${r.pct==null?'':round(r.pct,2)}</td>
+      <td>${r.pose1}</td><td>${r.pose2}</td><td>${round(r.epi,2)}</td>`;
+    tb.appendChild(tr);
+  });
+}
+function clearResults(){ results = []; refreshResults(); }
+
+/********************************************************************
+ * RENDER
+ ********************************************************************/
+function renderLive(){
+  if(!streaming || !video.videoWidth) return;
+  ensureCanvasSize(video.videoWidth, video.videoHeight);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+}
+function renderFrame(frame){
+  if(!frame) return;
+  ensureCanvasSize(frame.width, frame.height);
+  ctx.putImageData(frame.imageData, 0, 0);
+}
+function drawRect(r, color='#00e676'){
+  if(!r) return;
+  const rr = scaleRect(r);
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = 3;
+  ctx.strokeRect(rr.x, rr.y, rr.w, rr.h);
+  ctx.restore();
+}
+function drawPoint(p, label, color='#ffeb3b'){
+  if(!p) return;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI*2); ctx.fill();
+  ctx.font = 'bold 16px system-ui'; ctx.fillText(label, p.x + 8, p.y - 8);
+  ctx.restore();
+}
+function boardLinesForDisplay(frame, info, pose){
+  if(!info || !pose || !document.getElementById('overlayBoardChk').checked) return;
+  info.matchedMarkers.forEach(m=>{
+    ctx.save();
+    ctx.strokeStyle = '#00c853'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(m.corners[0].x, m.corners[0].y);
+    for(let i=1;i<m.corners.length;i++) ctx.lineTo(m.corners[i].x, m.corners[i].y);
+    ctx.closePath(); ctx.stroke();
+    const c = m.corners.reduce((a,p)=>({x:a.x+p.x/4,y:a.y+p.y/4}),{x:0,y:0});
+    ctx.fillStyle = '#00c853'; ctx.font='bold 18px system-ui'; ctx.fillText(String(m.id), c.x+8, c.y-8);
+    ctx.restore();
+  });
+}
+function drawEpipolarIfNeeded(){
+  if(!currentObject || !boardSolved || !document.getElementById('overlayEpiChk').checked) return;
+  const F = fundamentalMatrix();
+  if(displayMode === 'v2'){
+    if(currentObject.p1_v1) drawEpiLine(lineFromF(F, currentObject.p1_v1), '#00bcd4');
+    if(currentObject.p2_v1) drawEpiLine(lineFromF(F, currentObject.p2_v1), '#ff9800');
+  }
+}
+function drawEpiLine(line, color){
+  const [a,b,c] = line;
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2;
+  let pts = [];
+  if(Math.abs(b) > 1e-6){
+    pts.push({x:0, y:-c/b});
+    pts.push({x:canvas.width, y:-(a*canvas.width+c)/b});
+  }else if(Math.abs(a) > 1e-6){
+    const x = -c/a;
+    pts.push({x, y:0}); pts.push({x, y:canvas.height});
+  }
+  ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.stroke();
+  ctx.restore();
+}
+function render(){
+  const f = getDisplayedFrame();
+  if(displayMode === 'live'){ renderLive(); }
+  else if(f){ renderFrame(f); }
+  else{
+    ensureCanvasSize(1280, 720);
+    ctx.fillStyle = '#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+
+  if(displayMode === 'v1'){
+    boardLinesForDisplay(frame1, detectorInfo1, pose1);
+    if(currentObject){
+      drawRect(currentObject.roi1, '#00e676');
+      drawPoint(currentObject.p1_v1, 'P1', '#00bcd4');
+      drawPoint(currentObject.p2_v1, 'P2', '#ff9800');
+    }
+  }else if(displayMode === 'v2'){
+    boardLinesForDisplay(frame2, detectorInfo2, pose2);
+    if(currentObject){
+      drawRect(currentObject.roi2, '#00e676');
+      drawPoint(currentObject.p1_v2, 'P1', '#00bcd4');
+      drawPoint(currentObject.p2_v2, 'P2', '#ff9800');
+    }
+    drawEpipolarIfNeeded();
+  }
+  if(drawDrag){
+    drawRect(drawDrag, '#f44336');
+  }
+}
+function renderLoop(){
+  if(streaming && displayMode === 'live') render();
+  requestAnimationFrame(renderLoop);
+}
+
+/********************************************************************
+ * POINTERS
+ ********************************************************************/
+function canvasPoint(evt){
+  const rect = canvas.getBoundingClientRect();
+  const x = (evt.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (evt.clientY - rect.top) * (canvas.height / rect.height);
+  return {x,y};
+}
+canvas.addEventListener('pointerdown', evt => {
+  if(activeTouches>0 && evt.pointerType==='mouse') return;
+  if(!actionMode || !currentObject) return;
+  const p = canvasPoint(evt);
+  if(actionMode.startsWith('roi_')){
+    drawDrag = { x1:p.x, y1:p.y, x2:p.x, y2:p.y };
+    canvas.setPointerCapture(evt.pointerId);
+  }else{
+    let roi = null, frame = null;
+    if(actionMode.endsWith('_v1')){
+      roi = currentObject.roi1; frame = frame1;
+    }else{
+      roi = currentObject.roi2; frame = frame2;
+    }
+    const rp = refinePoint(frame, p, roi);
+    currentObject[actionMode] = rp;
+    setOut(`${actionMode} set`, 'ok');
+    if(actionMode === 'p1_v1') actionMode = 'p2_v1';
+    else if(actionMode === 'p2_v1') actionMode = 'p1_v2';
+    else if(actionMode === 'p1_v2') actionMode = 'p2_v2';
+    else if(actionMode === 'p2_v2') actionMode = null;
+    render();
+  }
+});
+canvas.addEventListener('pointermove', evt => {
+  if(!drawDrag) return;
+  const p = canvasPoint(evt);
+  drawDrag.x2 = p.x; drawDrag.y2 = p.y;
+  render();
+});
+canvas.addEventListener('pointerup', evt => {
+  if(!drawDrag || !currentObject) return;
+  const p = canvasPoint(evt);
+  drawDrag.x2 = p.x; drawDrag.y2 = p.y;
+  if(actionMode === 'roi_v1') currentObject.roi1 = {...drawDrag};
+  if(actionMode === 'roi_v2') currentObject.roi2 = {...drawDrag};
+  drawDrag = null;
+  actionMode = null;
+  render();
+});
+canvas.addEventListener('touchstart', ()=>{ activeTouches++; }, {passive:true});
+canvas.addEventListener('touchend', ()=>{ activeTouches=Math.max(0,activeTouches-1); }, {passive:true});
+
+/********************************************************************
+ * BOOT
+ ********************************************************************/
+(function init(){
+  setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
+  log('[boot] board ids ' + BOARD.ids.join(', ') + ' | dictionary ' + BOARD.dictionary);
+})();
+</script>
 </body>
 </html>
