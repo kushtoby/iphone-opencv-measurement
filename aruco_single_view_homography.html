@@ -178,8 +178,58 @@
     </div>
   </div>
 
-<script src="./cv.js"></script>
-<script src="./aruco.js"></script>
+<script>
+window.__deps = { cvReady:false, arReady:false, cvTriedLocal:false, cvTriedCdn:false };
+function __setBoot(text, cls=''){
+  const el = document.getElementById('out');
+  if(!el) return;
+  el.className = cls;
+  el.textContent = text;
+}
+function __loadScript(src){
+  return new Promise((resolve,reject)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = ()=>resolve(src);
+    s.onerror = ()=>reject(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
+  });
+}
+async function __bootDeps(){
+  __setBoot('Loading libraries...');
+  try{
+    window.__deps.cvTriedLocal = true;
+    await __loadScript('./cv.js');
+  }catch(_){
+    try{
+      window.__deps.cvTriedCdn = true;
+      await __loadScript('https://docs.opencv.org/4.10.0/opencv.js');
+    }catch(err){
+      __setBoot('OpenCV failed to load (local and CDN).', 'warn');
+      return;
+    }
+  }
+  try{
+    await __loadScript('./aruco.js');
+  }catch(err){
+    __setBoot('aruco.js failed to load. Put aruco.js beside this HTML file.', 'warn');
+    return;
+  }
+  const readyTimer = setInterval(()=>{
+    const cvOk = typeof cv !== 'undefined' && (typeof cv.findHomography === 'function' || (cv.Mat && typeof cv.getBuildInformation === 'function'));
+    const arOk = typeof AR !== 'undefined' && typeof AR.Detector === 'function';
+    if(cvOk && arOk){
+      clearInterval(readyTimer);
+      window.__deps.cvReady = true;
+      window.__deps.arReady = true;
+      __setBoot('Libraries ready. Start camera.', 'ok');
+      if(typeof updateLibStatus === 'function') updateLibStatus();
+    }
+  }, 100);
+}
+window.addEventListener('load', __bootDeps);
+</script>
 <script>
 'use strict';
 
@@ -227,6 +277,7 @@ let activeTouches = 0;
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d', { willReadFrequently:true });
+updateLibStatus();
 
 /********************************************************************
  * UTILS
@@ -242,6 +293,12 @@ function setOut(msg, cls=''){
   el.textContent = msg || '';
 }
 function setStatus(id, txt){ document.getElementById(id).textContent = txt; }
+function updateLibStatus(){
+  const cvTxt = window.__deps?.cvReady ? 'opencv: ready' : 'opencv: loading';
+  const arTxt = window.__deps?.arReady ? 'aruco: ready' : 'aruco: loading';
+  setStatus('cvStatus', cvTxt);
+  setStatus('arucoStatus', arTxt);
+}
 function round(v, n=2){ return Number(v).toFixed(n); }
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 function clonePt(p){ return { x:p.x, y:p.y }; }
@@ -311,12 +368,12 @@ function undistortPixelPoint(frame, p){
 async function startCamera(){
   try{
     if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){
-      setOut('aruco.js not loaded correctly', 'warn');
+      setOut('aruco.js not ready. Keep aruco.js beside this HTML file.', 'warn');
       log('[boot] AR.Detector missing');
       return;
     }
     if(typeof cv === 'undefined' || typeof cv.findHomography !== 'function'){
-      setOut('cv.js not loaded correctly', 'warn');
+      setOut('OpenCV not ready yet. Wait for the status to say ready.', 'warn');
       log('[boot] cv.findHomography missing');
       return;
     }
