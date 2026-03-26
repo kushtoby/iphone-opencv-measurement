@@ -1,77 +1,129 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Single-view ArUco homography measurement</title>
+  <title>Aruco Board Single-View Measurement</title>
   <style>
     :root{
-      --maxw: 980px; --radius: 14px; --border: 1px solid #e7e7e7;
-      --bg: #fafafa; --fg: #111; --muted: #555; --ok: #0a7a2f; --warn: #b00020;
+      --maxw: 980px;
+      --radius: 14px;
+      --border: 1px solid #e7e7e7;
+      --bg: #fafafa;
+      --fg: #111;
+      --muted: #555;
+      --ok: #0a7a2f;
+      --warn: #b00020;
+      --accent: #111;
     }
     *{ box-sizing:border-box; }
-    body{ margin:10px; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--fg); background:var(--bg); text-align:center; }
-    h2{ margin:6px 0 10px; font-size:20px; }
-    .wrap{ max-width:var(--maxw); margin:0 auto; text-align:left; }
-    canvas{ width:100%; max-width:var(--maxw); border-radius:var(--radius); border:var(--border); background:#000; display:block; margin:0 auto; touch-action:none; }
+    body{
+      margin: 10px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+      text-align: center;
+    }
+    h2{ margin: 6px 0 10px; font-size: 20px; }
+    .wrap{ max-width: var(--maxw); margin: 0 auto; text-align: left; }
+    canvas{
+      width: 100%;
+      max-width: var(--maxw);
+      border-radius: var(--radius);
+      border: var(--border);
+      background: #000;
+      display: block;
+      margin: 0 auto;
+      touch-action: none;
+    }
     .toolbar{
-      background:rgba(255,255,255,0.96); border:var(--border); border-radius:var(--radius);
-      padding:8px; margin:10px auto; max-width:var(--maxw);
-      display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px;
+      background: rgba(255,255,255,0.96);
+      border: var(--border);
+      border-radius: var(--radius);
+      padding: 8px;
+      margin: 10px auto;
+      max-width: var(--maxw);
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap: 8px;
     }
-    button,input{ border:var(--border); border-radius:12px; padding:10px 12px; font-size:15px; background:#fff; min-width:0; }
-    button.primary{ background:#111; color:#fff; border-color:#111; }
-    button:disabled{ opacity:.5; }
+    button,input{
+      border: var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 15px;
+      background: #fff;
+      min-width: 0;
+    }
+    button.primary{ background: var(--accent); color: #fff; border-color: var(--accent); }
+    button:disabled{ opacity: .5; }
     .pill{
-      grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:10px;
-      border:var(--border); border-radius:12px; padding:10px 12px; background:#fff; font-size:14px; flex-wrap:wrap;
+      grid-column: 1/-1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #fff;
+      font-size: 14px;
+      flex-wrap: wrap;
     }
-    .pill .grp{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .pill input[type="checkbox"]{ transform:scale(1.1); }
-    .section{ border:var(--border); border-radius:var(--radius); padding:10px; margin:10px 0; background:#fff; }
-    .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
-    .small{ font-size:12px; color:var(--muted); }
-    .ok{ color:var(--ok); font-weight:800; }
-    .warn{ color:var(--warn); font-weight:800; }
-    .resultsBox{ max-height:260px; overflow:auto; border:var(--border); border-radius:12px; margin-top:8px; }
-    table{ width:100%; border-collapse:collapse; font-size:13px; }
-    th,td{ border-bottom:1px solid #eee; padding:8px; text-align:left; white-space:nowrap; }
-    th{ position:sticky; top:0; background:#fff; }
+    .pill .grp{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .pill input[type="checkbox"]{ transform: scale(1.1); }
+    .section{
+      border: var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      margin: 10px 0;
+      background: #fff;
+    }
+    .row{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+    .small{ font-size: 12px; color: var(--muted); }
+    .ok{ color: var(--ok); font-weight: 800; }
+    .warn{ color: var(--warn); font-weight: 800; }
+    .resultsBox{ max-height: 260px; overflow: auto; border: var(--border); border-radius: 12px; margin-top: 8px; }
+    table{ width: 100%; border-collapse: collapse; font-size: 13px; }
+    th,td{ border-bottom: 1px solid #eee; padding: 8px; text-align: left; white-space: nowrap; }
+    th{ position: sticky; top: 0; background: #fff; }
     pre{
-      margin:8px 0 0; white-space:pre-wrap; word-break:break-word;
-      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-      font-size:12px; line-height:1.25; max-height:220px; overflow:auto;
-      border:var(--border); border-radius:12px; padding:10px; background:#fbfbfb;
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size: 12px;
+      line-height: 1.25;
+      max-height: 220px;
+      overflow: auto;
+      border: var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      background: #fbfbfb;
     }
-    @media (max-width:760px){ .toolbar{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
+    @media (max-width:760px){ .toolbar{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
   </style>
 </head>
 <body>
-  <h2>Single-view Metric Measurement — ArUco Board Homography</h2>
+  <h2>Single-View Length Measurement — ARUCO Board Homography</h2>
 
   <video id="video" autoplay playsinline style="display:none;"></video>
   <canvas id="canvas"></canvas>
 
   <div class="toolbar">
-    <button id="startBtn" class="primary" onclick="startCamera()">Start</button>
-    <button id="captureBtn" class="primary" onclick="captureFrameNow()" disabled>Capture</button>
-    <button id="showLiveBtn" onclick="setDisplay('live')" disabled>Live</button>
-    <button id="showCapBtn" onclick="setDisplay('cap')" disabled>Captured</button>
-
-    <button id="solveBtn" class="primary" onclick="solvePlane()" disabled>Solve plane</button>
-    <button id="newBtn" onclick="newMeasurement()" disabled>New measurement</button>
-    <button id="computeBtn" class="primary" onclick="computeMeasurement()" disabled>Compute</button>
-    <button id="clearBtn" onclick="clearMeasurement()" disabled>Clear measurement</button>
+    <button id="startBtn" class="primary" onclick="startCamera()">Start camera</button>
+    <button id="captureBtn" class="primary" onclick="captureBoard()" disabled>Capture board</button>
+    <button id="retakeBtn" onclick="retakeCapture()" disabled>Retake</button>
+    <button id="clearPtsBtn" onclick="clearPoints()" disabled>Clear points</button>
 
     <div class="pill">
       <div class="grp">
+        <label><input type="checkbox" id="liveDetectChk" checked> Live detect</label>
+        <label><input type="checkbox" id="overlayBoardChk" checked onchange="render()"> Show board</label>
         <label><input type="checkbox" id="refineChk" checked> Refine clicks</label>
         <label>Refine px <input id="refineRad" type="number" value="16" min="4" max="40" step="1" style="width:84px"></label>
-        <label><input type="checkbox" id="overlayBoardChk" checked onchange="render()"> Show board</label>
-        <label><input type="checkbox" id="overlayFeatChk" checked onchange="render()"> Show ROI features</label>
-        <label><input type="checkbox" id="liveDetectChk" checked> Live detect</label>
-        <label>Features <input id="maxFeat" type="number" value="80" min="10" max="300" step="10" style="width:84px"></label>
+        <label>Ground truth mm <input id="gtMm" type="number" value="" min="0" step="0.1" style="width:110px"></label>
+        <button onclick="clearResults()">Clear results</button>
       </div>
       <div class="grp small">
         Local files required: cv.js, aruco.js
@@ -84,30 +136,25 @@
       <div><b>Status</b></div>
       <div class="row small">
         <div id="cameraStatus">camera: idle</div>
-        <div id="displayStatus">display: live</div>
-        <div id="boardStatus">plane: unsolved</div>
-        <div id="objStatus">measurement: none</div>
+        <div id="viewStatus">view: live</div>
         <div id="liveDetectStatus">live ids: none</div>
+        <div id="boardStatus">board: not solved</div>
+        <div id="pointsStatus">points: 0 / 2</div>
       </div>
       <div class="row small">
         <div id="captureStatus">capture: none</div>
         <div id="boardDetail">expected ids: 12,13,14,15,16,17,18,19</div>
-        <div id="featStatus">features: none</div>
       </div>
       <div id="out" style="margin-top:8px;font-weight:800;"></div>
     </div>
 
     <div class="section">
-      <div><b>Measurement actions</b></div>
-      <div class="row">
-        <button onclick="beginAction('roi')" id="roiBtn" disabled>ROI</button>
-        <button onclick="beginAction('p1')" id="p1Btn" disabled>P1</button>
-        <button onclick="beginAction('p2')" id="p2Btn" disabled>P2</button>
-        <button onclick="detectRoiFeatures()" id="featBtn" disabled>Detect features</button>
-        <button onclick="snapPointsToNearestFeatures()" id="snapBtn" disabled>Snap points to features</button>
+      <div><b>How it works</b></div>
+      <div class="row small">
+        Start camera → align the ARUCO board until IDs appear → capture board → tap endpoint 1 and endpoint 2 on the frozen image.
       </div>
       <div class="row small">
-        Workflow: capture → solve plane → new measurement → draw ROI → detect features if needed → click P1 and P2 → compute.
+        This mode assumes the object segment lies on the same plane as the board. It measures planar length only.
       </div>
     </div>
 
@@ -117,15 +164,11 @@
         <table id="resTable">
           <thead>
             <tr>
-              <th>#</th><th>Measured mm</th><th>Truth mm</th><th>% err</th><th>Detected IDs</th><th>Used points</th>
+              <th>#</th><th>Measured mm</th><th>Truth mm</th><th>% err</th><th>Markers</th><th>Inliers</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
-      </div>
-      <div class="row">
-        <label>Ground truth mm <input id="gtMm" type="number" value="" min="0" step="0.1" style="width:110px"></label>
-        <button onclick="clearResults()">Clear results</button>
       </div>
     </div>
 
@@ -135,8 +178,54 @@
     </div>
   </div>
 
-<script src="./cv.js"></script>
-<script src="./aruco.js"></script>
+<script>
+window.__deps = { cvReady:false, arReady:false, cvTriedLocal:false };
+function __setBoot(text, cls=''){
+  const el = document.getElementById('out');
+  if(!el) return;
+  el.className = cls;
+  el.textContent = text;
+}
+function __loadScript(src){
+  return new Promise((resolve,reject)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = ()=>resolve(src);
+    s.onerror = ()=>reject(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
+  });
+}
+async function __bootDeps(){
+  __setBoot('Loading libraries...');
+  try{
+    window.__deps.cvTriedLocal = true;
+    await __loadScript('./cv.js');
+  }catch(err){
+    __setBoot('cv.js failed to load. Put cv.js beside this HTML file.', 'warn');
+    return;
+  }
+  try{
+    await __loadScript('./aruco.js');
+  }catch(err){
+    __setBoot('aruco.js failed to load. Put aruco.js beside this HTML file.', 'warn');
+    return;
+  }
+  const readyTimer = setInterval(()=>{
+    const cvOk = typeof CV !== 'undefined' && typeof CV.grayscale === 'function';
+    const arOk = typeof AR !== 'undefined' && typeof AR.Detector === 'function';
+    if(cvOk && arOk){
+      clearInterval(readyTimer);
+      window.__deps.cvReady = true;
+      window.__deps.arReady = true;
+      __setBoot('Libraries ready. Start camera.', 'ok');
+      if(typeof updateLibStatus === 'function') updateLibStatus();
+    }
+  }, 100);
+}
+
+window.addEventListener('load', __bootDeps);
+</script>
 <script>
 'use strict';
 
@@ -154,10 +243,11 @@ const CALIB = {
 };
 
 const BOARD = {
-  dictionary: 'ARUCO',
   ids: [12,13,14,15,16,17,18,19],
   markerSizeMm: 50,
   gapMm: 10,
+  boardWidthMm: 170,
+  boardHeightMm: 170,
   centersMm: {
     12:[25,145], 13:[85,145], 14:[145,145],
     15:[25,85],  16:[85,85],  17:[145,85],
@@ -170,22 +260,20 @@ const BOARD = {
  ********************************************************************/
 let detector = null;
 let streaming = false;
-let displayMode = 'live';
-let capturedFrame = null;
-let liveDetectorInfo = null;
-let capDetectorInfo = null;
-let planeSolved = false;
-let planeH = null;       // image-undistorted px -> plane mm
-let planeHinv = null;    // plane mm -> image-undistorted px
-let currentMeasurement = null;
+let liveInfo = null;
+let lastLiveDetectTs = 0;
+let frozenFrame = null;
+let frozenInfo = null;
+let HimgToBoard = null;
+let homographyInfo = null;
+let measurePoints = [];
 let results = [];
-let drawDrag = null;
-let actionMode = null;
 let activeTouches = 0;
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d', { willReadFrequently:true });
+updateLibStatus();
 
 /********************************************************************
  * UTILS
@@ -201,22 +289,29 @@ function setOut(msg, cls=''){
   el.textContent = msg || '';
 }
 function setStatus(id, txt){ document.getElementById(id).textContent = txt; }
+function updateLibStatus(){
+  const cvTxt = window.__deps?.cvReady ? 'cv.js: ready' : 'cv.js: loading';
+  const arTxt = window.__deps?.arReady ? 'aruco: ready' : 'aruco: loading';
+  setStatus('cvStatus', cvTxt);
+  setStatus('arucoStatus', arTxt);
+}
 function round(v, n=2){ return Number(v).toFixed(n); }
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
-function clonePt(p){ return p ? {x:p.x, y:p.y} : null; }
-
-function frameK(frame){
-  const sx = frame.width / CALIB.calW, sy = frame.height / CALIB.calH;
-  return { fx: CALIB.fx * sx, fy: CALIB.fy * sy, cx: CALIB.cx * sx, cy: CALIB.cy * sy };
-}
-function scaleRect(r){
-  const x = Math.min(r.x1, r.x2), y = Math.min(r.y1, r.y2);
-  return { x, y, w: Math.abs(r.x2-r.x1), h: Math.abs(r.y2-r.y1) };
-}
+function clonePt(p){ return { x:p.x, y:p.y }; }
 function ensureCanvasSize(w,h){
   if(canvas.width !== w || canvas.height !== h){
     canvas.width = w; canvas.height = h;
   }
+}
+function frameK(frame){
+  const sx = frame.width / CALIB.calW;
+  const sy = frame.height / CALIB.calH;
+  return {
+    fx: CALIB.fx * sx,
+    fy: CALIB.fy * sy,
+    cx: CALIB.cx * sx,
+    cy: CALIB.cy * sy
+  };
 }
 function captureCurrentFrame(){
   const w = video.videoWidth, h = video.videoHeight;
@@ -227,108 +322,7 @@ function captureCurrentFrame(){
   return { width:w, height:h, imageData:tctx.getImageData(0,0,w,h) };
 }
 function getDisplayedFrame(){
-  if(displayMode === 'cap') return capturedFrame;
-  return null;
-}
-function pointInRect(p, r){
-  if(!p || !r) return false;
-  const rr = scaleRect(r);
-  return p.x >= rr.x && p.x <= rr.x + rr.w && p.y >= rr.y && p.y <= rr.y + rr.h;
-}
-function matVec3(A, v){
-  return [
-    A[0][0]*v[0] + A[0][1]*v[1] + A[0][2]*v[2],
-    A[1][0]*v[0] + A[1][1]*v[1] + A[1][2]*v[2],
-    A[2][0]*v[0] + A[2][1]*v[1] + A[2][2]*v[2]
-  ];
-}
-function boardMarkerWorldCorners(id){
-  const c = BOARD.centersMm[id];
-  if(!c) return null;
-  const h = BOARD.markerSizeMm / 2;
-  return [
-    {x:c[0]-h, y:c[1]+h}, // TL
-    {x:c[0]+h, y:c[1]+h}, // TR
-    {x:c[0]+h, y:c[1]-h}, // BR
-    {x:c[0]-h, y:c[1]-h}  // BL
-  ];
-}
-function applyH(H, x, y){
-  const d = H[2][0]*x + H[2][1]*y + H[2][2];
-  if(Math.abs(d) < 1e-9) return null;
-  return {
-    x: (H[0][0]*x + H[0][1]*y + H[0][2]) / d,
-    y: (H[1][0]*x + H[1][1]*y + H[1][2]) / d
-  };
-}
-function cvMatToArray3x3(mat){
-  return [
-    [mat.doubleAt(0,0), mat.doubleAt(0,1), mat.doubleAt(0,2)],
-    [mat.doubleAt(1,0), mat.doubleAt(1,1), mat.doubleAt(1,2)],
-    [mat.doubleAt(2,0), mat.doubleAt(2,1), mat.doubleAt(2,2)]
-  ];
-}
-function undistortNormPoint(xd, yd){
-  const [k1,k2,p1,p2,k3] = CALIB.dist;
-  let x = xd, y = yd;
-  for(let i=0;i<6;i++){
-    const r2 = x*x + y*y, r4 = r2*r2, r6 = r4*r2;
-    const radial = 1 + k1*r2 + k2*r4 + k3*r6;
-    const dx = 2*p1*x*y + p2*(r2 + 2*x*x);
-    const dy = p1*(r2 + 2*y*y) + 2*p2*x*y;
-    x = (xd - dx) / radial;
-    y = (yd - dy) / radial;
-  }
-  return {x,y};
-}
-function undistortPixelPoint(frame, p){
-  const K = frameK(frame);
-  const xd = (p.x - K.cx) / K.fx;
-  const yd = (p.y - K.cy) / K.fy;
-  const u = undistortNormPoint(xd, yd);
-  return { x: u.x * K.fx + K.cx, y: u.y * K.fy + K.cy };
-}
-function grayscaleArray(frame){
-  const src = frame.imageData.data;
-  const g = new Float32Array(frame.width * frame.height);
-  for(let i=0,j=0;i<src.length;i+=4,j++) g[j] = 0.299*src[i] + 0.587*src[i+1] + 0.114*src[i+2];
-  return g;
-}
-function refinePoint(frame, pt, roi){
-  if(!document.getElementById('refineChk').checked) return clonePt(pt);
-  const rad = clamp(parseInt(document.getElementById('refineRad').value || '16',10), 4, 40);
-  const gray = grayscaleArray(frame);
-  const w = frame.width, h = frame.height;
-  const rr = roi ? scaleRect(roi) : {x:0,y:0,w:w,h:h};
-  let best = {score:-1, x:pt.x, y:pt.y};
-  const x0 = Math.max(1, Math.floor(pt.x-rad)), x1 = Math.min(w-2, Math.ceil(pt.x+rad));
-  const y0 = Math.max(1, Math.floor(pt.y-rad)), y1 = Math.min(h-2, Math.ceil(pt.y+rad));
-  for(let y=y0; y<=y1; y++){
-    if(y < rr.y || y > rr.y + rr.h) continue;
-    for(let x=x0; x<=x1; x++){
-      if(x < rr.x || x > rr.x + rr.w) continue;
-      const idx = y*w + x;
-      const gx = gray[idx+1] - gray[idx-1];
-      const gy = gray[idx+w] - gray[idx-w];
-      const mag = gx*gx + gy*gy;
-      const dist2 = (x-pt.x)*(x-pt.x) + (y-pt.y)*(y-pt.y);
-      const score = mag - 0.2*dist2;
-      if(score > best.score) best = {score, x, y};
-    }
-  }
-  return {x:best.x, y:best.y};
-}
-function invert3x3(H){
-  const src = cv.matFromArray(3,3,cv.CV_64F, [
-    H[0][0],H[0][1],H[0][2],
-    H[1][0],H[1][1],H[1][2],
-    H[2][0],H[2][1],H[2][2]
-  ]);
-  const dst = new cv.Mat();
-  cv.invert(src, dst);
-  const out = cvMatToArray3x3(dst);
-  src.delete(); dst.delete();
-  return out;
+  return frozenFrame;
 }
 function canvasPoint(evt){
   const rect = canvas.getBoundingClientRect();
@@ -339,14 +333,48 @@ function canvasPoint(evt){
 }
 
 /********************************************************************
+ * DISTORTION CORRECTION
+ ********************************************************************/
+function undistortNormPoint(xd, yd){
+  const [k1,k2,p1,p2,k3] = CALIB.dist;
+  let x = xd, y = yd;
+  for(let i=0;i<6;i++){
+    const r2 = x*x + y*y;
+    const r4 = r2*r2;
+    const r6 = r4*r2;
+    const radial = 1 + k1*r2 + k2*r4 + k3*r6;
+    const dx = 2*p1*x*y + p2*(r2 + 2*x*x);
+    const dy = p1*(r2 + 2*y*y) + 2*p2*x*y;
+    x = (xd - dx) / radial;
+    y = (yd - dy) / radial;
+  }
+  return { x, y };
+}
+function undistortPixelPoint(frame, p){
+  const K = frameK(frame);
+  const xd = (p.x - K.cx) / K.fx;
+  const yd = (p.y - K.cy) / K.fy;
+  const u = undistortNormPoint(xd, yd);
+  return { x: u.x * K.fx + K.cx, y: u.y * K.fy + K.cy };
+}
+
+/********************************************************************
  * CAMERA
  ********************************************************************/
 async function startCamera(){
   try{
-    if(typeof cv === 'undefined'){ setOut('Local cv.js not loaded correctly', 'warn'); return; }
-    if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){ setOut('Local aruco.js not loaded correctly', 'warn'); return; }
+    if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){
+      setOut('aruco.js not ready. Keep aruco.js beside this HTML file.', 'warn');
+      log('[boot] AR.Detector missing');
+      return;
+    }
+    if(typeof CV === 'undefined' || typeof CV.grayscale !== 'function'){
+      setOut('cv.js not ready yet. Keep cv.js beside this HTML file.', 'warn');
+      log('[boot] CV missing');
+      return;
+    }
 
-    detector = new AR.Detector({ dictionaryName: BOARD.dictionary });
+    detector = new AR.Detector({ dictionaryName: 'ARUCO' });
 
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -356,18 +384,17 @@ async function startCamera(){
       },
       audio: false
     });
+
     video.srcObject = stream;
     await video.play();
-
     ensureCanvasSize(video.videoWidth, video.videoHeight);
     streaming = true;
 
     setStatus('cameraStatus', `camera: ${video.videoWidth}x${video.videoHeight}`);
+    setStatus('viewStatus', 'view: live');
     document.getElementById('captureBtn').disabled = false;
-    document.getElementById('showLiveBtn').disabled = false;
     renderLoop();
     log('[cam] started');
-    setOut('Camera started', 'ok');
   }catch(err){
     setOut('Camera start failed', 'warn');
     log('[cam] ' + (err.message || err));
@@ -377,244 +404,258 @@ async function startCamera(){
 /********************************************************************
  * BOARD DETECTION + HOMOGRAPHY
  ********************************************************************/
+function markerCenter(marker){
+  let x = 0, y = 0;
+  for(const c of marker.corners){ x += c.x; y += c.y; }
+  return { x: x / marker.corners.length, y: y / marker.corners.length };
+}
+
 function detectBoardInFrame(frame){
   const markers = detector.detect(frame.imageData) || [];
-  const matchedMarkers = markers.filter(m => BOARD.ids.includes(Number(m.id)));
+  const matchedMarkers = markers
+    .filter(m => BOARD.ids.includes(Number(m.id)))
+    .map(m => {
+      const center = markerCenter(m);
+      const undCenter = undistortPixelPoint(frame, center);
+      return { ...m, center, undCenter };
+    })
+    .sort((a,b) => a.id - b.id);
+
   return { allMarkers: markers, matchedMarkers };
 }
-function runLiveBoardDetection(force=false){
-  if(!streaming || !video.videoWidth || !document.getElementById('liveDetectChk').checked){
-    liveDetectorInfo = null;
-    setStatus('liveDetectStatus', 'live ids: off');
-    return;
-  }
-  const now = performance.now();
-  if(!force && runLiveBoardDetection.lastTs && now - runLiveBoardDetection.lastTs < 250) return;
-  runLiveBoardDetection.lastTs = now;
-  const frame = captureCurrentFrame();
-  liveDetectorInfo = detectBoardInFrame(frame);
-  const ids = liveDetectorInfo.matchedMarkers.map(m => m.id);
-  setStatus('liveDetectStatus', `live ids: ${ids.length ? ids.join(',') : 'none'}`);
-}
-function solvePlane(){
-  if(!capturedFrame){ setOut('Capture a frame first', 'warn'); return; }
-  capDetectorInfo = detectBoardInFrame(capturedFrame);
 
-  const imgPts = [];
-  const objPts = [];
-  capDetectorInfo.matchedMarkers.forEach(m => {
-    const wc = boardMarkerWorldCorners(Number(m.id));
-    if(!wc) return;
-    for(let i=0;i<4;i++){
-      const und = undistortPixelPoint(capturedFrame, m.corners[i]);
-      imgPts.push(und.x, und.y);
-      objPts.push(wc[i].x, wc[i].y);
+function solveLinearSystem(A, b){
+  const n = A.length;
+  const M = A.map((row,i)=>row.slice().concat([b[i]]));
+  for(let col=0; col<n; col++){
+    let piv = col;
+    for(let r=col+1; r<n; r++) if(Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    if(Math.abs(M[piv][col]) < 1e-12) return null;
+    if(piv !== col){ const tmp=M[col]; M[col]=M[piv]; M[piv]=tmp; }
+    const div = M[col][col];
+    for(let c=col; c<=n; c++) M[col][c] /= div;
+    for(let r=0; r<n; r++){
+      if(r === col) continue;
+      const f = M[r][col];
+      for(let c=col; c<=n; c++) M[r][c] -= f * M[col][c];
     }
-  });
+  }
+  return M.map(row=>row[n]);
+}
 
-  const n = imgPts.length / 2;
-  if(n < 4){
-    planeSolved = false; planeH = null; planeHinv = null;
-    setStatus('boardStatus', 'plane: unsolved');
-    setOut('Need at least one full board marker (4 corners)', 'warn');
-    log('[plane] insufficient corners');
-    render();
+function fitHomographyLeastSquares(srcPts, dstPts){
+  if(!srcPts || !dstPts || srcPts.length !== dstPts.length || srcPts.length < 4) return null;
+  const ATA = Array.from({length:8}, ()=>Array(8).fill(0));
+  const ATb = Array(8).fill(0);
+  for(let i=0; i<srcPts.length; i++){
+    const x = srcPts[i].x, y = srcPts[i].y;
+    const X = dstPts[i].x, Y = dstPts[i].y;
+    const r1 = [x, y, 1, 0, 0, 0, -x*X, -y*X];
+    const r2 = [0, 0, 0, x, y, 1, -x*Y, -y*Y];
+    for(let r=0; r<8; r++){
+      ATb[r] += r1[r]*X + r2[r]*Y;
+      for(let c=0; c<8; c++) ATA[r][c] += r1[r]*r1[c] + r2[r]*r2[c];
+    }
+  }
+  const h = solveLinearSystem(ATA, ATb);
+  if(!h) return null;
+  return [[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]];
+}
+
+function applyHomography(H, p){
+  const w = H[2][0]*p.x + H[2][1]*p.y + H[2][2];
+  if(Math.abs(w) < 1e-12) return null;
+  return {
+    x: (H[0][0]*p.x + H[0][1]*p.y + H[0][2]) / w,
+    y: (H[1][0]*p.x + H[1][1]*p.y + H[1][2]) / w
+  };
+}
+
+function invert3x3(H){
+  const a=H[0][0], b=H[0][1], c=H[0][2];
+  const d=H[1][0], e=H[1][1], f=H[1][2];
+  const g=H[2][0], h=H[2][1], i=H[2][2];
+  const A=e*i-f*h, B=-(d*i-f*g), C=d*h-e*g;
+  const D=-(b*i-c*h), E=a*i-c*g, F=-(a*h-b*g);
+  const G=b*f-c*e, Hc=-(a*f-c*d), I=a*e-b*d;
+  const det = a*A + b*B + c*C;
+  if(Math.abs(det) < 1e-12) return null;
+  return [[A/det,D/det,G/det],[B/det,E/det,Hc/det],[C/det,F/det,I/det]];
+}
+
+function computeImageToBoardHomography(frame, info){
+  if(!info || info.matchedMarkers.length < 4) return null;
+  const srcPts = [];
+  const dstPts = [];
+  for(const m of info.matchedMarkers){
+    const boardPt = BOARD.centersMm[m.id];
+    if(!boardPt) continue;
+    srcPts.push({x:m.undCenter.x, y:m.undCenter.y});
+    dstPts.push({x:boardPt[0], y:boardPt[1]});
+  }
+  if(srcPts.length < 4) return null;
+  const H = fitHomographyLeastSquares(srcPts, dstPts);
+  if(!H) return null;
+  let inliers = 0;
+  for(let i=0; i<srcPts.length; i++){
+    const q = applyHomography(H, srcPts[i]);
+    if(!q) continue;
+    const err = Math.hypot(q.x - dstPts[i].x, q.y - dstPts[i].y);
+    if(err < 6) inliers++;
+  }
+  return { H, inlierCount: inliers, markerCount: srcPts.length };
+}
+function captureBoard(){
+  if(!streaming){
+    setOut('Start camera first', 'warn');
     return;
   }
 
-  const src = cv.matFromArray(n, 1, cv.CV_32FC2, imgPts);
-  const dst = cv.matFromArray(n, 1, cv.CV_32FC2, objPts);
-  const mask = new cv.Mat();
-  const H = cv.findHomography(src, dst, cv.RANSAC, 3.0, mask);
+  try{
+    frozenFrame = captureCurrentFrame();
+    frozenInfo = detectBoardInFrame(frozenFrame);
+    const hom = computeImageToBoardHomography(frozenFrame, frozenInfo);
 
-  if(H.empty()){
-    planeSolved = false; planeH = null; planeHinv = null;
-    setStatus('boardStatus', 'plane: unsolved');
-    setOut('Homography solve failed', 'warn');
-    log('[plane] findHomography failed');
-  }else{
-    planeH = cvMatToArray3x3(H);
-    planeHinv = invert3x3(planeH);
-    planeSolved = true;
-    setStatus('boardStatus', `plane: solved (${n} corners)`);
-    setOut(`Plane solved with ${n} corners`, 'ok');
-    log(`[plane] solved using ${n} board corners`);
-    document.getElementById('newBtn').disabled = false;
-    document.getElementById('clearBtn').disabled = false;
+    if(!hom){
+      HimgToBoard = null;
+      homographyInfo = null;
+      measurePoints = [];
+      setStatus('viewStatus', 'view: frozen');
+      setStatus('captureStatus', 'capture: frozen frame');
+      setStatus('boardStatus', 'board: solve failed');
+      setStatus('boardDetail', `found ids: ${frozenInfo.matchedMarkers.map(m=>m.id).join(',') || 'none'}`);
+      setOut('Board solve failed. Show at least 4 known board markers clearly.', 'warn');
+      log('[board] solve failed | ids ' + (frozenInfo.matchedMarkers.map(m=>m.id).join(',') || 'none'));
+      document.getElementById('retakeBtn').disabled = false;
+      document.getElementById('clearPtsBtn').disabled = true;
+      render();
+      return;
+    }
+
+    HimgToBoard = hom.H;
+    homographyInfo = hom;
+    measurePoints = [];
+
+    setStatus('viewStatus', 'view: frozen');
+    setStatus('captureStatus', 'capture: frozen frame');
+    setStatus('boardStatus', 'board: solved');
+    setStatus('boardDetail', `ids: ${frozenInfo.matchedMarkers.map(m=>m.id).join(',')} | inliers ${hom.inlierCount}/${hom.markerCount}`);
+    setStatus('pointsStatus', 'points: 0 / 2');
+    setOut('Board solved. Tap two endpoints on the frozen image.', 'ok');
+    log(`[board] solved | ids ${frozenInfo.matchedMarkers.map(m=>m.id).join(',')} | inliers ${hom.inlierCount}/${hom.markerCount}`);
+
+    document.getElementById('retakeBtn').disabled = false;
+    document.getElementById('clearPtsBtn').disabled = false;
+    render();
+  }catch(err){
+    setOut('Board capture failed', 'warn');
+    log('[board] ' + (err && err.stack ? err.stack : (err.message || err)));
   }
+}
 
-  src.delete(); dst.delete(); mask.delete(); H.delete();
+function retakeCapture(){
+  frozenFrame = null;
+  frozenInfo = null;
+  HimgToBoard = null;
+  homographyInfo = null;
+  measurePoints = [];
+  setStatus('viewStatus', 'view: live');
+  setStatus('captureStatus', 'capture: none');
+  setStatus('boardStatus', 'board: not solved');
+  setStatus('pointsStatus', 'points: 0 / 2');
+  setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
+  setOut('Retake ready', '');
+  document.getElementById('clearPtsBtn').disabled = true;
   render();
 }
 
 /********************************************************************
- * CAPTURE + MEASUREMENT STATE
+ * CLICK REFINEMENT + MEASUREMENT
  ********************************************************************/
-function captureFrameNow(){
-  if(!streaming){ setOut('Start camera first', 'warn'); return; }
-  capturedFrame = captureCurrentFrame();
-  capDetectorInfo = detectBoardInFrame(capturedFrame);
-  planeSolved = false; planeH = null; planeHinv = null;
-  currentMeasurement = null;
-  const ids = capDetectorInfo.matchedMarkers.map(m => m.id);
-  setStatus('captureStatus', `capture: ${capturedFrame.width}x${capturedFrame.height}`);
-  setStatus('boardStatus', 'plane: unsolved');
-  setStatus('objStatus', 'measurement: none');
-  setStatus('featStatus', 'features: none');
-  setDisplay('cap');
-  document.getElementById('showCapBtn').disabled = false;
-  document.getElementById('solveBtn').disabled = false;
-  document.getElementById('newBtn').disabled = true;
-  document.getElementById('computeBtn').disabled = true;
-  document.getElementById('roiBtn').disabled = true;
-  document.getElementById('p1Btn').disabled = true;
-  document.getElementById('p2Btn').disabled = true;
-  document.getElementById('featBtn').disabled = true;
-  document.getElementById('snapBtn').disabled = true;
-  setOut(`Captured frame. Board IDs: ${ids.length ? ids.join(', ') : 'none'}`, ids.length ? 'ok' : 'warn');
-  log(`[cap] board ids: ${ids.length ? ids.join(',') : 'none'}`);
-  render();
-}
-function setDisplay(mode){
-  displayMode = mode;
-  setStatus('displayStatus', `display: ${mode === 'cap' ? 'captured' : 'live'}`);
-  render();
-}
-function newMeasurement(){
-  if(!planeSolved || !capturedFrame){ setOut('Solve the plane first', 'warn'); return; }
-  currentMeasurement = { roi:null, p1:null, p2:null, features:[], p1_mm:null, p2_mm:null };
-  setStatus('objStatus', 'measurement: active');
-  setStatus('featStatus', 'features: none');
-  document.getElementById('computeBtn').disabled = false;
-  document.getElementById('roiBtn').disabled = false;
-  document.getElementById('p1Btn').disabled = false;
-  document.getElementById('p2Btn').disabled = false;
-  document.getElementById('featBtn').disabled = false;
-  document.getElementById('snapBtn').disabled = false;
-  actionMode = null;
-  setOut('New measurement ready', 'ok');
-  render();
-}
-function clearMeasurement(){
-  currentMeasurement = null;
-  actionMode = null;
-  drawDrag = null;
-  setStatus('objStatus', 'measurement: none');
-  setStatus('featStatus', 'features: none');
-  document.getElementById('computeBtn').disabled = true;
-  document.getElementById('roiBtn').disabled = true;
-  document.getElementById('p1Btn').disabled = true;
-  document.getElementById('p2Btn').disabled = true;
-  document.getElementById('featBtn').disabled = true;
-  document.getElementById('snapBtn').disabled = true;
-  render();
-}
-function beginAction(mode){
-  if(displayMode !== 'cap'){ setOut('Switch to Captured view first', 'warn'); return; }
-  if(!currentMeasurement){ setOut('Create a measurement first', 'warn'); return; }
-  actionMode = mode;
-  setOut(`Action: ${mode}`, 'ok');
-}
-
-/********************************************************************
- * ROI FEATURES
- ********************************************************************/
-function detectRoiFeatures(){
-  if(!capturedFrame || !currentMeasurement || !currentMeasurement.roi){
-    setOut('Draw ROI first', 'warn'); return;
+function grayscaleArray(frame){
+  const src = frame.imageData.data;
+  const g = new Float32Array(frame.width * frame.height);
+  for(let i=0,j=0;i<src.length;i+=4,j++){
+    g[j] = 0.299*src[i] + 0.587*src[i+1] + 0.114*src[i+2];
   }
-  const rr = scaleRect(currentMeasurement.roi);
-  if(rr.w < 10 || rr.h < 10){ setOut('ROI too small', 'warn'); return; }
+  return g;
+}
 
-  const src = cv.matFromImageData(capturedFrame.imageData);
-  const gray = new cv.Mat();
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+function refinePoint(frame, pt){
+  if(!document.getElementById('refineChk').checked) return clonePt(pt);
+  const rad = clamp(parseInt(document.getElementById('refineRad').value || '16',10), 4, 40);
+  const gray = grayscaleArray(frame);
+  const w = frame.width, h = frame.height;
+  let best = { score:-1, x:pt.x, y:pt.y };
 
-  const rect = new cv.Rect(
-    clamp(Math.round(rr.x), 0, gray.cols - 1),
-    clamp(Math.round(rr.y), 0, gray.rows - 1),
-    clamp(Math.round(rr.w), 1, gray.cols - clamp(Math.round(rr.x), 0, gray.cols - 1)),
-    clamp(Math.round(rr.h), 1, gray.rows - clamp(Math.round(rr.y), 0, gray.rows - 1))
-  );
-  const roiMat = gray.roi(rect);
-  const corners = new cv.Mat();
-  const maxCorners = clamp(parseInt(document.getElementById('maxFeat').value || '80', 10), 10, 300);
-  cv.goodFeaturesToTrack(roiMat, corners, maxCorners, 0.01, 6);
+  const x0 = Math.max(1, Math.floor(pt.x - rad));
+  const x1 = Math.min(w - 2, Math.ceil(pt.x + rad));
+  const y0 = Math.max(1, Math.floor(pt.y - rad));
+  const y1 = Math.min(h - 2, Math.ceil(pt.y + rad));
 
-  const pts = [];
-  for(let i=0; i<corners.rows; i++){
-    const x = corners.floatAt(i,0) + rect.x;
-    const y = corners.floatAt(i,1) + rect.y;
-    pts.push({x,y});
+  for(let y=y0; y<=y1; y++){
+    for(let x=x0; x<=x1; x++){
+      const idx = y*w + x;
+      const gx = gray[idx + 1] - gray[idx - 1];
+      const gy = gray[idx + w] - gray[idx - w];
+      const mag = gx*gx + gy*gy;
+      const dist2 = (x - pt.x)*(x - pt.x) + (y - pt.y)*(y - pt.y);
+      const score = mag - 0.2*dist2;
+      if(score > best.score) best = { score, x, y };
+    }
   }
-  currentMeasurement.features = pts;
-  setStatus('featStatus', `features: ${pts.length}`);
-  setOut(`Detected ${pts.length} ROI features`, 'ok');
-  log(`[feat] ${pts.length} features in ROI`);
-
-  src.delete(); gray.delete(); roiMat.delete(); corners.delete();
-  render();
-}
-function snapOnePointToFeatures(p){
-  if(!p || !currentMeasurement || !currentMeasurement.features || !currentMeasurement.features.length) return p;
-  let best = null, bestD2 = Infinity;
-  for(const q of currentMeasurement.features){
-    const d2 = (q.x-p.x)*(q.x-p.x) + (q.y-p.y)*(q.y-p.y);
-    if(d2 < bestD2){ bestD2 = d2; best = q; }
-  }
-  return best && bestD2 <= 35*35 ? clonePt(best) : p;
-}
-function snapPointsToNearestFeatures(){
-  if(!currentMeasurement){ setOut('No active measurement', 'warn'); return; }
-  if(!currentMeasurement.features || !currentMeasurement.features.length){
-    setOut('Detect features first', 'warn'); return;
-  }
-  if(currentMeasurement.p1) currentMeasurement.p1 = snapOnePointToFeatures(currentMeasurement.p1);
-  if(currentMeasurement.p2) currentMeasurement.p2 = snapOnePointToFeatures(currentMeasurement.p2);
-  setOut('Snapped points to nearest ROI features', 'ok');
-  render();
+  return { x: best.x, y: best.y };
 }
 
-/********************************************************************
- * MEASUREMENT
- ********************************************************************/
-function imagePointToPlaneMm(p){
-  if(!planeSolved || !planeH) return null;
-  const und = undistortPixelPoint(capturedFrame, p);
-  return applyH(planeH, und.x, und.y);
+function boardPointFromImagePoint(frame, p){
+  if(!HimgToBoard) return null;
+  const und = undistortPixelPoint(frame, p);
+  return transformPoint(HimgToBoard, und);
 }
+
 function computeMeasurement(){
-  if(!planeSolved || !currentMeasurement){ setOut('Need solved plane and active measurement', 'warn'); return; }
-  if(!(currentMeasurement.p1 && currentMeasurement.p2)){ setOut('Need P1 and P2', 'warn'); return; }
+  if(!frozenFrame || !HimgToBoard || measurePoints.length !== 2) return;
 
-  const P1 = imagePointToPlaneMm(currentMeasurement.p1);
-  const P2 = imagePointToPlaneMm(currentMeasurement.p2);
-  if(!P1 || !P2){ setOut('Point mapping failed', 'warn'); return; }
+  const b1 = boardPointFromImagePoint(frozenFrame, measurePoints[0]);
+  const b2 = boardPointFromImagePoint(frozenFrame, measurePoints[1]);
+  if(!b1 || !b2 || !Number.isFinite(b1.x) || !Number.isFinite(b1.y) || !Number.isFinite(b2.x) || !Number.isFinite(b2.y)){
+    setOut('Measurement failed', 'warn');
+    log('[measure] board-point mapping failed');
+    return;
+  }
 
-  currentMeasurement.p1_mm = P1;
-  currentMeasurement.p2_mm = P2;
-  const measured = Math.hypot(P2.x - P1.x, P2.y - P1.y);
-
+  const dx = b2.x - b1.x;
+  const dy = b2.y - b1.y;
+  const measured = Math.hypot(dx, dy);
   const gt = parseFloat(document.getElementById('gtMm').value);
-  const pct = Number.isFinite(gt) && gt > 0 ? Math.abs(measured - gt)/gt*100 : null;
-  const ids = (capDetectorInfo?.matchedMarkers || []).map(m => m.id).join(',');
+  const pct = Number.isFinite(gt) && gt > 0 ? Math.abs(measured - gt) / gt * 100 : null;
 
   results.push({
-    measured, truth: Number.isFinite(gt) ? gt : null, pct,
-    ids, usedPoints: `${round(P1.x,1)},${round(P1.y,1)} → ${round(P2.x,1)},${round(P2.y,1)}`
+    measured,
+    truth: Number.isFinite(gt) ? gt : null,
+    pct,
+    markers: homographyInfo ? homographyInfo.markerCount : null,
+    inliers: homographyInfo ? homographyInfo.inlierCount : null
   });
   refreshResults();
+
   setOut(`Measured ${round(measured,2)} mm`, 'ok');
-  log(`[measure] ${round(measured,2)} mm`);
+  log(`[measure] ${round(measured,2)} mm | board p1=(${round(b1.x,1)}, ${round(b1.y,1)}) p2=(${round(b2.x,1)}, ${round(b2.y,1)})`);
 }
+
+function clearPoints(){
+  measurePoints = [];
+  setStatus('pointsStatus', 'points: 0 / 2');
+  setOut('Points cleared', '');
+  render();
+}
+
 function refreshResults(){
   const tb = document.querySelector('#resTable tbody');
   tb.innerHTML = '';
   results.forEach((r, i) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${i+1}</td><td>${round(r.measured,2)}</td>
-      <td>${r.truth==null?'':round(r.truth,2)}</td><td>${r.pct==null?'':round(r.pct,2)}</td>
-      <td>${r.ids}</td><td>${r.usedPoints}</td>`;
+    tr.innerHTML = `<td>${i+1}</td><td>${round(r.measured,2)}</td><td>${r.truth==null?'':round(r.truth,2)}</td><td>${r.pct==null?'':round(r.pct,2)}</td><td>${r.markers ?? ''}</td><td>${r.inliers ?? ''}</td>`;
     tb.appendChild(tr);
   });
 }
@@ -623,123 +664,93 @@ function clearResults(){ results = []; refreshResults(); }
 /********************************************************************
  * RENDER
  ********************************************************************/
+function runLiveBoardDetection(){
+  if(!streaming || !video.videoWidth || !document.getElementById('liveDetectChk').checked){
+    liveInfo = null;
+    setStatus('liveDetectStatus', 'live ids: off');
+    return;
+  }
+  const now = performance.now();
+  if(now - lastLiveDetectTs < 250) return;
+  lastLiveDetectTs = now;
+  const frame = captureCurrentFrame();
+  liveInfo = detectBoardInFrame(frame);
+  setStatus('liveDetectStatus', `live ids: ${liveInfo.matchedMarkers.length ? liveInfo.matchedMarkers.map(m=>m.id).join(',') : 'none'}`);
+}
+
 function renderLive(){
   if(!streaming || !video.videoWidth) return;
   ensureCanvasSize(video.videoWidth, video.videoHeight);
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  if(liveDetectorInfo && document.getElementById('overlayBoardChk').checked) drawBoardMarkers(liveDetectorInfo);
+  runLiveBoardDetection();
+  drawBoardOverlay(liveInfo);
 }
-function renderFrame(frame){
+
+function renderFrozen(frame){
   if(!frame) return;
   ensureCanvasSize(frame.width, frame.height);
   ctx.putImageData(frame.imageData, 0, 0);
+  drawBoardOverlay(frozenInfo);
+  drawMeasurePoints();
 }
-function drawRect(r, color='#00e676'){
-  if(!r) return;
-  const rr = scaleRect(r);
-  ctx.save();
-  ctx.strokeStyle = color; ctx.lineWidth = 3;
-  ctx.strokeRect(rr.x, rr.y, rr.w, rr.h);
-  ctx.restore();
-}
-function drawPoint(p, label, color='#ffeb3b'){
-  if(!p) return;
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI*2); ctx.fill();
-  ctx.font = 'bold 16px system-ui'; ctx.fillText(label, p.x + 8, p.y - 8);
-  ctx.restore();
-}
-function drawFeatures(feats){
-  if(!feats || !document.getElementById('overlayFeatChk').checked) return;
-  ctx.save();
-  ctx.strokeStyle = '#00bcd4'; ctx.lineWidth = 1.5;
-  for(const p of feats){
-    ctx.beginPath();
-    ctx.moveTo(p.x-4, p.y); ctx.lineTo(p.x+4, p.y);
-    ctx.moveTo(p.x, p.y-4); ctx.lineTo(p.x, p.y+4);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-function drawBoardMarkers(info){
-  if(!info) return;
-  info.matchedMarkers.forEach(m => {
+
+function drawBoardOverlay(info){
+  if(!info || !document.getElementById('overlayBoardChk').checked) return;
+  for(const m of info.matchedMarkers){
     ctx.save();
-    ctx.strokeStyle = '#00c853'; ctx.lineWidth = 3;
+    ctx.strokeStyle = '#00c853';
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(m.corners[0].x, m.corners[0].y);
     for(let i=1;i<m.corners.length;i++) ctx.lineTo(m.corners[i].x, m.corners[i].y);
-    ctx.closePath(); ctx.stroke();
-    const c = m.corners.reduce((a,p)=>({x:a.x+p.x/4,y:a.y+p.y/4}),{x:0,y:0});
-    ctx.fillStyle = '#00c853'; ctx.font='bold 18px system-ui'; ctx.fillText(String(m.id), c.x+8, c.y-8);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = '#00c853';
+    ctx.beginPath();
+    ctx.arc(m.center.x, m.center.y, 5, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.font = 'bold 18px system-ui';
+    ctx.fillText(String(m.id), m.center.x + 8, m.center.y - 8);
     ctx.restore();
-  });
+  }
 }
-function drawPlaneBackProjectionGrid(){
-  if(!planeSolved || !planeHinv || displayMode !== 'cap') return;
+
+function drawPoint(p, label, color){
+  if(!p) return;
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-  ctx.lineWidth = 1;
-  for(let x=0; x<=180; x+=20){
-    let first = true;
-    ctx.beginPath();
-    for(let y=0; y<=180; y+=10){
-      const p = applyH(planeHinv, x, y);
-      if(!p) continue;
-      if(first){ ctx.moveTo(p.x, p.y); first = false; } else ctx.lineTo(p.x, p.y);
-    }
-    ctx.stroke();
-  }
-  for(let y=0; y<=180; y+=20){
-    let first = true;
-    ctx.beginPath();
-    for(let x=0; x<=180; x+=10){
-      const p = applyH(planeHinv, x, y);
-      if(!p) continue;
-      if(first){ ctx.moveTo(p.x, p.y); first = false; } else ctx.lineTo(p.x, p.y);
-    }
-    ctx.stroke();
-  }
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 6, 0, Math.PI*2);
+  ctx.fill();
+  ctx.font = 'bold 16px system-ui';
+  ctx.fillText(label, p.x + 8, p.y - 8);
   ctx.restore();
 }
-function render(){
-  const f = getDisplayedFrame();
-  if(displayMode === 'live'){ renderLive(); }
-  else if(f){ renderFrame(f); }
-  else{
-    ensureCanvasSize(1280, 720);
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-  }
 
-  if(displayMode === 'cap' && capturedFrame){
-    if(document.getElementById('overlayBoardChk').checked) drawBoardMarkers(capDetectorInfo);
-    drawPlaneBackProjectionGrid();
-    if(currentMeasurement){
-      drawRect(currentMeasurement.roi, '#00e676');
-      drawFeatures(currentMeasurement.features);
-      drawPoint(currentMeasurement.p1, 'P1', '#00bcd4');
-      drawPoint(currentMeasurement.p2, 'P2', '#ff9800');
-      if(currentMeasurement.p1_mm && currentMeasurement.p2_mm){
-        ctx.save();
-        ctx.strokeStyle = '#ffeb3b'; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(currentMeasurement.p1.x, currentMeasurement.p1.y); ctx.lineTo(currentMeasurement.p2.x, currentMeasurement.p2.y); ctx.stroke();
-        const midx = 0.5*(currentMeasurement.p1.x + currentMeasurement.p2.x);
-        const midy = 0.5*(currentMeasurement.p1.y + currentMeasurement.p2.y);
-        const d = Math.hypot(currentMeasurement.p2_mm.x-currentMeasurement.p1_mm.x, currentMeasurement.p2_mm.y-currentMeasurement.p1_mm.y);
-        ctx.fillStyle = '#ffeb3b'; ctx.font = 'bold 20px system-ui'; ctx.fillText(`${round(d,2)} mm`, midx + 8, midy - 8);
-        ctx.restore();
-      }
-    }
+function drawMeasurePoints(){
+  drawPoint(measurePoints[0], 'P1', '#00bcd4');
+  drawPoint(measurePoints[1], 'P2', '#ff9800');
+  if(measurePoints.length === 2){
+    ctx.save();
+    ctx.strokeStyle = '#ffd54f';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(measurePoints[0].x, measurePoints[0].y);
+    ctx.lineTo(measurePoints[1].x, measurePoints[1].y);
+    ctx.stroke();
+    ctx.restore();
   }
-  if(drawDrag) drawRect(drawDrag, '#f44336');
 }
+
+function render(){
+  if(frozenFrame) renderFrozen(frozenFrame);
+  else renderLive();
+}
+
 function renderLoop(){
-  if(streaming && displayMode === 'live'){
-    runLiveBoardDetection(false);
-    render();
-  }
+  if(streaming) render();
   requestAnimationFrame(renderLoop);
 }
 
@@ -748,46 +759,31 @@ function renderLoop(){
  ********************************************************************/
 canvas.addEventListener('pointerdown', evt => {
   if(activeTouches > 0 && evt.pointerType === 'mouse') return;
-  if(displayMode !== 'cap' || !actionMode || !currentMeasurement || !capturedFrame) return;
-  const p = canvasPoint(evt);
-  if(actionMode === 'roi'){
-    drawDrag = { x1:p.x, y1:p.y, x2:p.x, y2:p.y };
-    canvas.setPointerCapture(evt.pointerId);
-  }else{
-    const rp = refinePoint(capturedFrame, p, currentMeasurement.roi);
-    currentMeasurement[actionMode] = rp;
-    if(actionMode === 'p1') actionMode = 'p2';
-    else if(actionMode === 'p2') actionMode = null;
-    setOut('Point set', 'ok');
-    render();
-  }
-});
-canvas.addEventListener('pointermove', evt => {
-  if(!drawDrag) return;
-  const p = canvasPoint(evt);
-  drawDrag.x2 = p.x; drawDrag.y2 = p.y;
-  render();
-});
-canvas.addEventListener('pointerup', evt => {
-  if(!drawDrag || !currentMeasurement) return;
-  const p = canvasPoint(evt);
-  drawDrag.x2 = p.x; drawDrag.y2 = p.y;
-  currentMeasurement.roi = {...drawDrag};
-  currentMeasurement.features = [];
-  currentMeasurement.p1 = null;
-  currentMeasurement.p2 = null;
-  currentMeasurement.p1_mm = null;
-  currentMeasurement.p2_mm = null;
-  setStatus('featStatus', 'features: none');
-  drawDrag = null;
-  actionMode = null;
-  setOut('ROI set', 'ok');
-  render();
-});
-canvas.addEventListener('touchstart', ()=>{ activeTouches++; }, {passive:true});
-canvas.addEventListener('touchend', ()=>{ activeTouches=Math.max(0,activeTouches-1); }, {passive:true});
+  if(!frozenFrame || !HimgToBoard) return;
 
-render();
+  const p = canvasPoint(evt);
+  const rp = refinePoint(frozenFrame, p);
+
+  if(measurePoints.length >= 2) measurePoints = [];
+  measurePoints.push(rp);
+  setStatus('pointsStatus', `points: ${measurePoints.length} / 2`);
+  if(measurePoints.length === 2) computeMeasurement();
+  else setOut('Endpoint 1 set. Tap endpoint 2.', 'ok');
+  render();
+});
+
+canvas.addEventListener('touchstart', ()=>{ activeTouches++; }, {passive:true});
+canvas.addEventListener('touchend', ()=>{ activeTouches = Math.max(0, activeTouches - 1); }, {passive:true});
+
+/********************************************************************
+ * BOOT
+ ********************************************************************/
+(function init(){
+  setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
+  log('[boot] single-view board homography mode');
+  log('[boot] board ids ' + BOARD.ids.join(', '));
+  log('[boot] measurement plane is the board plane only');
+})();
 </script>
 </body>
 </html>
