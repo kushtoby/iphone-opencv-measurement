@@ -206,13 +206,13 @@
  * CONFIG
  ********************************************************************/
 const CALIB = {
-  calW: 2560,
+  calW: 1080,
   calH: 1920,
-  fx: 1939.22217,
-  fy: 1944.80422,
-  cx: 1250.09825,
-  cy: 947.957973,
-  dist: [0.196139581, -0.79214993, 0.000251525214, -0.00647283132, 0.486071831]
+  fx: 1388.13835,
+  fy: 1388.73166,
+  cx: 583.186733,
+  cy: 913.686033,
+  dist: [0.11153592, -0.21737664, -0.00028422, 0.00925723, 0.21312604]
 };
 
 const BOARD = {
@@ -348,8 +348,8 @@ async function startCamera(){
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+        width: { ideal: 1080 },
+        height: { ideal: 1920 }
       },
       audio: false
     });
@@ -798,7 +798,7 @@ function render(){
   if(displayMode === 'live'){ renderLive(); }
   else if(f){ renderFrame(f); }
   else{
-    ensureCanvasSize(1280, 720);
+    ensureCanvasSize(1080, 1920);
     ctx.fillStyle = '#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
   }
 
@@ -885,6 +885,7 @@ canvas.addEventListener('touchend', ()=>{ activeTouches=Math.max(0,activeTouches
 (function init(){
   setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
   log('[boot] board ids ' + BOARD.ids.join(', ') + ' | dictionary ' + BOARD.dictionary);
+  log('[boot] calib mode ' + CALIB.calW + 'x' + CALIB.calH);
 })();
 </script>
 </body>
