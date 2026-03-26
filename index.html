@@ -551,6 +551,7 @@ function solveBoard(){
     enableObjectControls(false);
   }
   render();
+  updateComputeButton();
 }
 
 /********************************************************************
@@ -618,6 +619,7 @@ function newObjectSession(){
   setStatus('objStatus', 'object: active');
   setOut('New object session started', 'ok');
   render();
+  updateComputeButton();
 }
 function clearCurrentObject(){
   currentObject = null;
@@ -626,6 +628,7 @@ function clearCurrentObject(){
   setStatus('objStatus', 'object: none');
   setOut('Current object cleared', '');
   render();
+  updateComputeButton();
 }
 function finishCurrentAndNext(){
   newObjectSession();
@@ -973,6 +976,18 @@ function render(){
 function renderLoop(){
   if(streaming && displayMode === 'live') render();
   requestAnimationFrame(renderLoop);
+}
+
+function updateComputeButton(){
+  const ok = !!(
+    boardSolved &&
+    currentObject &&
+    currentObject.p1_v1 &&
+    currentObject.p2_v1 &&
+    currentObject.p1_v2 &&
+    currentObject.p2_v2
+  );
+  document.getElementById('computeBtn').disabled = !ok;
 }
 
 /********************************************************************
