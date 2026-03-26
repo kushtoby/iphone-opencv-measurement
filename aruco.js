@@ -11,13 +11,35 @@ var AR = AR || (function() {
       options = options || {};
       this.grey = new CV.Image();
       this.thres = new CV.Image();
+      this.thresAlt = new CV.Image();
+      this.thresGlobal = new CV.Image();
+      this.blur = new CV.Image();
       this.homography = new CV.Image();
       this.binary = [];
+      this.binaryAlt = [];
+      this.binaryGlobal = [];
       this.contours = [];
       this.polys = [];
       this.candidates = [];
       this.dictionaryName = options.dictionaryName || 'ARUCO';
       this.dictionary = AR.Dictionary[this.dictionaryName];
+
+      // Tunable detection parameters with more forgiving defaults for phone captures.
+      this.params = {
+        candidateMinSizeRatio: options.candidateMinSizeRatio || 0.12,
+        epsilon: options.epsilon || 0.03,
+        minEdgeLength: options.minEdgeLength || 14,
+        nearDistance: options.nearDistance || 12,
+        warpSize: options.warpSize || 70,
+        borderWhiteMaxFraction: options.borderWhiteMaxFraction || 0.65,
+        useMultiThreshold: (options.useMultiThreshold !== false),
+        adaptiveBlockSize1: options.adaptiveBlockSize1 || 2,
+        adaptiveOffset1: options.adaptiveOffset1 || 7,
+        adaptiveBlockSize2: options.adaptiveBlockSize2 || 2,
+        adaptiveOffset2: options.adaptiveOffset2 || 5,
+        blurKernelSize: options.blurKernelSize || 3,
+        useGlobalOtsuPass: (options.useGlobalOtsuPass !== false)
+      };
     }
   };
 
@@ -45,39 +67,93 @@ var AR = AR || (function() {
   };
 
   AR.Detector.prototype.detect = function(image){
+    var markers = [], thresholdImages = [], thresholdBinaries = [], i;
+
     CV.grayscale(image, this.grey);
-    CV.adaptiveThreshold(this.grey, this.thres, 2, 7);
 
-    this.contours = CV.findContours(this.thres, this.binary);
-    this.candidates = this.findCandidates(this.contours, image.width * 0.20, 0.05, 10);
-    this.candidates = this.clockwiseCorners(this.candidates);
-    this.candidates = this.notTooNear(this.candidates, 10);
+    // Pass 1: original adaptive threshold.
+    CV.adaptiveThreshold(this.grey, this.thres,
+      this.params.adaptiveBlockSize1,
+      this.params.adaptiveOffset1);
+    thresholdImages.push(this.thres);
+    thresholdBinaries.push(this.binary);
 
-    return this.findMarkers(this.grey, this.candidates, 49);
+    if (this.params.useMultiThreshold){
+      // Pass 2: slight blur + softer adaptive threshold, helps under indoor noise.
+      CV.gaussianBlur(this.grey, this.blur, this.blur, this.params.blurKernelSize);
+      CV.adaptiveThreshold(this.blur, this.thresAlt,
+        this.params.adaptiveBlockSize2,
+        this.params.adaptiveOffset2);
+      thresholdImages.push(this.thresAlt);
+      thresholdBinaries.push(this.binaryAlt);
+
+      // Pass 3: global Otsu on blurred grayscale, helps when adaptive breaks up borders.
+      if (this.params.useGlobalOtsuPass){
+        CV.threshold(this.blur, this.thresGlobal, CV.otsu(this.blur));
+        thresholdImages.push(this.thresGlobal);
+        thresholdBinaries.push(this.binaryGlobal);
+      }
+    }
+
+    this.contours = [];
+    this.polys = [];
+    this.candidates = [];
+
+    for (i = 0; i < thresholdImages.length; ++i){
+      markers = markers.concat(this.detectOnThreshold(image, this.grey, thresholdImages[i], thresholdBinaries[i]));
+    }
+
+    return this.mergeMarkers(markers);
+  };
+
+  AR.Detector.prototype.detectOnThreshold = function(image, greyImage, thresholdImage, binaryStore){
+    var contours, candidates;
+
+    contours = CV.findContours(thresholdImage, binaryStore);
+    candidates = this.findCandidates(
+      contours,
+      image.width * this.params.candidateMinSizeRatio,
+      this.params.epsilon,
+      this.params.minEdgeLength
+    );
+    candidates = this.clockwiseCorners(candidates);
+    candidates = this.notTooNear(candidates, this.params.nearDistance);
+
+    this.contours = this.contours.concat(contours);
+    this.candidates = this.candidates.concat(candidates);
+
+    return this.findMarkers(greyImage, candidates, this.params.warpSize);
   };
 
   AR.Detector.prototype.findCandidates = function(contours, minSize, epsilon, minLength){
     var candidates = [], len = contours.length, contour, poly, i;
-
-    this.polys = [];
 
     for (i = 0; i < len; ++ i){
       contour = contours[i];
 
       if (contour.length >= minSize){
         poly = CV.approxPolyDP(contour, contour.length * epsilon);
-
         this.polys.push(poly);
 
-        if ( (4 === poly.length) && (CV.isContourConvex ? CV.isContourConvex(poly) : true) ){
+        if ((4 === poly.length) && (CV.isContourConvex ? CV.isContourConvex(poly) : true)){
           if (this.minEdgeLength(poly) >= minLength){
-            candidates.push(poly);
+            candidates.push(this.refineCorners(poly));
           }
         }
       }
     }
 
     return candidates;
+  };
+
+  AR.Detector.prototype.refineCorners = function(poly){
+    // Lightweight refinement: snap each corner to integer pixels and keep shape stable.
+    // This is intentionally conservative so it does not distort the quad.
+    var out = [], i;
+    for (i = 0; i < poly.length; ++i){
+      out.push({x: Math.round(poly[i].x), y: Math.round(poly[i].y)});
+    }
+    return out;
   };
 
   AR.Detector.prototype.clockwiseCorners = function(candidates){
@@ -89,7 +165,7 @@ var AR = AR || (function() {
       dx2 = candidates[i][2].x - candidates[i][0].x;
       dy2 = candidates[i][2].y - candidates[i][0].y;
 
-      if ( (dx1 * dy2 - dy1 * dx2) < 0){
+      if ((dx1 * dy2 - dy1 * dx2) < 0){
         swap = candidates[i][1];
         candidates[i][1] = candidates[i][3];
         candidates[i][3] = swap;
@@ -100,33 +176,48 @@ var AR = AR || (function() {
   };
 
   AR.Detector.prototype.notTooNear = function(candidates, minDist){
-    var notTooNear = [], len = candidates.length, dist, dx, dy, i, j, k;
+    var survivors = [], len = candidates.length, dist, dx, dy, i, j, k,
+        areaI, areaJ;
 
     minDist *= minDist;
 
     for (i = 0; i < len; ++ i){
-      for (j = i + 1; j < len; ++ j){
-        dist = 0;
+      candidates[i].rejected = false;
+    }
 
+    for (i = 0; i < len; ++ i){
+      if (candidates[i].rejected) continue;
+
+      for (j = i + 1; j < len; ++ j){
+        if (candidates[j].rejected) continue;
+
+        dist = 0;
         for (k = 0; k < 4; ++ k){
           dx = candidates[i][k].x - candidates[j][k].x;
           dy = candidates[i][k].y - candidates[j][k].y;
           dist += dx * dx + dy * dy;
         }
 
-        if ( (dist / 4) < minDist){
-          candidates[i].tooNear = candidates[j].tooNear = true;
+        if ((dist / 4) < minDist){
+          areaI = this.quadArea(candidates[i]);
+          areaJ = this.quadArea(candidates[j]);
+          if (areaI >= areaJ){
+            candidates[j].rejected = true;
+          } else {
+            candidates[i].rejected = true;
+            break;
+          }
         }
       }
     }
 
     for (i = 0; i < len; ++ i){
-      if (!candidates[i].tooNear){
-        notTooNear.push(candidates[i]);
+      if (!candidates[i].rejected){
+        survivors.push(candidates[i]);
       }
     }
 
-    return notTooNear;
+    return survivors;
   };
 
   AR.Detector.prototype.findMarkers = function(imageSrc, candidates, warpSize){
@@ -134,8 +225,9 @@ var AR = AR || (function() {
 
     for (i = 0; i < len; ++ i){
       candidate = candidates[i];
-
-      CV.warp && CV.warp(imageSrc, this.homography, candidate, warpSize);
+      if (CV.warp){
+        CV.warp(imageSrc, this.homography, candidate, warpSize);
+      }
       CV.threshold(this.homography, this.homography, CV.otsu(this.homography));
 
       marker = this.getMarker(this.homography, candidate);
@@ -149,13 +241,12 @@ var AR = AR || (function() {
 
   AR.Detector.prototype.getMarker = function(imageSrc, candidate){
     var width = (imageSrc.width / 7) >>> 0,
-        minZero = (width * width) >> 1,
-        bits = [], rotations = [],
-        distances = [],
+        minZero = Math.floor(width * width * this.params.borderWhiteMaxFraction),
+        bits = [], rotations = [], distances = [],
         square, pair, inc, i, j;
 
     for (i = 0; i < 7; ++ i){
-      inc = (i === 0 || i === 6)? 1: 6;
+      inc = (i === 0 || i === 6) ? 1 : 6;
 
       for (j = 0; j < 7; j += inc){
         square = {x: j * width, y: i * width, width: width, height: width};
@@ -167,29 +258,26 @@ var AR = AR || (function() {
 
     for (i = 0; i < 5; ++ i){
       bits[i] = [];
-
       for (j = 0; j < 5; ++ j){
         square = {x: (j + 1) * width, y: (i + 1) * width, width: width, height: width};
-        bits[i][j] = CV.countNonZero && CV.countNonZero(imageSrc, square) > minZero? 1: 0;
+        bits[i][j] = (CV.countNonZero && CV.countNonZero(imageSrc, square) > ((width * width) >> 1)) ? 1 : 0;
       }
     }
 
     rotations[0] = bits;
     distances[0] = this.hammingDistance(rotations[0]);
-
     pair = {first: distances[0], second: 0};
 
     for (i = 1; i < 4; ++ i){
       rotations[i] = this.rotate(rotations[i - 1]);
       distances[i] = this.hammingDistance(rotations[i]);
-
       if (distances[i] < pair.first){
         pair.first = distances[i];
         pair.second = i;
       }
     }
 
-    if (pair.first !== 0){
+    if (pair.first > (this.dictionary.maxCorrectionBits || 0)){
       return null;
     }
 
@@ -197,6 +285,26 @@ var AR = AR || (function() {
       this.mat2id(rotations[pair.second]),
       this.rotate2(candidate, 4 - pair.second)
     );
+  };
+
+  AR.Detector.prototype.mergeMarkers = function(markers){
+    var bestById = {}, i, m, key;
+
+    for (i = 0; i < markers.length; ++i){
+      m = markers[i];
+      key = String(m.id);
+      if (!bestById[key] || this.quadArea(m.corners) > this.quadArea(bestById[key].corners)){
+        bestById[key] = m;
+      }
+    }
+
+    markers = [];
+    for (key in bestById){
+      if (bestById.hasOwnProperty(key)){
+        markers.push(bestById[key]);
+      }
+    }
+    return markers;
   };
 
   AR.Detector.prototype.hammingDistance = function(bits){
@@ -208,11 +316,9 @@ var AR = AR || (function() {
 
       for (j = 0; j < 4; ++ j){
         sum = 0;
-
         for (k = 0; k < 5; ++ k){
-          sum += bits[i][k] === ids[j][k]? 0: 1;
+          sum += bits[i][k] === ids[j][k] ? 0 : 1;
         }
-
         if (sum < minSum){
           minSum = sum;
         }
@@ -268,6 +374,14 @@ var AR = AR || (function() {
     }
 
     return Math.sqrt(min);
+  };
+
+  AR.Detector.prototype.quadArea = function(quad){
+    var area = 0, i, j;
+    for (i = 0, j = quad.length - 1; i < quad.length; j = i++){
+      area += (quad[j].x + quad[i].x) * (quad[j].y - quad[i].y);
+    }
+    return Math.abs(area * 0.5);
   };
 
   return AR;
