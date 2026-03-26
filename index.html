@@ -327,7 +327,7 @@ function matVec3(R,v){
     R[2][0]*v[0]+R[2][1]*v[1]+R[2][2]*v[2]
   ];
 }
-function matT(R){
+function transpose3x3(R){
   return [
     [R[0][0],R[1][0],R[2][0]],
     [R[0][1],R[1][1],R[2][1]],
@@ -637,7 +637,6 @@ function solveBoard(){
   setStatus('boardDetail',
     `v1 ids ${detectorInfo1.matchedMarkers.map(m=>m.id).join(',') || 'none'} | v2 ids ${detectorInfo2.matchedMarkers.map(m=>m.id).join(',') || 'none'}`);
   if(boardSolved){
-    setOut(`Board solved. best v1 id ${pose1.id}, v2 id ${pose2.id}`, 'ok');
     setOut(`Board solved. v1 ${pose1.id}, v2 ${pose2.id}`, 'ok');
     log(`[board] v1 matched ids: ${detectorInfo1.matchedMarkers.map(m=>m.id).join(', ')}`);
     log(`[board] v2 matched ids: ${detectorInfo2.matchedMarkers.map(m=>m.id).join(', ')}`);
@@ -977,12 +976,19 @@ function computeMeasurement(){
 
     const d = sub3(X2, X1);
 
+    const boardNormal = [0, 0, 1]; // board/world z-axis
+    const dNormal = Math.abs(dot3(d, boardNormal));
+    const dParallelVec = sub3(d, scale3(boardNormal, dot3(d, boardNormal)));
+    const dParallel = norm3(dParallelVec);
+    
     let measured;
     if(document.getElementById('axisSel').value === 'table_normal'){
-      measured = Math.abs(d[2]);
+      measured = dNormal;
     }else{
-      measured = Math.hypot(d[0], d[1]);
+      measured = dParallel;
     }
+    
+    log('[compute] dNormal=' + dNormal + ' dParallel=' + dParallel);
 
     if(!Number.isFinite(measured)){
       setOut('Measurement came out invalid', 'warn');
