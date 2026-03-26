@@ -279,6 +279,47 @@ function norm3(v){ return Math.hypot(v[0],v[1],v[2]); }
 function sub3(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
 function add3(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
 function dot3(a,b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function scale3(v, s){ return [v[0]*s, v[1]*s, v[2]*s]; }
+
+function cross3(a,b){
+  return [
+    a[1]*b[2] - a[2]*b[1],
+    a[2]*b[0] - a[0]*b[2],
+    a[0]*b[1] - a[1]*b[0]
+  ];
+}
+
+function normalize3(v){
+  const n = Math.hypot(v[0], v[1], v[2]);
+  if(!Number.isFinite(n) || n < 1e-12) return null;
+  return [v[0]/n, v[1]/n, v[2]/n];
+}
+
+function rotationColumns(R){
+  return [
+    [R[0][0], R[1][0], R[2][0]],
+    [R[0][1], R[1][1], R[2][1]],
+    [R[0][2], R[1][2], R[2][2]]
+  ];
+}
+
+function makeRotationFromXZ(xApprox, zApprox){
+  let x = normalize3(xApprox);
+  let z = normalize3(zApprox);
+  if(!x || !z) return null;
+
+  let y = normalize3(cross3(z, x));
+  if(!y) return null;
+
+  x = normalize3(cross3(y, z));
+  if(!x) return null;
+
+  return [
+    [x[0], y[0], z[0]],
+    [x[1], y[1], z[1]],
+    [x[2], y[2], z[2]]
+  ];
+}
 function matVec3(R,v){
   return [
     R[0][0]*v[0]+R[0][1]*v[1]+R[0][2]*v[2],
@@ -489,10 +530,55 @@ function computeMarkerBoardPose(marker, frame){
     undistortedCorners: und
   };
 }
+function fuseBoardPoses(poses){
+  if(!poses || poses.length === 0) return null;
+  if(poses.length === 1) return poses[0];
 
+  let wsum = 0;
+  let tSum = [0,0,0];
+  let xSum = [0,0,0];
+  let zSum = [0,0,0];
+  let idList = [];
+
+  for(const p of poses){
+    const err = Math.max(0.25, Number(p.bestError) || 1.0);
+    const w = 1.0 / (err * err);
+
+    const cols = rotationColumns(p.rotation);
+    const x = cols[0];
+    const z = cols[2];
+
+    tSum = add3(tSum, scale3(p.translation, w));
+    xSum = add3(xSum, scale3(x, w));
+    zSum = add3(zSum, scale3(z, w));
+    wsum += w;
+    idList.push(p.id);
+  }
+
+  if(wsum <= 0) return null;
+
+  const tAvg = scale3(tSum, 1.0 / wsum);
+  const xAvg = scale3(xSum, 1.0 / wsum);
+  const zAvg = scale3(zSum, 1.0 / wsum);
+
+  const Ravg = makeRotationFromXZ(xAvg, zAvg);
+  if(!Ravg) return null;
+
+  const meanErr = poses.reduce((s,p)=>s + (Number(p.bestError)||0), 0) / poses.length;
+
+  return {
+    id: `fused:${idList.join(',')}`,
+    ids: idList.slice(),
+    bestError: meanErr,
+    rotation: Ravg,
+    translation: tAvg,
+    fusedCount: poses.length
+  };
+}
 function detectBoardInFrame(frame){
   const markers = detector.detect(frame.imageData) || [];
   const filtered = markers.filter(m => BOARD.ids.includes(Number(m.id)));
+
   const poses = [];
   for(const m of filtered){
     try{
@@ -502,9 +588,19 @@ function detectBoardInFrame(frame){
       log(`[board] marker ${m.id} pose error: ${err.message || err}`);
     }
   }
+
   poses.sort((a,b)=>a.bestError - b.bestError);
+
+  const fused = fuseBoardPoses(poses);
   const best = poses[0] || null;
-  return { allMarkers: markers, matchedMarkers: filtered, poses, best };
+
+  return {
+    allMarkers: markers,
+    matchedMarkers: filtered,
+    poses,
+    best,
+    fused
+  };
 }
 
 
@@ -529,8 +625,9 @@ function solveBoard(){
   }
   detectorInfo1 = detectBoardInFrame(frame1);
   detectorInfo2 = detectBoardInFrame(frame2);
-  pose1 = detectorInfo1.best;
-  pose2 = detectorInfo2.best;
+  
+  pose1 = detectorInfo1.fused || detectorInfo1.best;
+  pose2 = detectorInfo2.fused || detectorInfo2.best;
 
   const ok1 = pose1 && detectorInfo1.matchedMarkers.length >= 1;
   const ok2 = pose2 && detectorInfo2.matchedMarkers.length >= 1;
@@ -541,9 +638,11 @@ function solveBoard(){
     `v1 ids ${detectorInfo1.matchedMarkers.map(m=>m.id).join(',') || 'none'} | v2 ids ${detectorInfo2.matchedMarkers.map(m=>m.id).join(',') || 'none'}`);
   if(boardSolved){
     setOut(`Board solved. best v1 id ${pose1.id}, v2 id ${pose2.id}`, 'ok');
+    setOut(`Board solved. v1 ${pose1.id}, v2 ${pose2.id}`, 'ok');
     log(`[board] v1 matched ids: ${detectorInfo1.matchedMarkers.map(m=>m.id).join(', ')}`);
     log(`[board] v2 matched ids: ${detectorInfo2.matchedMarkers.map(m=>m.id).join(', ')}`);
-    log(`[board] using v1 marker ${pose1.id} err ${round(pose1.bestError,2)}, v2 marker ${pose2.id} err ${round(pose2.bestError,2)}`);
+    log(`[board] using v1 pose ${pose1.id} err ${round(pose1.bestError,2)} n=${pose1.fusedCount || 1}`);
+    log(`[board] using v2 pose ${pose2.id} err ${round(pose2.bestError,2)} n=${pose2.fusedCount || 1}`);
     enableObjectControls(true);
   }else{
     setOut('Board solve failed. Make sure at least one known marker is detected in both views.', 'warn');
@@ -866,8 +965,9 @@ function computeMeasurement(){
 
     const X1 = triangulatePoint(p1v1, p1v2);
     const X2 = triangulatePoint(p2v1, p2v2);
-
-    log('[compute] X1=' + JSON.stringify(X1) + ' X2=' + JSON.stringify(X2));
+    log('[compute] X1=' + JSON.stringify(X1));
+    log('[compute] X2=' + JSON.stringify(X2));
+    log('[compute] d=' + JSON.stringify(sub3(X2, X1)));
 
     if(!X1 || !X2 || !X1.every(Number.isFinite) || !X2.every(Number.isFinite)){
       setOut('Triangulation failed', 'warn');
