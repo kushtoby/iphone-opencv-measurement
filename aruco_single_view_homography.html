@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Aruco Board Single-View Measurement</title>
+  <style>
+    :root{
+      --maxw: 980px;
+      --radius: 14px;
+      --border: 1px solid #e7e7e7;
+      --bg: #fafafa;
+      --fg: #111;
+      --muted: #555;
+      --ok: #0a7a2f;
+      --warn: #b00020;
+      --accent: #111;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin: 10px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+      text-align: center;
+    }
+    h2{ margin: 6px 0 10px; font-size: 20px; }
+    .wrap{ max-width: var(--maxw); margin: 0 auto; text-align: left; }
+    canvas{
+      width: 100%;
+      max-width: var(--maxw);
+      border-radius: var(--radius);
+      border: var(--border);
+      background: #000;
+      display: block;
+      margin: 0 auto;
+      touch-action: none;
+    }
+    .toolbar{
+      background: rgba(255,255,255,0.96);
+      border: var(--border);
+      border-radius: var(--radius);
+      padding: 8px;
+      margin: 10px auto;
+      max-width: var(--maxw);
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap: 8px;
+    }
+    button,input{
+      border: var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 15px;
+      background: #fff;
+      min-width: 0;
+    }
+    button.primary{ background: var(--accent); color: #fff; border-color: var(--accent); }
+    button:disabled{ opacity: .5; }
+    .pill{
+      grid-column: 1/-1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #fff;
+      font-size: 14px;
+      flex-wrap: wrap;
+    }
+    .pill .grp{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .pill input[type="checkbox"]{ transform: scale(1.1); }
+    .section{
+      border: var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      margin: 10px 0;
+      background: #fff;
+    }
+    .row{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+    .small{ font-size: 12px; color: var(--muted); }
+    .ok{ color: var(--ok); font-weight: 800; }
+    .warn{ color: var(--warn); font-weight: 800; }
+    .resultsBox{ max-height: 260px; overflow: auto; border: var(--border); border-radius: 12px; margin-top: 8px; }
+    table{ width: 100%; border-collapse: collapse; font-size: 13px; }
+    th,td{ border-bottom: 1px solid #eee; padding: 8px; text-align: left; white-space: nowrap; }
+    th{ position: sticky; top: 0; background: #fff; }
+    pre{
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size: 12px;
+      line-height: 1.25;
+      max-height: 220px;
+      overflow: auto;
+      border: var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      background: #fbfbfb;
+    }
+    @media (max-width:760px){ .toolbar{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  </style>
+</head>
+<body>
+  <h2>Single-View Length Measurement — ARUCO Board Homography</h2>
+
+  <video id="video" autoplay playsinline style="display:none;"></video>
+  <canvas id="canvas"></canvas>
+
+  <div class="toolbar">
+    <button id="startBtn" class="primary" onclick="startCamera()">Start camera</button>
+    <button id="captureBtn" class="primary" onclick="captureBoard()" disabled>Capture board</button>
+    <button id="retakeBtn" onclick="retakeCapture()" disabled>Retake</button>
+    <button id="clearPtsBtn" onclick="clearPoints()" disabled>Clear points</button>
+
+    <div class="pill">
+      <div class="grp">
+        <label><input type="checkbox" id="liveDetectChk" checked> Live detect</label>
+        <label><input type="checkbox" id="overlayBoardChk" checked onchange="render()"> Show board</label>
+        <label><input type="checkbox" id="refineChk" checked> Refine clicks</label>
+        <label>Refine px <input id="refineRad" type="number" value="16" min="4" max="40" step="1" style="width:84px"></label>
+        <label>Ground truth mm <input id="gtMm" type="number" value="" min="0" step="0.1" style="width:110px"></label>
+        <button onclick="clearResults()">Clear results</button>
+      </div>
+      <div class="grp small">
+        Local files required: cv.js, aruco.js
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="section">
+      <div><b>Status</b></div>
+      <div class="row small">
+        <div id="cameraStatus">camera: idle</div>
+        <div id="viewStatus">view: live</div>
+        <div id="liveDetectStatus">live ids: none</div>
+        <div id="boardStatus">board: not solved</div>
+        <div id="pointsStatus">points: 0 / 2</div>
+      </div>
+      <div class="row small">
+        <div id="captureStatus">capture: none</div>
+        <div id="boardDetail">expected ids: 12,13,14,15,16,17,18,19</div>
+      </div>
+      <div id="out" style="margin-top:8px;font-weight:800;"></div>
+    </div>
+
+    <div class="section">
+      <div><b>How it works</b></div>
+      <div class="row small">
+        Start camera → align the ARUCO board until IDs appear → capture board → tap endpoint 1 and endpoint 2 on the frozen image.
+      </div>
+      <div class="row small">
+        This mode assumes the object segment lies on the same plane as the board. It measures planar length only.
+      </div>
+    </div>
+
+    <div class="section">
+      <div><b>Results</b></div>
+      <div class="resultsBox">
+        <table id="resTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Measured mm</th><th>Truth mm</th><th>% err</th><th>Markers</th><th>Inliers</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <div><b>Log</b></div>
+      <pre id="log"></pre>
+    </div>
+  </div>
+
+<script src="./cv.js"></script>
+<script src="./aruco.js"></script>
+<script>
+'use strict';
+
+/********************************************************************
+ * CONFIG
+ ********************************************************************/
+const CALIB = {
+  calW: 1080,
+  calH: 1920,
+  fx: 1388.13835,
+  fy: 1388.73166,
+  cx: 583.186733,
+  cy: 913.686033,
+  dist: [0.11153592, -0.21737664, -0.00028422, 0.00925723, 0.21312604]
+};
+
+const BOARD = {
+  ids: [12,13,14,15,16,17,18,19],
+  markerSizeMm: 50,
+  gapMm: 10,
+  boardWidthMm: 170,
+  boardHeightMm: 170,
+  centersMm: {
+    12:[25,145], 13:[85,145], 14:[145,145],
+    15:[25,85],  16:[85,85],  17:[145,85],
+    18:[25,25],  19:[85,25]
+  }
+};
+
+/********************************************************************
+ * GLOBALS
+ ********************************************************************/
+let detector = null;
+let streaming = false;
+let liveInfo = null;
+let lastLiveDetectTs = 0;
+let frozenFrame = null;
+let frozenInfo = null;
+let HimgToBoard = null;
+let homographyInfo = null;
+let measurePoints = [];
+let results = [];
+let activeTouches = 0;
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently:true });
+
+/********************************************************************
+ * UTILS
+ ********************************************************************/
+function log(msg){
+  const el = document.getElementById('log');
+  const t = new Date().toLocaleTimeString();
+  el.textContent = `[${t}] ${msg}\n` + el.textContent;
+}
+function setOut(msg, cls=''){
+  const el = document.getElementById('out');
+  el.className = cls;
+  el.textContent = msg || '';
+}
+function setStatus(id, txt){ document.getElementById(id).textContent = txt; }
+function round(v, n=2){ return Number(v).toFixed(n); }
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+function clonePt(p){ return { x:p.x, y:p.y }; }
+function ensureCanvasSize(w,h){
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w; canvas.height = h;
+  }
+}
+function frameK(frame){
+  const sx = frame.width / CALIB.calW;
+  const sy = frame.height / CALIB.calH;
+  return {
+    fx: CALIB.fx * sx,
+    fy: CALIB.fy * sy,
+    cx: CALIB.cx * sx,
+    cy: CALIB.cy * sy
+  };
+}
+function captureCurrentFrame(){
+  const w = video.videoWidth, h = video.videoHeight;
+  const tmp = document.createElement('canvas');
+  tmp.width = w; tmp.height = h;
+  const tctx = tmp.getContext('2d', { willReadFrequently:true });
+  tctx.drawImage(video, 0, 0, w, h);
+  return { width:w, height:h, imageData:tctx.getImageData(0,0,w,h) };
+}
+function getDisplayedFrame(){
+  return frozenFrame;
+}
+function canvasPoint(evt){
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (evt.clientX - rect.left) * (canvas.width / rect.width),
+    y: (evt.clientY - rect.top) * (canvas.height / rect.height)
+  };
+}
+
+/********************************************************************
+ * DISTORTION CORRECTION
+ ********************************************************************/
+function undistortNormPoint(xd, yd){
+  const [k1,k2,p1,p2,k3] = CALIB.dist;
+  let x = xd, y = yd;
+  for(let i=0;i<6;i++){
+    const r2 = x*x + y*y;
+    const r4 = r2*r2;
+    const r6 = r4*r2;
+    const radial = 1 + k1*r2 + k2*r4 + k3*r6;
+    const dx = 2*p1*x*y + p2*(r2 + 2*x*x);
+    const dy = p1*(r2 + 2*y*y) + 2*p2*x*y;
+    x = (xd - dx) / radial;
+    y = (yd - dy) / radial;
+  }
+  return { x, y };
+}
+function undistortPixelPoint(frame, p){
+  const K = frameK(frame);
+  const xd = (p.x - K.cx) / K.fx;
+  const yd = (p.y - K.cy) / K.fy;
+  const u = undistortNormPoint(xd, yd);
+  return { x: u.x * K.fx + K.cx, y: u.y * K.fy + K.cy };
+}
+
+/********************************************************************
+ * CAMERA
+ ********************************************************************/
+async function startCamera(){
+  try{
+    if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){
+      setOut('aruco.js not loaded correctly', 'warn');
+      log('[boot] AR.Detector missing');
+      return;
+    }
+    if(typeof cv === 'undefined' || typeof cv.findHomography !== 'function'){
+      setOut('cv.js not loaded correctly', 'warn');
+      log('[boot] cv.findHomography missing');
+      return;
+    }
+
+    detector = new AR.Detector({ dictionaryName: 'ARUCO' });
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1080 },
+        height: { ideal: 1920 }
+      },
+      audio: false
+    });
+
+    video.srcObject = stream;
+    await video.play();
+    ensureCanvasSize(video.videoWidth, video.videoHeight);
+    streaming = true;
+
+    setStatus('cameraStatus', `camera: ${video.videoWidth}x${video.videoHeight}`);
+    setStatus('viewStatus', 'view: live');
+    document.getElementById('captureBtn').disabled = false;
+    renderLoop();
+    log('[cam] started');
+  }catch(err){
+    setOut('Camera start failed', 'warn');
+    log('[cam] ' + (err.message || err));
+  }
+}
+
+/********************************************************************
+ * BOARD DETECTION + HOMOGRAPHY
+ ********************************************************************/
+function markerCenter(marker){
+  let x = 0, y = 0;
+  for(const c of marker.corners){ x += c.x; y += c.y; }
+  return { x: x / marker.corners.length, y: y / marker.corners.length };
+}
+
+function detectBoardInFrame(frame){
+  const markers = detector.detect(frame.imageData) || [];
+  const matchedMarkers = markers
+    .filter(m => BOARD.ids.includes(Number(m.id)))
+    .map(m => {
+      const center = markerCenter(m);
+      const undCenter = undistortPixelPoint(frame, center);
+      return { ...m, center, undCenter };
+    })
+    .sort((a,b) => a.id - b.id);
+
+  return { allMarkers: markers, matchedMarkers };
+}
+
+function computeImageToBoardHomography(frame, info){
+  if(!info || info.matchedMarkers.length < 4) return null;
+
+  const src = [];
+  const dst = [];
+  for(const m of info.matchedMarkers){
+    const boardPt = BOARD.centersMm[m.id];
+    if(!boardPt) continue;
+    src.push(m.undCenter.x, m.undCenter.y);
+    dst.push(boardPt[0], boardPt[1]);
+  }
+
+  if(src.length < 8) return null;
+
+  const srcMat = cv.matFromArray(src.length / 2, 1, cv.CV_32FC2, src);
+  const dstMat = cv.matFromArray(dst.length / 2, 1, cv.CV_32FC2, dst);
+  const mask = new cv.Mat();
+
+  let H = null;
+  try{
+    H = cv.findHomography(srcMat, dstMat, cv.RANSAC, 3.0, mask, 2000, 0.995);
+    if(!H || H.empty()){
+      if(H) H.delete();
+      srcMat.delete();
+      dstMat.delete();
+      mask.delete();
+      return null;
+    }
+
+    const Hjs = [
+      [H.doubleAt(0,0), H.doubleAt(0,1), H.doubleAt(0,2)],
+      [H.doubleAt(1,0), H.doubleAt(1,1), H.doubleAt(1,2)],
+      [H.doubleAt(2,0), H.doubleAt(2,1), H.doubleAt(2,2)]
+    ];
+
+    let inliers = 0;
+    if(mask.rows > 0){
+      for(let r=0; r<mask.rows; r++) inliers += mask.ucharAt(r,0) ? 1 : 0;
+    }
+
+    H.delete();
+    srcMat.delete();
+    dstMat.delete();
+    mask.delete();
+
+    return {
+      H: Hjs,
+      markerCount: info.matchedMarkers.length,
+      inlierCount: inliers || info.matchedMarkers.length
+    };
+  }catch(err){
+    if(H) H.delete();
+    srcMat.delete();
+    dstMat.delete();
+    mask.delete();
+    throw err;
+  }
+}
+
+function transformPoint(H, p){
+  const x = p.x, y = p.y;
+  const w = H[2][0]*x + H[2][1]*y + H[2][2];
+  if(Math.abs(w) < 1e-12) return null;
+  return {
+    x: (H[0][0]*x + H[0][1]*y + H[0][2]) / w,
+    y: (H[1][0]*x + H[1][1]*y + H[1][2]) / w
+  };
+}
+
+function captureBoard(){
+  if(!streaming){
+    setOut('Start camera first', 'warn');
+    return;
+  }
+
+  try{
+    frozenFrame = captureCurrentFrame();
+    frozenInfo = detectBoardInFrame(frozenFrame);
+    const hom = computeImageToBoardHomography(frozenFrame, frozenInfo);
+
+    if(!hom){
+      HimgToBoard = null;
+      homographyInfo = null;
+      measurePoints = [];
+      setStatus('viewStatus', 'view: frozen');
+      setStatus('captureStatus', 'capture: frozen frame');
+      setStatus('boardStatus', 'board: solve failed');
+      setStatus('boardDetail', `found ids: ${frozenInfo.matchedMarkers.map(m=>m.id).join(',') || 'none'}`);
+      setOut('Board solve failed. Show at least 4 known board markers clearly.', 'warn');
+      log('[board] solve failed | ids ' + (frozenInfo.matchedMarkers.map(m=>m.id).join(',') || 'none'));
+      document.getElementById('retakeBtn').disabled = false;
+      document.getElementById('clearPtsBtn').disabled = true;
+      render();
+      return;
+    }
+
+    HimgToBoard = hom.H;
+    homographyInfo = hom;
+    measurePoints = [];
+
+    setStatus('viewStatus', 'view: frozen');
+    setStatus('captureStatus', 'capture: frozen frame');
+    setStatus('boardStatus', 'board: solved');
+    setStatus('boardDetail', `ids: ${frozenInfo.matchedMarkers.map(m=>m.id).join(',')} | inliers ${hom.inlierCount}/${hom.markerCount}`);
+    setStatus('pointsStatus', 'points: 0 / 2');
+    setOut('Board solved. Tap two endpoints on the frozen image.', 'ok');
+    log(`[board] solved | ids ${frozenInfo.matchedMarkers.map(m=>m.id).join(',')} | inliers ${hom.inlierCount}/${hom.markerCount}`);
+
+    document.getElementById('retakeBtn').disabled = false;
+    document.getElementById('clearPtsBtn').disabled = false;
+    render();
+  }catch(err){
+    setOut('Board capture failed', 'warn');
+    log('[board] ' + (err && err.stack ? err.stack : (err.message || err)));
+  }
+}
+
+function retakeCapture(){
+  frozenFrame = null;
+  frozenInfo = null;
+  HimgToBoard = null;
+  homographyInfo = null;
+  measurePoints = [];
+  setStatus('viewStatus', 'view: live');
+  setStatus('captureStatus', 'capture: none');
+  setStatus('boardStatus', 'board: not solved');
+  setStatus('pointsStatus', 'points: 0 / 2');
+  setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
+  setOut('Retake ready', '');
+  document.getElementById('clearPtsBtn').disabled = true;
+  render();
+}
+
+/********************************************************************
+ * CLICK REFINEMENT + MEASUREMENT
+ ********************************************************************/
+function grayscaleArray(frame){
+  const src = frame.imageData.data;
+  const g = new Float32Array(frame.width * frame.height);
+  for(let i=0,j=0;i<src.length;i+=4,j++){
+    g[j] = 0.299*src[i] + 0.587*src[i+1] + 0.114*src[i+2];
+  }
+  return g;
+}
+
+function refinePoint(frame, pt){
+  if(!document.getElementById('refineChk').checked) return clonePt(pt);
+  const rad = clamp(parseInt(document.getElementById('refineRad').value || '16',10), 4, 40);
+  const gray = grayscaleArray(frame);
+  const w = frame.width, h = frame.height;
+  let best = { score:-1, x:pt.x, y:pt.y };
+
+  const x0 = Math.max(1, Math.floor(pt.x - rad));
+  const x1 = Math.min(w - 2, Math.ceil(pt.x + rad));
+  const y0 = Math.max(1, Math.floor(pt.y - rad));
+  const y1 = Math.min(h - 2, Math.ceil(pt.y + rad));
+
+  for(let y=y0; y<=y1; y++){
+    for(let x=x0; x<=x1; x++){
+      const idx = y*w + x;
+      const gx = gray[idx + 1] - gray[idx - 1];
+      const gy = gray[idx + w] - gray[idx - w];
+      const mag = gx*gx + gy*gy;
+      const dist2 = (x - pt.x)*(x - pt.x) + (y - pt.y)*(y - pt.y);
+      const score = mag - 0.2*dist2;
+      if(score > best.score) best = { score, x, y };
+    }
+  }
+  return { x: best.x, y: best.y };
+}
+
+function boardPointFromImagePoint(frame, p){
+  if(!HimgToBoard) return null;
+  const und = undistortPixelPoint(frame, p);
+  return transformPoint(HimgToBoard, und);
+}
+
+function computeMeasurement(){
+  if(!frozenFrame || !HimgToBoard || measurePoints.length !== 2) return;
+
+  const b1 = boardPointFromImagePoint(frozenFrame, measurePoints[0]);
+  const b2 = boardPointFromImagePoint(frozenFrame, measurePoints[1]);
+  if(!b1 || !b2 || !Number.isFinite(b1.x) || !Number.isFinite(b1.y) || !Number.isFinite(b2.x) || !Number.isFinite(b2.y)){
+    setOut('Measurement failed', 'warn');
+    log('[measure] board-point mapping failed');
+    return;
+  }
+
+  const dx = b2.x - b1.x;
+  const dy = b2.y - b1.y;
+  const measured = Math.hypot(dx, dy);
+  const gt = parseFloat(document.getElementById('gtMm').value);
+  const pct = Number.isFinite(gt) && gt > 0 ? Math.abs(measured - gt) / gt * 100 : null;
+
+  results.push({
+    measured,
+    truth: Number.isFinite(gt) ? gt : null,
+    pct,
+    markers: homographyInfo ? homographyInfo.markerCount : null,
+    inliers: homographyInfo ? homographyInfo.inlierCount : null
+  });
+  refreshResults();
+
+  setOut(`Measured ${round(measured,2)} mm`, 'ok');
+  log(`[measure] ${round(measured,2)} mm | board p1=(${round(b1.x,1)}, ${round(b1.y,1)}) p2=(${round(b2.x,1)}, ${round(b2.y,1)})`);
+}
+
+function clearPoints(){
+  measurePoints = [];
+  setStatus('pointsStatus', 'points: 0 / 2');
+  setOut('Points cleared', '');
+  render();
+}
+
+function refreshResults(){
+  const tb = document.querySelector('#resTable tbody');
+  tb.innerHTML = '';
+  results.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td><td>${round(r.measured,2)}</td><td>${r.truth==null?'':round(r.truth,2)}</td><td>${r.pct==null?'':round(r.pct,2)}</td><td>${r.markers ?? ''}</td><td>${r.inliers ?? ''}</td>`;
+    tb.appendChild(tr);
+  });
+}
+function clearResults(){ results = []; refreshResults(); }
+
+/********************************************************************
+ * RENDER
+ ********************************************************************/
+function runLiveBoardDetection(){
+  if(!streaming || !video.videoWidth || !document.getElementById('liveDetectChk').checked){
+    liveInfo = null;
+    setStatus('liveDetectStatus', 'live ids: off');
+    return;
+  }
+  const now = performance.now();
+  if(now - lastLiveDetectTs < 250) return;
+  lastLiveDetectTs = now;
+  const frame = captureCurrentFrame();
+  liveInfo = detectBoardInFrame(frame);
+  setStatus('liveDetectStatus', `live ids: ${liveInfo.matchedMarkers.length ? liveInfo.matchedMarkers.map(m=>m.id).join(',') : 'none'}`);
+}
+
+function renderLive(){
+  if(!streaming || !video.videoWidth) return;
+  ensureCanvasSize(video.videoWidth, video.videoHeight);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  runLiveBoardDetection();
+  drawBoardOverlay(liveInfo);
+}
+
+function renderFrozen(frame){
+  if(!frame) return;
+  ensureCanvasSize(frame.width, frame.height);
+  ctx.putImageData(frame.imageData, 0, 0);
+  drawBoardOverlay(frozenInfo);
+  drawMeasurePoints();
+}
+
+function drawBoardOverlay(info){
+  if(!info || !document.getElementById('overlayBoardChk').checked) return;
+  for(const m of info.matchedMarkers){
+    ctx.save();
+    ctx.strokeStyle = '#00c853';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(m.corners[0].x, m.corners[0].y);
+    for(let i=1;i<m.corners.length;i++) ctx.lineTo(m.corners[i].x, m.corners[i].y);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = '#00c853';
+    ctx.beginPath();
+    ctx.arc(m.center.x, m.center.y, 5, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.font = 'bold 18px system-ui';
+    ctx.fillText(String(m.id), m.center.x + 8, m.center.y - 8);
+    ctx.restore();
+  }
+}
+
+function drawPoint(p, label, color){
+  if(!p) return;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 6, 0, Math.PI*2);
+  ctx.fill();
+  ctx.font = 'bold 16px system-ui';
+  ctx.fillText(label, p.x + 8, p.y - 8);
+  ctx.restore();
+}
+
+function drawMeasurePoints(){
+  drawPoint(measurePoints[0], 'P1', '#00bcd4');
+  drawPoint(measurePoints[1], 'P2', '#ff9800');
+  if(measurePoints.length === 2){
+    ctx.save();
+    ctx.strokeStyle = '#ffd54f';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(measurePoints[0].x, measurePoints[0].y);
+    ctx.lineTo(measurePoints[1].x, measurePoints[1].y);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function render(){
+  if(frozenFrame) renderFrozen(frozenFrame);
+  else renderLive();
+}
+
+function renderLoop(){
+  if(streaming) render();
+  requestAnimationFrame(renderLoop);
+}
+
+/********************************************************************
+ * POINTERS
+ ********************************************************************/
+canvas.addEventListener('pointerdown', evt => {
+  if(activeTouches > 0 && evt.pointerType === 'mouse') return;
+  if(!frozenFrame || !HimgToBoard) return;
+
+  const p = canvasPoint(evt);
+  const rp = refinePoint(frozenFrame, p);
+
+  if(measurePoints.length >= 2) measurePoints = [];
+  measurePoints.push(rp);
+  setStatus('pointsStatus', `points: ${measurePoints.length} / 2`);
+  if(measurePoints.length === 2) computeMeasurement();
+  else setOut('Endpoint 1 set. Tap endpoint 2.', 'ok');
+  render();
+});
+
+canvas.addEventListener('touchstart', ()=>{ activeTouches++; }, {passive:true});
+canvas.addEventListener('touchend', ()=>{ activeTouches = Math.max(0, activeTouches - 1); }, {passive:true});
+
+/********************************************************************
+ * BOOT
+ ********************************************************************/
+(function init(){
+  setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
+  log('[boot] single-view board homography mode');
+  log('[boot] board ids ' + BOARD.ids.join(', '));
+  log('[boot] measurement plane is the board plane only');
+})();
+</script>
+</body>
+</html>
