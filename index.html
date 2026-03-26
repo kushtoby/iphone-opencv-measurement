@@ -130,6 +130,7 @@
         <label>Refine px <input id="refineRad" type="number" value="16" min="4" max="40" step="1" style="width:84px"></label>
         <label><input type="checkbox" id="overlayBoardChk" checked onchange="render()"> Show board</label>
         <label><input type="checkbox" id="overlayEpiChk" checked onchange="render()"> Show epipolar</label>
+        <label><input type="checkbox" id="liveDetectChk" checked> Live detect</label>
         <label>IMU max ° <input id="imuGateDeg" type="number" value="7" min="1" max="30" step="0.5" style="width:78px"></label>
       </div>
       <div class="grp small">
@@ -147,6 +148,7 @@
         <div id="displayStatus">display: live</div>
         <div id="boardStatus">board: unsolved</div>
         <div id="objStatus">object: none</div>
+        <div id="liveDetectStatus">live ids: none</div>
       </div>
       <div class="row small">
         <div id="captureStatus">captures: none</div>
@@ -208,13 +210,13 @@
  * CONFIG
  ********************************************************************/
 const CALIB = {
-  calW: 2560,
+  calW: 1080,
   calH: 1920,
-  fx: 1939.22217,
-  fy: 1944.80422,
-  cx: 1250.09825,
-  cy: 947.957973,
-  dist: [0.196139581, -0.79214993, 0.000251525214, -0.00647283132, 0.486071831]
+  fx: 1388.13835,
+  fy: 1388.73166,
+  cx: 583.186733,
+  cy: 913.686033,
+  dist: [0.11153592, -0.21737664, -0.00028422, 0.00925723, 0.21312604]
 };
 
 const BOARD = {
@@ -249,6 +251,8 @@ let sensorOn = false;
 let imu = { alpha:null, beta:null, gamma:null };
 let imuRefAtV1 = null;
 let activeTouches = 0;
+let liveDetectorInfo = null;
+let lastLiveDetectTs = 0;
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -352,22 +356,33 @@ function currentImuDelta(){
 }
 function updateImuGateStatus(){
   const el = document.getElementById('imuGateStatus');
-  if(!sensorOn){
-    el.textContent = 'imu gate: sensors off';
-    return;
-  }
-  if(!imuRefAtV1){
-    el.textContent = 'imu gate: waiting for Capture 1';
-    return;
-  }
+  if(!sensorOn){ el.textContent = 'imu gate: sensors off'; return; }
+  if(!imuRefAtV1){ el.textContent = 'imu gate: waiting for Capture 1'; return; }
   const d = currentImuDelta();
-  if(!d){
-    el.textContent = 'imu gate: waiting for IMU samples';
-    return;
-  }
+  if(!d){ el.textContent = 'imu gate: waiting for IMU samples'; return; }
   const thr = imuGateThreshold();
   const ok = d.tilt <= thr;
   el.textContent = `imu gate: Δβ ${round(d.dBeta,1)}° Δγ ${round(d.dGamma,1)}° | tilt ${round(d.tilt,1)}° / ${round(thr,1)}° ${ok ? 'OK' : 'BLOCK'}`;
+}
+function undistortNormPoint(xd, yd){
+  const [k1,k2,p1,p2,k3] = CALIB.dist;
+  let x = xd, y = yd;
+  for(let i=0;i<6;i++){
+    const r2 = x*x + y*y, r4 = r2*r2, r6 = r4*r2;
+    const radial = 1 + k1*r2 + k2*r4 + k3*r6;
+    const dx = 2*p1*x*y + p2*(r2 + 2*x*x);
+    const dy = p1*(r2 + 2*y*y) + 2*p2*x*y;
+    x = (xd - dx) / radial;
+    y = (yd - dy) / radial;
+  }
+  return {x,y};
+}
+function undistortPixelPoint(frame, p){
+  const K = frameK(frame);
+  const xd = (p.x - K.cx) / K.fx;
+  const yd = (p.y - K.cy) / K.fy;
+  const u = undistortNormPoint(xd, yd);
+  return { x: u.x * K.fx + K.cx, y: u.y * K.fy + K.cy };
 }
 
 /********************************************************************
@@ -390,8 +405,8 @@ async function startCamera(){
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
+        width: { ideal: 1080 },
+        height: { ideal: 1920 }
       },
       audio: false
     });
@@ -455,8 +470,10 @@ function markerCornersCentered(marker, width, height){
 }
 
 function computeMarkerBoardPose(marker, frame){
-  const posit = new POS.Posit(BOARD.markerSizeMm, Math.max(frame.width, frame.height));
-  const corners = markerCornersCentered(marker, frame.width, frame.height);
+  const K = frameK(frame);
+  const posit = new POS.Posit(BOARD.markerSizeMm, 0.5*(K.fx + K.fy));
+  const und = marker.corners.map(c => undistortPixelPoint(frame, c));
+  const corners = und.map(c => ({ x: c.x - K.cx, y: K.cy - c.y }));
   const pose = posit.pose(corners);
   const Rm = pose.bestRotation;
   const tm = pose.bestTranslation;
@@ -468,7 +485,8 @@ function computeMarkerBoardPose(marker, frame){
     bestError: pose.bestError,
     rotation: Rm,
     translation: tBoard,
-    rawTranslation: tm
+    rawTranslation: tm,
+    undistortedCorners: und
   };
 }
 
@@ -487,6 +505,22 @@ function detectBoardInFrame(frame){
   poses.sort((a,b)=>a.bestError - b.bestError);
   const best = poses[0] || null;
   return { allMarkers: markers, matchedMarkers: filtered, poses, best };
+}
+
+
+function runLiveBoardDetection(force=false){
+  if(!streaming || !video.videoWidth || !document.getElementById('liveDetectChk').checked){
+    liveDetectorInfo = null;
+    document.getElementById('liveDetectStatus').textContent = 'live ids: off';
+    return;
+  }
+  const now = performance.now();
+  if(!force && now - lastLiveDetectTs < 250) return;
+  lastLiveDetectTs = now;
+  const frame = captureCurrentFrame();
+  liveDetectorInfo = detectBoardInFrame(frame);
+  const ids = liveDetectorInfo.matchedMarkers.map(m=>m.id);
+  document.getElementById('liveDetectStatus').textContent = `live ids: ${ids.length ? ids.join(',') : 'none'}`;
 }
 
 function solveBoard(){
@@ -513,6 +547,7 @@ function solveBoard(){
     enableObjectControls(true);
   }else{
     setOut('Board solve failed. Make sure at least one known marker is detected in both views.', 'warn');
+    log(`[board] solve failed | v1 matched ${detectorInfo1.matchedMarkers.map(m=>m.id).join(',') || 'none'} | v2 matched ${detectorInfo2.matchedMarkers.map(m=>m.id).join(',') || 'none'}`);
     enableObjectControls(false);
   }
   render();
@@ -541,7 +576,6 @@ function captureView2(){
   if(!frame1 || !imuRefAtV1){ setOut('Capture view 1 first', 'warn'); return; }
   if(!sensorOn){ setOut('Sensors must stay on for IMU gating', 'warn'); return; }
   if(imu.beta == null || imu.gamma == null){ setOut('Waiting for IMU readings', 'warn'); return; }
-
   const d = currentImuDelta();
   const thr = imuGateThreshold();
   if(!d || d.tilt > thr){
@@ -550,7 +584,6 @@ function captureView2(){
     log(`[capture] view2 blocked | Δβ ${d ? round(d.dBeta,1) : '?'} Δγ ${d ? round(d.dGamma,1) : '?'} tilt ${d ? round(d.tilt,1) : '?'} / ${round(thr,1)} deg`);
     return;
   }
-
   frame2 = captureCurrentFrame();
   displayMode = 'v2';
   document.getElementById('showV2Btn').disabled = false;
@@ -798,6 +831,21 @@ function renderLive(){
   if(!streaming || !video.videoWidth) return;
   ensureCanvasSize(video.videoWidth, video.videoHeight);
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  runLiveBoardDetection(false);
+  if(liveDetectorInfo && document.getElementById('overlayBoardChk').checked){
+    liveDetectorInfo.matchedMarkers.forEach(m=>{
+      ctx.save();
+      ctx.strokeStyle = '#00c853'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(m.corners[0].x, m.corners[0].y);
+      for(let i=1;i<m.corners.length;i++) ctx.lineTo(m.corners[i].x, m.corners[i].y);
+      ctx.closePath(); ctx.stroke();
+      const c = m.corners.reduce((a,p)=>({x:a.x+p.x/4,y:a.y+p.y/4}),{x:0,y:0});
+      ctx.fillStyle = '#00c853'; ctx.font='bold 18px system-ui';
+      ctx.fillText(String(m.id), c.x+8, c.y-8);
+      ctx.restore();
+    });
+  }
 }
 function renderFrame(frame){
   if(!frame) return;
@@ -948,6 +996,8 @@ canvas.addEventListener('touchend', ()=>{ activeTouches=Math.max(0,activeTouches
 (function init(){
   setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
   log('[boot] board ids ' + BOARD.ids.join(', ') + ' | dictionary ' + BOARD.dictionary);
+  log('[boot] calib mode ' + CALIB.calW + 'x' + CALIB.calH);
+  updateImuGateStatus();
 })();
 </script>
 </body>
