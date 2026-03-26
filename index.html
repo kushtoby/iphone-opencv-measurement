@@ -705,23 +705,93 @@ function projectionMatrix(frame, pose){
   }
   return {K, P};
 }
-function svdSolveHomogeneous4(A){
-  const svd = SVD.svdcmp(A.map(r=>r.slice()), A.length, 4, [], []);
-  const V = svd.v;
-  return [V[0][3], V[1][3], V[2][3], V[3][3]];
+function det3(M){
+  return (
+    M[0][0]*(M[1][1]*M[2][2] - M[1][2]*M[2][1]) -
+    M[0][1]*(M[1][0]*M[2][2] - M[1][2]*M[2][0]) +
+    M[0][2]*(M[1][0]*M[2][1] - M[1][1]*M[2][0])
+  );
 }
+
+function inv3(M){
+  const d = det3(M);
+  if(!Number.isFinite(d) || Math.abs(d) < 1e-12) return null;
+
+  return [
+    [
+      (M[1][1]*M[2][2] - M[1][2]*M[2][1]) / d,
+      (M[0][2]*M[2][1] - M[0][1]*M[2][2]) / d,
+      (M[0][1]*M[1][2] - M[0][2]*M[1][1]) / d
+    ],
+    [
+      (M[1][2]*M[2][0] - M[1][0]*M[2][2]) / d,
+      (M[0][0]*M[2][2] - M[0][2]*M[2][0]) / d,
+      (M[0][2]*M[1][0] - M[0][0]*M[1][2]) / d
+    ],
+    [
+      (M[1][0]*M[2][1] - M[1][1]*M[2][0]) / d,
+      (M[0][1]*M[2][0] - M[0][0]*M[2][1]) / d,
+      (M[0][0]*M[1][1] - M[0][1]*M[1][0]) / d
+    ]
+  ];
+}
+
+function matT(A){
+  return A[0].map((_, c) => A.map(r => r[c]));
+}
+
+function matMul(A, B){
+  const rows = A.length, cols = B[0].length, inner = B.length;
+  const C = Array.from({length: rows}, () => Array(cols).fill(0));
+  for(let r=0; r<rows; r++){
+    for(let c=0; c<cols; c++){
+      let s = 0;
+      for(let k=0; k<inner; k++) s += A[r][k] * B[k][c];
+      C[r][c] = s;
+    }
+  }
+  return C;
+}
+
+function matVecMul(A, x){
+  return A.map(row => row.reduce((s,v,i) => s + v*x[i], 0));
+}
+
+function solveLeastSquares3(A, b){
+  const At = matT(A);                 // 3x4
+  const AtA = matMul(At, A);         // 3x3
+  const Atb = matVecMul(At, b);      // 3x1
+  const AtAinv = inv3(AtA);
+  if(!AtAinv) return null;
+  return matVecMul(AtAinv, Atb);     // [X,Y,Z]
+}
+
 function triangulatePoint(p1, p2){
   const {P: P1} = projectionMatrix(frame1, pose1);
   const {P: P2} = projectionMatrix(frame2, pose2);
+
+  // Solve for X=[X,Y,Z]^T with homogeneous last coordinate fixed to 1
+  // (u*P3 - P1)*[X,Y,Z,1]^T = 0
+  // -> (u*P3[:3]-P1[:3]) [X,Y,Z]^T = P1[3] - u*P3[3]
   const A = [
-    [p1.x*P1[2][0]-P1[0][0], p1.x*P1[2][1]-P1[0][1], p1.x*P1[2][2]-P1[0][2], p1.x*P1[2][3]-P1[0][3]],
-    [p1.y*P1[2][0]-P1[1][0], p1.y*P1[2][1]-P1[1][1], p1.y*P1[2][2]-P1[1][2], p1.y*P1[2][3]-P1[1][3]],
-    [p2.x*P2[2][0]-P2[0][0], p2.x*P2[2][1]-P2[0][1], p2.x*P2[2][2]-P2[0][2], p2.x*P2[2][3]-P2[0][3]],
-    [p2.y*P2[2][0]-P2[1][0], p2.y*P2[2][1]-P2[1][1], p2.y*P2[2][2]-P2[1][2], p2.y*P2[2][3]-P2[1][3]]
+    [p1.x*P1[2][0] - P1[0][0], p1.x*P1[2][1] - P1[0][1], p1.x*P1[2][2] - P1[0][2]],
+    [p1.y*P1[2][0] - P1[1][0], p1.y*P1[2][1] - P1[1][1], p1.y*P1[2][2] - P1[1][2]],
+    [p2.x*P2[2][0] - P2[0][0], p2.x*P2[2][1] - P2[0][1], p2.x*P2[2][2] - P2[0][2]],
+    [p2.y*P2[2][0] - P2[1][0], p2.y*P2[2][1] - P2[1][1], p2.y*P2[2][2] - P2[1][2]]
   ];
-  const X = svdSolveHomogeneous4(A);
-  return [X[0]/X[3], X[1]/X[3], X[2]/X[3]];
+
+  const b = [
+    P1[0][3] - p1.x*P1[2][3],
+    P1[1][3] - p1.y*P1[2][3],
+    P2[0][3] - p2.x*P2[2][3],
+    P2[1][3] - p2.y*P2[2][3]
+  ];
+
+  const X = solveLeastSquares3(A, b);
+  if(!X || !X.every(Number.isFinite)) return null;
+  return X;
 }
+
 function skew(v){
   return [[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]];
 }
@@ -796,6 +866,8 @@ function computeMeasurement(){
 
     const X1 = triangulatePoint(p1v1, p1v2);
     const X2 = triangulatePoint(p2v1, p2v2);
+
+    log('[compute] X1=' + JSON.stringify(X1) + ' X2=' + JSON.stringify(X2));
 
     if(!X1 || !X2 || !X1.every(Number.isFinite) || !X2.every(Number.isFinite)){
       setOut('Triangulation failed', 'warn');
