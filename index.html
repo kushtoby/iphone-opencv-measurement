@@ -130,6 +130,7 @@
         <label>Refine px <input id="refineRad" type="number" value="16" min="4" max="40" step="1" style="width:84px"></label>
         <label><input type="checkbox" id="overlayBoardChk" checked onchange="render()"> Show board</label>
         <label><input type="checkbox" id="overlayEpiChk" checked onchange="render()"> Show epipolar</label>
+        <label>IMU max ° <input id="imuGateDeg" type="number" value="7" min="1" max="30" step="0.5" style="width:78px"></label>
       </div>
       <div class="grp small">
         Local files required: cv.js, aruco.js, svd.js, posit1.js
@@ -151,6 +152,7 @@
         <div id="captureStatus">captures: none</div>
         <div id="boardDetail">expected ids: 12,13,14,15,16,17,18,19</div>
         <div id="imuReadout"></div>
+        <div id="imuGateStatus">imu gate: waiting for Capture 1</div>
       </div>
       <div id="out" style="margin-top:8px;font-weight:800;"></div>
     </div>
@@ -206,13 +208,13 @@
  * CONFIG
  ********************************************************************/
 const CALIB = {
-  calW: 1080,
+  calW: 2560,
   calH: 1920,
-  fx: 1388.13835,
-  fy: 1388.73166,
-  cx: 583.186733,
-  cy: 913.686033,
-  dist: [0.11153592, -0.21737664, -0.00028422, 0.00925723, 0.21312604]
+  fx: 1939.22217,
+  fy: 1944.80422,
+  cx: 1250.09825,
+  cy: 947.957973,
+  dist: [0.196139581, -0.79214993, 0.000251525214, -0.00647283132, 0.486071831]
 };
 
 const BOARD = {
@@ -245,6 +247,7 @@ let drawDrag = null;
 let results = [];
 let sensorOn = false;
 let imu = { alpha:null, beta:null, gamma:null };
+let imuRefAtV1 = null;
 let activeTouches = 0;
 
 const video = document.getElementById('video');
@@ -328,6 +331,45 @@ function ensureCanvasSize(w,h){
   }
 }
 
+
+function angleDiffDeg(a, b){
+  if(a == null || b == null) return null;
+  let d = a - b;
+  while(d > 180) d -= 360;
+  while(d < -180) d += 360;
+  return d;
+}
+function imuGateThreshold(){
+  return Math.max(0.5, parseFloat(document.getElementById('imuGateDeg').value || '7'));
+}
+function currentImuDelta(){
+  if(!imuRefAtV1 || imu.beta == null || imu.gamma == null) return null;
+  const dBeta = angleDiffDeg(imu.beta, imuRefAtV1.beta) ?? 0;
+  const dGamma = angleDiffDeg(imu.gamma, imuRefAtV1.gamma) ?? 0;
+  const dAlpha = angleDiffDeg(imu.alpha, imuRefAtV1.alpha);
+  const tilt = Math.hypot(dBeta, dGamma);
+  return { dAlpha, dBeta, dGamma, tilt };
+}
+function updateImuGateStatus(){
+  const el = document.getElementById('imuGateStatus');
+  if(!sensorOn){
+    el.textContent = 'imu gate: sensors off';
+    return;
+  }
+  if(!imuRefAtV1){
+    el.textContent = 'imu gate: waiting for Capture 1';
+    return;
+  }
+  const d = currentImuDelta();
+  if(!d){
+    el.textContent = 'imu gate: waiting for IMU samples';
+    return;
+  }
+  const thr = imuGateThreshold();
+  const ok = d.tilt <= thr;
+  el.textContent = `imu gate: Δβ ${round(d.dBeta,1)}° Δγ ${round(d.dGamma,1)}° | tilt ${round(d.tilt,1)}° / ${round(thr,1)}° ${ok ? 'OK' : 'BLOCK'}`;
+}
+
 /********************************************************************
  * CAMERA + IMU
  ********************************************************************/
@@ -348,8 +390,8 @@ async function startCamera(){
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1080 },
-        height: { ideal: 1920 }
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
       },
       audio: false
     });
@@ -375,6 +417,7 @@ function toggleSensors(){
     sensorOn = false;
     setStatus('sensorStatus', 'imu: off');
     document.getElementById('imuBtn').textContent = 'Sensors';
+    updateImuGateStatus();
     return;
   }
   if (typeof DeviceOrientationEvent === 'undefined'){
@@ -385,6 +428,7 @@ function toggleSensors(){
     sensorOn = true;
     setStatus('sensorStatus', 'imu: on');
     document.getElementById('imuBtn').textContent = 'Sensors on';
+    updateImuGateStatus();
   };
   if (typeof DeviceOrientationEvent.requestPermission === 'function'){
     DeviceOrientationEvent.requestPermission().then(state=>{
@@ -397,6 +441,7 @@ function onDeviceOrientation(e){
   imu.alpha = e.alpha; imu.beta = e.beta; imu.gamma = e.gamma;
   document.getElementById('imuReadout').textContent =
     `imu α ${imu.alpha==null?'?':round(imu.alpha,1)} β ${imu.beta==null?'?':round(imu.beta,1)} γ ${imu.gamma==null?'?':round(imu.gamma,1)}`;
+  updateImuGateStatus();
 }
 
 /********************************************************************
@@ -478,24 +523,42 @@ function solveBoard(){
  ********************************************************************/
 function captureView1(){
   if(!streaming){ setOut('Start camera first', 'warn'); return; }
+  if(!sensorOn){ setOut('Turn sensors on before Capture 1', 'warn'); return; }
+  if(imu.beta == null || imu.gamma == null){ setOut('Wait for IMU readings before Capture 1', 'warn'); return; }
   frame1 = captureCurrentFrame();
+  imuRefAtV1 = { alpha: imu.alpha, beta: imu.beta, gamma: imu.gamma };
   displayMode = 'v1';
   document.getElementById('showV1Btn').disabled = false;
   document.getElementById('cap2Btn').disabled = false;
   setStatus('captureStatus', frame2 ? 'captures: view1 + view2' : 'captures: view1 only');
-  setOut('Captured view 1', 'ok');
-  log('[capture] view1');
+  updateImuGateStatus();
+  setOut('Captured view 1 and locked IMU reference', 'ok');
+  log(`[capture] view1 | imu ref α ${imuRefAtV1.alpha==null?'?':round(imuRefAtV1.alpha,1)} β ${round(imuRefAtV1.beta,1)} γ ${round(imuRefAtV1.gamma,1)}`);
   render();
 }
 function captureView2(){
   if(!streaming){ setOut('Start camera first', 'warn'); return; }
+  if(!frame1 || !imuRefAtV1){ setOut('Capture view 1 first', 'warn'); return; }
+  if(!sensorOn){ setOut('Sensors must stay on for IMU gating', 'warn'); return; }
+  if(imu.beta == null || imu.gamma == null){ setOut('Waiting for IMU readings', 'warn'); return; }
+
+  const d = currentImuDelta();
+  const thr = imuGateThreshold();
+  if(!d || d.tilt > thr){
+    updateImuGateStatus();
+    setOut('Capture 2 blocked: too much rotation. Keep sideways motion only.', 'warn');
+    log(`[capture] view2 blocked | Δβ ${d ? round(d.dBeta,1) : '?'} Δγ ${d ? round(d.dGamma,1) : '?'} tilt ${d ? round(d.tilt,1) : '?'} / ${round(thr,1)} deg`);
+    return;
+  }
+
   frame2 = captureCurrentFrame();
   displayMode = 'v2';
   document.getElementById('showV2Btn').disabled = false;
   document.getElementById('solveBtn').disabled = false;
   setStatus('captureStatus', frame1 ? 'captures: view1 + view2' : 'captures: view2 only');
+  updateImuGateStatus();
   setOut('Captured view 2', 'ok');
-  log('[capture] view2');
+  log(`[capture] view2 | Δβ ${round(d.dBeta,1)} Δγ ${round(d.dGamma,1)} tilt ${round(d.tilt,1)} / ${round(thr,1)} deg`);
   render();
 }
 function setDisplay(mode){
@@ -798,7 +861,7 @@ function render(){
   if(displayMode === 'live'){ renderLive(); }
   else if(f){ renderFrame(f); }
   else{
-    ensureCanvasSize(1080, 1920);
+    ensureCanvasSize(1280, 720);
     ctx.fillStyle = '#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
   }
 
@@ -885,7 +948,6 @@ canvas.addEventListener('touchend', ()=>{ activeTouches=Math.max(0,activeTouches
 (function init(){
   setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
   log('[boot] board ids ' + BOARD.ids.join(', ') + ' | dictionary ' + BOARD.dictionary);
-  log('[boot] calib mode ' + CALIB.calW + 'x' + CALIB.calH);
 })();
 </script>
 </body>
