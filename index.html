@@ -1020,6 +1020,7 @@ canvas.addEventListener('pointerdown', evt => {
     else if(actionMode === 'p2_v1') actionMode = 'p1_v2';
     else if(actionMode === 'p1_v2') actionMode = 'p2_v2';
     else if(actionMode === 'p2_v2') actionMode = null;
+    updateComputeButton();
     render();
   }
 });
@@ -1037,6 +1038,7 @@ canvas.addEventListener('pointerup', evt => {
   if(actionMode === 'roi_v2') currentObject.roi2 = {...drawDrag};
   drawDrag = null;
   actionMode = null;
+  updateComputeButton();
   render();
 });
 canvas.addEventListener('touchstart', ()=>{ activeTouches++; }, {passive:true});
