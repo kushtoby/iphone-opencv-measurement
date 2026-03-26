@@ -321,57 +321,73 @@ function boardOuterImageQuad(planeToImage){
 }
 
 async function startCamera(){
+  if(typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setOut('Camera API not available in this browser', 'warn');
+    log('[cam] getUserMedia unavailable');
+    return;
+  }
+  if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){
+    setOut('Local aruco.js not loaded correctly', 'warn');
+    log('[boot] AR.Detector missing');
+    return;
+  }
+
   try{
     detector = makeDetector();
+  }catch(err){
+    setOut('Board detector failed to initialize', 'warn');
+    log('[boot] detector init failed: ' + (err.message || err));
+    return;
+  }
 
+  try{
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1080 },
-        height: { ideal: 1920 }
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30, max: 30 }
       },
       audio: false
     });
     video.srcObject = stream;
     await video.play();
 
-    await new Promise((resolve) => {
-      if(video.readyState >= 1 && video.videoWidth > 0 && video.videoHeight > 0){
-        resolve();
-      }else{
-        video.onloadedmetadata = () => resolve();
-      }
-    });
+    const finishSetup = () => {
+      rawCanvas.width = video.videoWidth;
+      rawCanvas.height = video.videoHeight;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
-    rawCanvas.width = video.videoWidth;
-    rawCanvas.height = video.videoHeight;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+      streaming = true;
+      frozen = false;
+      currentObject = null;
+      rawFrame = null;
+      displayFrame = null;
+      liveDetectorInfo = null;
+      frozenDetectorInfo = null;
+      frozenHomography = null;
+      actionMode = null;
+      drawDrag = null;
 
-    streaming = true;
-    frozen = false;
-    currentObject = null;
-    rawFrame = null;
-    displayFrame = null;
-    liveDetectorInfo = null;
-    frozenDetectorInfo = null;
-    frozenHomography = null;
-    actionMode = null;
-    drawDrag = null;
+      setStatus('cameraStatus', `camera: ${video.videoWidth}x${video.videoHeight}`);
+      setStatus('frameStatus', 'frame: live');
+      setStatus('boardStatus', 'board: none');
+      setStatus('detectStatus', 'live ids: none');
+      setStatus('objStatus', 'object: none');
+      setOut('Camera started. Place board coplanar with the object, then Freeze.', 'ok');
 
-    setStatus('cameraStatus', `camera: ${video.videoWidth}x${video.videoHeight}`);
-    setStatus('frameStatus', 'frame: live');
-    setStatus('boardStatus', 'board: none');
-    setStatus('detectStatus', 'live ids: none');
-    setStatus('objStatus', 'object: none');
-    setOut('Camera started. Place board coplanar with the object, then Freeze.', 'ok');
+      updateButtons();
+      if(!rafId) loop();
+      log('[cam] started');
+    };
 
-    updateButtons();
-    if(!rafId) loop();
-    log('[cam] started');
+    if (video.readyState >= 1 && video.videoWidth > 0) finishSetup();
+    else video.onloadedmetadata = finishSetup;
   }catch(err){
-    setOut('Camera start failed', 'warn');
-    log('[cam] ' + (err.message || err));
+    const msg = (err && (err.message || err.name)) ? (err.message || err.name) : String(err);
+    setOut('Camera failed. Use HTTPS and allow camera permission.', 'warn');
+    log('[cam] ' + msg);
   }
 }
 function captureCurrentFrame(){
