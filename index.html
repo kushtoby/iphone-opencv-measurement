@@ -964,6 +964,20 @@ function computeMeasurement(){
 
     const X1 = triangulatePoint(p1v1, p1v2);
     const X2 = triangulatePoint(p2v1, p2v2);
+    const maxAbsCoordMm = 2000; // generous sanity bound
+    if(
+      Math.abs(X1[0]) > maxAbsCoordMm || Math.abs(X1[1]) > maxAbsCoordMm || Math.abs(X1[2]) > maxAbsCoordMm ||
+      Math.abs(X2[0]) > maxAbsCoordMm || Math.abs(X2[1]) > maxAbsCoordMm || Math.abs(X2[2]) > maxAbsCoordMm
+    ){
+      setOut('Triangulation is unstable. Retake or re-mark the points.', 'warn');
+      log('[compute] rejected: absurd 3D coordinates');
+      return;
+    }
+    if(Math.sign(X1[2]) !== Math.sign(X2[2])){
+      setOut('Endpoint depths are inconsistent. Re-mark the same physical points in both views.', 'warn');
+      log('[compute] rejected: X1 and X2 have opposite z signs');
+      return;
+    }
     log('[compute] X1=' + JSON.stringify(X1));
     log('[compute] X2=' + JSON.stringify(X2));
     log('[compute] d=' + JSON.stringify(sub3(X2, X1)));
@@ -1004,6 +1018,11 @@ function computeMeasurement(){
       epi = 0.5 * (e1 + e2);
     }catch(err){
       log('[compute] epipolar check failed: ' + (err.message || err));
+    }
+    if(epi != null && epi > 8.0){
+      setOut(`Point match too inconsistent (epi ${round(epi,2)} px). Re-mark both views more carefully.`, 'warn');
+      log(`[compute] rejected: epipolar error too high (${epi})`);
+      return;
     }
 
     const gt = parseFloat(document.getElementById('gtMm').value);
