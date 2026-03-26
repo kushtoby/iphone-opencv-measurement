@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>index.html</title>
+  <style>
+    :root{
+      --maxw: 980px;
+      --radius: 14px;
+      --border: 1px solid #e7e7e7;
+      --bg: #fafafa;
+      --fg: #111;
+      --muted: #555;
+      --ok: #0a7a2f;
+      --warn: #b00020;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:10px;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:var(--fg);
+      background:var(--bg);
+      text-align:center;
+    }
+    h2{ margin:6px 0 10px; font-size:20px; }
+    .wrap{ max-width:var(--maxw); margin:0 auto; text-align:left; }
+    canvas{
+      width:100%;
+      max-width:var(--maxw);
+      border-radius:var(--radius);
+      border:var(--border);
+      background:#000;
+      display:block;
+      margin:0 auto;
+      touch-action:none;
+    }
+    .toolbar{
+      background:rgba(255,255,255,0.96);
+      border:var(--border);
+      border-radius:var(--radius);
+      padding:8px;
+      margin:10px auto;
+      max-width:var(--maxw);
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0,1fr));
+      gap:8px;
+    }
+    button,input,select{
+      border:var(--border);
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:15px;
+      background:#fff;
+      min-width:0;
+    }
+    button.primary{ background:#111; color:#fff; border-color:#111; }
+    button:disabled{ opacity:.5; }
+    .pill{
+      grid-column:1/-1;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      border:var(--border);
+      border-radius:12px;
+      padding:10px 12px;
+      background:#fff;
+      font-size:14px;
+      flex-wrap:wrap;
+    }
+    .pill .grp{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .pill input[type="checkbox"]{ transform:scale(1.1); }
+    .section{
+      border:var(--border);
+      border-radius:var(--radius);
+      padding:10px;
+      margin:10px 0;
+      background:#fff;
+    }
+    .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .small{ font-size:12px; color:var(--muted); }
+    .ok{ color:var(--ok); font-weight:800; }
+    .warn{ color:var(--warn); font-weight:800; }
+    .resultsBox{ max-height:260px; overflow:auto; border:var(--border); border-radius:12px; margin-top:8px; }
+    table{ width:100%; border-collapse:collapse; font-size:13px; }
+    th,td{ border-bottom:1px solid #eee; padding:8px; text-align:left; white-space:nowrap; }
+    th{ position:sticky; top:0; background:#fff; }
+    pre{
+      margin:8px 0 0; white-space:pre-wrap; word-break:break-word;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px; line-height:1.25;
+      max-height:220px; overflow:auto;
+      border:var(--border); border-radius:12px; padding:10px; background:#fbfbfb;
+    }
+    @media (max-width:760px){ .toolbar{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  </style>
+</head>
+<body>
+  <h2>Metric 3D Measurement — 8-marker ARUCO board</h2>
+
+  <video id="video" autoplay playsinline style="display:none;"></video>
+  <canvas id="canvas"></canvas>
+
+  <div class="toolbar">
+    <button id="startBtn" class="primary" onclick="startCamera()">Start</button>
+    <button id="imuBtn" onclick="toggleSensors()" disabled>Sensors</button>
+    <button id="cap1Btn" class="primary" onclick="captureView1()" disabled>Capture 1</button>
+    <button id="cap2Btn" class="primary" onclick="captureView2()" disabled>Capture 2</button>
+
+    <button id="showLiveBtn" onclick="setDisplay('live')" disabled>Live</button>
+    <button id="showV1Btn" onclick="setDisplay('v1')" disabled>View 1</button>
+    <button id="showV2Btn" onclick="setDisplay('v2')" disabled>View 2</button>
+    <button id="solveBtn" class="primary" onclick="solveBoard()" disabled>Solve board</button>
+
+    <button id="newObjBtn" onclick="newObjectSession()" disabled>New object</button>
+    <button id="computeBtn" class="primary" onclick="computeMeasurement()" disabled>Compute</button>
+    <button id="nextObjBtn" onclick="finishCurrentAndNext()" disabled>Measure next</button>
+    <button id="clearObjBtn" onclick="clearCurrentObject()" disabled>Clear object</button>
+
+    <div class="pill">
+      <div class="grp">
+        <label>Axis
+          <select id="axisSel" onchange="render()">
+            <option value="table_parallel">Table-parallel</option>
+            <option value="table_normal">Table-normal</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="refineChk" checked> Refine clicks</label>
+        <label>Refine px <input id="refineRad" type="number" value="16" min="4" max="40" step="1" style="width:84px"></label>
+        <label><input type="checkbox" id="overlayBoardChk" checked onchange="render()"> Show board</label>
+        <label><input type="checkbox" id="overlayEpiChk" checked onchange="render()"> Show epipolar</label>
+        <label>IMU max ° <input id="imuGateDeg" type="number" value="7" min="1" max="30" step="0.5" style="width:78px"></label>
+      </div>
+      <div class="grp small">
+        Local files required: cv.js, aruco.js, svd.js, posit1.js
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="section">
+      <div><b>Status</b></div>
+      <div class="row small">
+        <div id="cameraStatus">camera: idle</div>
+        <div id="sensorStatus">imu: off</div>
+        <div id="displayStatus">display: live</div>
+        <div id="boardStatus">board: unsolved</div>
+        <div id="objStatus">object: none</div>
+      </div>
+      <div class="row small">
+        <div id="captureStatus">captures: none</div>
+        <div id="boardDetail">expected ids: 12,13,14,15,16,17,18,19</div>
+        <div id="imuReadout"></div>
+        <div id="imuGateStatus">imu gate: waiting for Capture 1</div>
+      </div>
+      <div id="out" style="margin-top:8px;font-weight:800;"></div>
+    </div>
+
+    <div class="section">
+      <div><b>Object actions</b></div>
+      <div class="row">
+        <button onclick="beginAction('roi_v1')" id="roi1Btn" disabled>ROI V1</button>
+        <button onclick="beginAction('roi_v2')" id="roi2Btn" disabled>ROI V2</button>
+        <button onclick="beginAction('p1_v1')" id="p11Btn" disabled>P1 V1</button>
+        <button onclick="beginAction('p2_v1')" id="p21Btn" disabled>P2 V1</button>
+        <button onclick="beginAction('p1_v2')" id="p12Btn" disabled>P1 V2</button>
+        <button onclick="beginAction('p2_v2')" id="p22Btn" disabled>P2 V2</button>
+      </div>
+      <div class="row small">
+        Use View 1 / View 2 buttons to switch images, then choose ROI or point actions.
+      </div>
+    </div>
+
+    <div class="section">
+      <div><b>Results</b></div>
+      <div class="resultsBox">
+        <table id="resTable">
+          <thead>
+            <tr>
+              <th>#</th><th>Axis</th><th>Measured mm</th><th>Truth mm</th><th>% err</th>
+              <th>Pose V1</th><th>Pose V2</th><th>Epi px</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="row">
+        <label>Ground truth mm <input id="gtMm" type="number" value="" min="0" step="0.1" style="width:110px"></label>
+        <button onclick="clearResults()">Clear results</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div><b>Log</b></div>
+      <pre id="log"></pre>
+    </div>
+  </div>
+
+<script src="./cv.js"></script>
+<script src="./aruco.js"></script>
+<script src="./svd.js"></script>
+<script src="./posit1.js"></script>
+<script>
+'use strict';
+
+/********************************************************************
+ * CONFIG
+ ********************************************************************/
+const CALIB = {
+  calW: 2560,
+  calH: 1920,
+  fx: 1939.22217,
+  fy: 1944.80422,
+  cx: 1250.09825,
+  cy: 947.957973,
+  dist: [0.196139581, -0.79214993, 0.000251525214, -0.00647283132, 0.486071831]
+};
+
+const BOARD = {
+  dictionary: 'ARUCO',
+  ids: [12,13,14,15,16,17,18,19],
+  markerSizeMm: 50,
+  gapMm: 10,
+  // board frame: x right, y up, z out of board
+  centersMm: {
+    12:[25,145,0], 13:[85,145,0], 14:[145,145,0],
+    15:[25,85,0],  16:[85,85,0],  17:[145,85,0],
+    18:[25,25,0],  19:[85,25,0]
+  }
+};
+
+/********************************************************************
+ * GLOBALS
+ ********************************************************************/
+let detector = null;
+let streaming = false;
+let displayMode = 'live'; // live | v1 | v2
+let boardSolved = false;
+let frame1 = null, frame2 = null; // {width,height,imageData}
+let pose1 = null, pose2 = null;   // board pose in camera coords
+let detectorInfo1 = null, detectorInfo2 = null;
+
+let currentObject = null;
+let actionMode = null;
+let drawDrag = null;
+let results = [];
+let sensorOn = false;
+let imu = { alpha:null, beta:null, gamma:null };
+let imuRefAtV1 = null;
+let activeTouches = 0;
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently:true });
+
+/********************************************************************
+ * UTILS
+ ********************************************************************/
+function log(msg){
+  const el = document.getElementById('log');
+  const t = new Date().toLocaleTimeString();
+  el.textContent = `[${t}] ${msg}\n` + el.textContent;
+}
+function setOut(msg, cls=''){
+  const el = document.getElementById('out');
+  el.className = cls;
+  el.textContent = msg || '';
+}
+function setStatus(id, txt){ document.getElementById(id).textContent = txt; }
+function round(v, n=2){ return Number(v).toFixed(n); }
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+function clonePt(p){ return {x:p.x, y:p.y}; }
+function norm3(v){ return Math.hypot(v[0],v[1],v[2]); }
+function sub3(a,b){ return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function add3(a,b){ return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+function dot3(a,b){ return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+function matVec3(R,v){
+  return [
+    R[0][0]*v[0]+R[0][1]*v[1]+R[0][2]*v[2],
+    R[1][0]*v[0]+R[1][1]*v[1]+R[1][2]*v[2],
+    R[2][0]*v[0]+R[2][1]*v[1]+R[2][2]*v[2]
+  ];
+}
+function matT(R){
+  return [
+    [R[0][0],R[1][0],R[2][0]],
+    [R[0][1],R[1][1],R[2][1]],
+    [R[0][2],R[1][2],R[2][2]]
+  ];
+}
+function frameK(frame){
+  const sx = frame.width / CALIB.calW, sy = frame.height / CALIB.calH;
+  return {
+    fx: CALIB.fx * sx,
+    fy: CALIB.fy * sy,
+    cx: CALIB.cx * sx,
+    cy: CALIB.cy * sy
+  };
+}
+function scaleRect(r){
+  const x = Math.min(r.x1, r.x2), y = Math.min(r.y1, r.y2);
+  return { x, y, w: Math.abs(r.x2-r.x1), h: Math.abs(r.y2-r.y1) };
+}
+function pointInRect(p, r){
+  const rr = scaleRect(r);
+  return p.x >= rr.x && p.x <= rr.x + rr.w && p.y >= rr.y && p.y <= rr.y + rr.h;
+}
+function getDisplayedFrame(){
+  if (displayMode === 'v1') return frame1;
+  if (displayMode === 'v2') return frame2;
+  return null;
+}
+function imageDataToCanvasImage(frame, targetCtx){
+  const cnv = document.createElement('canvas');
+  cnv.width = frame.width; cnv.height = frame.height;
+  cnv.getContext('2d').putImageData(frame.imageData,0,0);
+  targetCtx.drawImage(cnv,0,0);
+}
+function captureCurrentFrame(){
+  const w = video.videoWidth, h = video.videoHeight;
+  const tmp = document.createElement('canvas');
+  tmp.width = w; tmp.height = h;
+  const tctx = tmp.getContext('2d', { willReadFrequently:true });
+  tctx.drawImage(video, 0, 0, w, h);
+  return { width:w, height:h, imageData:tctx.getImageData(0,0,w,h) };
+}
+function ensureCanvasSize(w,h){
+  if(canvas.width !== w || canvas.height !== h){
+    canvas.width = w; canvas.height = h;
+  }
+}
+
+
+function angleDiffDeg(a, b){
+  if(a == null || b == null) return null;
+  let d = a - b;
+  while(d > 180) d -= 360;
+  while(d < -180) d += 360;
+  return d;
+}
+function imuGateThreshold(){
+  return Math.max(0.5, parseFloat(document.getElementById('imuGateDeg').value || '7'));
+}
+function currentImuDelta(){
+  if(!imuRefAtV1 || imu.beta == null || imu.gamma == null) return null;
+  const dBeta = angleDiffDeg(imu.beta, imuRefAtV1.beta) ?? 0;
+  const dGamma = angleDiffDeg(imu.gamma, imuRefAtV1.gamma) ?? 0;
+  const dAlpha = angleDiffDeg(imu.alpha, imuRefAtV1.alpha);
+  const tilt = Math.hypot(dBeta, dGamma);
+  return { dAlpha, dBeta, dGamma, tilt };
+}
+function updateImuGateStatus(){
+  const el = document.getElementById('imuGateStatus');
+  if(!sensorOn){
+    el.textContent = 'imu gate: sensors off';
+    return;
+  }
+  if(!imuRefAtV1){
+    el.textContent = 'imu gate: waiting for Capture 1';
+    return;
+  }
+  const d = currentImuDelta();
+  if(!d){
+    el.textContent = 'imu gate: waiting for IMU samples';
+    return;
+  }
+  const thr = imuGateThreshold();
+  const ok = d.tilt <= thr;
+  el.textContent = `imu gate: Δβ ${round(d.dBeta,1)}° Δγ ${round(d.dGamma,1)}° | tilt ${round(d.tilt,1)}° / ${round(thr,1)}° ${ok ? 'OK' : 'BLOCK'}`;
+}
+
+/********************************************************************
+ * CAMERA + IMU
+ ********************************************************************/
+async function startCamera(){
+  try{
+    if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){
+      setOut('Local aruco.js not loaded correctly', 'warn');
+      log('[boot] AR.Detector missing');
+      return;
+    }
+    if(typeof POS === 'undefined' || typeof POS.Posit !== 'function'){
+      setOut('Local posit1.js not loaded correctly', 'warn');
+      log('[boot] POS.Posit missing');
+      return;
+    }
+    detector = new AR.Detector({ dictionaryName: BOARD.dictionary });
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    ensureCanvasSize(video.videoWidth, video.videoHeight);
+    streaming = true;
+    setStatus('cameraStatus', `camera: ${video.videoWidth}x${video.videoHeight}`);
+    document.getElementById('imuBtn').disabled = false;
+    document.getElementById('cap1Btn').disabled = false;
+    document.getElementById('showLiveBtn').disabled = false;
+    renderLoop();
+    log('[cam] started');
+  }catch(err){
+    setOut('Camera start failed', 'warn');
+    log('[cam] ' + (err.message || err));
+  }
+}
+
+function toggleSensors(){
+  if(sensorOn){
+    window.removeEventListener('deviceorientation', onDeviceOrientation);
+    sensorOn = false;
+    setStatus('sensorStatus', 'imu: off');
+    document.getElementById('imuBtn').textContent = 'Sensors';
+    updateImuGateStatus();
+    return;
+  }
+  if (typeof DeviceOrientationEvent === 'undefined'){
+    setOut('IMU not available', 'warn'); return;
+  }
+  const start = () => {
+    window.addEventListener('deviceorientation', onDeviceOrientation);
+    sensorOn = true;
+    setStatus('sensorStatus', 'imu: on');
+    document.getElementById('imuBtn').textContent = 'Sensors on';
+    updateImuGateStatus();
+  };
+  if (typeof DeviceOrientationEvent.requestPermission === 'function'){
+    DeviceOrientationEvent.requestPermission().then(state=>{
+      if(state === 'granted') start();
+      else setOut('IMU permission denied', 'warn');
+    }).catch(()=>setOut('IMU permission denied', 'warn'));
+  }else start();
+}
+function onDeviceOrientation(e){
+  imu.alpha = e.alpha; imu.beta = e.beta; imu.gamma = e.gamma;
+  document.getElementById('imuReadout').textContent =
+    `imu α ${imu.alpha==null?'?':round(imu.alpha,1)} β ${imu.beta==null?'?':round(imu.beta,1)} γ ${imu.gamma==null?'?':round(imu.gamma,1)}`;
+  updateImuGateStatus();
+}
+
+/********************************************************************
+ * BOARD DETECTION + POSE
+ ********************************************************************/
+function markerCornersCentered(marker, width, height){
+  return marker.corners.map(c => ({
+    x: c.x - width/2,
+    y: height/2 - c.y
+  }));
+}
+
+function computeMarkerBoardPose(marker, frame){
+  const posit = new POS.Posit(BOARD.markerSizeMm, Math.max(frame.width, frame.height));
+  const corners = markerCornersCentered(marker, frame.width, frame.height);
+  const pose = posit.pose(corners);
+  const Rm = pose.bestRotation;
+  const tm = pose.bestTranslation;
+  const center = BOARD.centersMm[marker.id];
+  if(!center) return null;
+  const tBoard = sub3(tm, matVec3(Rm, center));
+  return {
+    id: marker.id,
+    bestError: pose.bestError,
+    rotation: Rm,
+    translation: tBoard,
+    rawTranslation: tm
+  };
+}
+
+function detectBoardInFrame(frame){
+  const markers = detector.detect(frame.imageData) || [];
+  const filtered = markers.filter(m => BOARD.ids.includes(Number(m.id)));
+  const poses = [];
+  for(const m of filtered){
+    try{
+      const p = computeMarkerBoardPose(m, frame);
+      if(p) poses.push(p);
+    }catch(err){
+      log(`[board] marker ${m.id} pose error: ${err.message || err}`);
+    }
+  }
+  poses.sort((a,b)=>a.bestError - b.bestError);
+  const best = poses[0] || null;
+  return { allMarkers: markers, matchedMarkers: filtered, poses, best };
+}
+
+function solveBoard(){
+  if(!frame1 || !frame2){
+    setOut('Capture both views first', 'warn'); return;
+  }
+  detectorInfo1 = detectBoardInFrame(frame1);
+  detectorInfo2 = detectBoardInFrame(frame2);
+  pose1 = detectorInfo1.best;
+  pose2 = detectorInfo2.best;
+
+  const ok1 = pose1 && detectorInfo1.matchedMarkers.length >= 1;
+  const ok2 = pose2 && detectorInfo2.matchedMarkers.length >= 1;
+  boardSolved = !!(ok1 && ok2);
+
+  setStatus('boardStatus', boardSolved ? 'board: solved' : 'board: not solved');
+  setStatus('boardDetail',
+    `v1 ids ${detectorInfo1.matchedMarkers.map(m=>m.id).join(',') || 'none'} | v2 ids ${detectorInfo2.matchedMarkers.map(m=>m.id).join(',') || 'none'}`);
+  if(boardSolved){
+    setOut(`Board solved. best v1 id ${pose1.id}, v2 id ${pose2.id}`, 'ok');
+    log(`[board] v1 matched ids: ${detectorInfo1.matchedMarkers.map(m=>m.id).join(', ')}`);
+    log(`[board] v2 matched ids: ${detectorInfo2.matchedMarkers.map(m=>m.id).join(', ')}`);
+    log(`[board] using v1 marker ${pose1.id} err ${round(pose1.bestError,2)}, v2 marker ${pose2.id} err ${round(pose2.bestError,2)}`);
+    enableObjectControls(true);
+  }else{
+    setOut('Board solve failed. Make sure at least one known marker is detected in both views.', 'warn');
+    enableObjectControls(false);
+  }
+  render();
+}
+
+/********************************************************************
+ * CAPTURES
+ ********************************************************************/
+function captureView1(){
+  if(!streaming){ setOut('Start camera first', 'warn'); return; }
+  if(!sensorOn){ setOut('Turn sensors on before Capture 1', 'warn'); return; }
+  if(imu.beta == null || imu.gamma == null){ setOut('Wait for IMU readings before Capture 1', 'warn'); return; }
+  frame1 = captureCurrentFrame();
+  imuRefAtV1 = { alpha: imu.alpha, beta: imu.beta, gamma: imu.gamma };
+  displayMode = 'v1';
+  document.getElementById('showV1Btn').disabled = false;
+  document.getElementById('cap2Btn').disabled = false;
+  setStatus('captureStatus', frame2 ? 'captures: view1 + view2' : 'captures: view1 only');
+  updateImuGateStatus();
+  setOut('Captured view 1 and locked IMU reference', 'ok');
+  log(`[capture] view1 | imu ref α ${imuRefAtV1.alpha==null?'?':round(imuRefAtV1.alpha,1)} β ${round(imuRefAtV1.beta,1)} γ ${round(imuRefAtV1.gamma,1)}`);
+  render();
+}
+function captureView2(){
+  if(!streaming){ setOut('Start camera first', 'warn'); return; }
+  if(!frame1 || !imuRefAtV1){ setOut('Capture view 1 first', 'warn'); return; }
+  if(!sensorOn){ setOut('Sensors must stay on for IMU gating', 'warn'); return; }
+  if(imu.beta == null || imu.gamma == null){ setOut('Waiting for IMU readings', 'warn'); return; }
+
+  const d = currentImuDelta();
+  const thr = imuGateThreshold();
+  if(!d || d.tilt > thr){
+    updateImuGateStatus();
+    setOut('Capture 2 blocked: too much rotation. Keep sideways motion only.', 'warn');
+    log(`[capture] view2 blocked | Δβ ${d ? round(d.dBeta,1) : '?'} Δγ ${d ? round(d.dGamma,1) : '?'} tilt ${d ? round(d.tilt,1) : '?'} / ${round(thr,1)} deg`);
+    return;
+  }
+
+  frame2 = captureCurrentFrame();
+  displayMode = 'v2';
+  document.getElementById('showV2Btn').disabled = false;
+  document.getElementById('solveBtn').disabled = false;
+  setStatus('captureStatus', frame1 ? 'captures: view1 + view2' : 'captures: view2 only');
+  updateImuGateStatus();
+  setOut('Captured view 2', 'ok');
+  log(`[capture] view2 | Δβ ${round(d.dBeta,1)} Δγ ${round(d.dGamma,1)} tilt ${round(d.tilt,1)} / ${round(thr,1)} deg`);
+  render();
+}
+function setDisplay(mode){
+  displayMode = mode;
+  setStatus('displayStatus', `display: ${mode}`);
+  render();
+}
+
+/********************************************************************
+ * OBJECT SESSION
+ ********************************************************************/
+function enableObjectControls(on){
+  ['newObjBtn','clearObjBtn','roi1Btn','roi2Btn','p11Btn','p21Btn','p12Btn','p22Btn','computeBtn','nextObjBtn']
+    .forEach(id => document.getElementById(id).disabled = !on);
+}
+function newObjectSession(){
+  if(!boardSolved){ setOut('Solve board first', 'warn'); return; }
+  currentObject = {
+    roi1:null, roi2:null,
+    p1_v1:null, p2_v1:null, p1_v2:null, p2_v2:null,
+    refined:{}
+  };
+  actionMode = null;
+  setStatus('objStatus', 'object: active');
+  setOut('New object session started', 'ok');
+  render();
+}
+function clearCurrentObject(){
+  currentObject = null;
+  actionMode = null;
+  drawDrag = null;
+  setStatus('objStatus', 'object: none');
+  setOut('Current object cleared', '');
+  render();
+}
+function finishCurrentAndNext(){
+  newObjectSession();
+}
+function beginAction(mode){
+  if(!currentObject){ setOut('Start a new object first', 'warn'); return; }
+  if((mode.endsWith('_v1') && displayMode !== 'v1') || (mode.endsWith('_v2') && displayMode !== 'v2')){
+    setOut(`Switch display to ${mode.endsWith('_v1')?'View 1':'View 2'} first`, 'warn');
+    return;
+  }
+  actionMode = mode;
+  setOut(`Action: ${mode}`, 'ok');
+}
+
+/********************************************************************
+ * CLICK REFINEMENT
+ ********************************************************************/
+function grayscaleArray(frame){
+  const src = frame.imageData.data;
+  const g = new Float32Array(frame.width * frame.height);
+  for(let i=0,j=0;i<src.length;i+=4,j++){
+    g[j] = 0.299*src[i] + 0.587*src[i+1] + 0.114*src[i+2];
+  }
+  return g;
+}
+function refinePoint(frame, pt, roi){
+  if(!document.getElementById('refineChk').checked) return clonePt(pt);
+  const rad = clamp(parseInt(document.getElementById('refineRad').value || '16',10), 4, 40);
+  const gray = grayscaleArray(frame);
+  const w = frame.width, h = frame.height;
+  const rr = roi ? scaleRect(roi) : {x:0,y:0,w:w,h:h};
+  let best = {score:-1, x:pt.x, y:pt.y};
+  const x0 = Math.max(1, Math.floor(pt.x-rad)), x1 = Math.min(w-2, Math.ceil(pt.x+rad));
+  const y0 = Math.max(1, Math.floor(pt.y-rad)), y1 = Math.min(h-2, Math.ceil(pt.y+rad));
+
+  for(let y=y0; y<=y1; y++){
+    if(y < rr.y || y > rr.y + rr.h) continue;
+    for(let x=x0; x<=x1; x++){
+      if(x < rr.x || x > rr.x + rr.w) continue;
+      const idx = y*w + x;
+      const gx = gray[idx+1] - gray[idx-1];
+      const gy = gray[idx+w] - gray[idx-w];
+      const mag = gx*gx + gy*gy;
+      const dist2 = (x-pt.x)*(x-pt.x) + (y-pt.y)*(y-pt.y);
+      const score = mag - 0.2*dist2;
+      if(score > best.score){
+        best = {score, x, y};
+      }
+    }
+  }
+  return {x:best.x, y:best.y};
+}
+
+/********************************************************************
+ * TRIANGULATION + EPIPOLAR
+ ********************************************************************/
+function projectionMatrix(frame, pose){
+  const K = frameK(frame);
+  const Rt = [
+    [pose.rotation[0][0], pose.rotation[0][1], pose.rotation[0][2], pose.translation[0]],
+    [pose.rotation[1][0], pose.rotation[1][1], pose.rotation[1][2], pose.translation[1]],
+    [pose.rotation[2][0], pose.rotation[2][1], pose.rotation[2][2], pose.translation[2]]
+  ];
+  const P = Array.from({length:3}, ()=>Array(4).fill(0));
+  const Kmat = [
+    [K.fx, 0, K.cx],
+    [0, K.fy, K.cy],
+    [0, 0, 1]
+  ];
+  for(let r=0;r<3;r++){
+    for(let c=0;c<4;c++){
+      P[r][c] = Kmat[r][0]*Rt[0][c] + Kmat[r][1]*Rt[1][c] + Kmat[r][2]*Rt[2][c];
+    }
+  }
+  return {K, P};
+}
+function svdSolveHomogeneous4(A){
+  const svd = SVD.svdcmp(A.map(r=>r.slice()), A.length, 4, [], []);
+  const V = svd.v;
+  return [V[0][3], V[1][3], V[2][3], V[3][3]];
+}
+function triangulatePoint(p1, p2){
+  const {P: P1} = projectionMatrix(frame1, pose1);
+  const {P: P2} = projectionMatrix(frame2, pose2);
+  const A = [
+    [p1.x*P1[2][0]-P1[0][0], p1.x*P1[2][1]-P1[0][1], p1.x*P1[2][2]-P1[0][2], p1.x*P1[2][3]-P1[0][3]],
+    [p1.y*P1[2][0]-P1[1][0], p1.y*P1[2][1]-P1[1][1], p1.y*P1[2][2]-P1[1][2], p1.y*P1[2][3]-P1[1][3]],
+    [p2.x*P2[2][0]-P2[0][0], p2.x*P2[2][1]-P2[0][1], p2.x*P2[2][2]-P2[0][2], p2.x*P2[2][3]-P2[0][3]],
+    [p2.y*P2[2][0]-P2[1][0], p2.y*P2[2][1]-P2[1][1], p2.y*P2[2][2]-P2[1][2], p2.y*P2[2][3]-P2[1][3]]
+  ];
+  const X = svdSolveHomogeneous4(A);
+  return [X[0]/X[3], X[1]/X[3], X[2]/X[3]];
+}
+function skew(v){
+  return [[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]];
+}
+function fundamentalMatrix(){
+  const {K:K1} = projectionMatrix(frame1, pose1);
+  const {K:K2} = projectionMatrix(frame2, pose2);
+  const Rrel = [
+    [
+      pose2.rotation[0][0]*pose1.rotation[0][0] + pose2.rotation[0][1]*pose1.rotation[0][1] + pose2.rotation[0][2]*pose1.rotation[0][2],
+      pose2.rotation[0][0]*pose1.rotation[1][0] + pose2.rotation[0][1]*pose1.rotation[1][1] + pose2.rotation[0][2]*pose1.rotation[1][2],
+      pose2.rotation[0][0]*pose1.rotation[2][0] + pose2.rotation[0][1]*pose1.rotation[2][1] + pose2.rotation[0][2]*pose1.rotation[2][2]
+    ],
+    [
+      pose2.rotation[1][0]*pose1.rotation[0][0] + pose2.rotation[1][1]*pose1.rotation[0][1] + pose2.rotation[1][2]*pose1.rotation[0][2],
+      pose2.rotation[1][0]*pose1.rotation[1][0] + pose2.rotation[1][1]*pose1.rotation[1][1] + pose2.rotation[1][2]*pose1.rotation[1][2],
+      pose2.rotation[1][0]*pose1.rotation[2][0] + pose2.rotation[1][1]*pose1.rotation[2][1] + pose2.rotation[1][2]*pose1.rotation[2][2]
+    ],
+    [
+      pose2.rotation[2][0]*pose1.rotation[0][0] + pose2.rotation[2][1]*pose1.rotation[0][1] + pose2.rotation[2][2]*pose1.rotation[0][2],
+      pose2.rotation[2][0]*pose1.rotation[1][0] + pose2.rotation[2][1]*pose1.rotation[1][1] + pose2.rotation[2][2]*pose1.rotation[1][2],
+      pose2.rotation[2][0]*pose1.rotation[2][0] + pose2.rotation[2][1]*pose1.rotation[2][1] + pose2.rotation[2][2]*pose1.rotation[2][2]
+    ]
+  ];
+  const trel = sub3(pose2.translation, matVec3(Rrel, pose1.translation));
+  const E = multiply3(skew(trel), Rrel);
+  const K1inv = invK(K1), K2invT = transpose3(invK(K2));
+  return multiply3(K2invT, multiply3(E, K1inv));
+}
+function multiply3(A,B){
+  const C = Array.from({length:3}, ()=>Array(3).fill(0));
+  for(let r=0;r<3;r++) for(let c=0;c<3;c++) C[r][c] = A[r][0]*B[0][c]+A[r][1]*B[1][c]+A[r][2]*B[2][c];
+  return C;
+}
+function transpose3(A){ return [[A[0][0],A[1][0],A[2][0]],[A[0][1],A[1][1],A[2][1]],[A[0][2],A[1][2],A[2][2]]]; }
+function invK(K){
+  return [[1/K.fx,0,-K.cx/K.fx],[0,1/K.fy,-K.cy/K.fy],[0,0,1]];
+}
+function lineFromF(F, p){
+  return [
+    F[0][0]*p.x + F[0][1]*p.y + F[0][2],
+    F[1][0]*p.x + F[1][1]*p.y + F[1][2],
+    F[2][0]*p.x + F[2][1]*p.y + F[2][2]
+  ];
+}
+function pointLineDistance(line, p){
+  return Math.abs(line[0]*p.x + line[1]*p.y + line[2]) / Math.hypot(line[0], line[1]);
+}
+
+/********************************************************************
+ * MEASUREMENT
+ ********************************************************************/
+function computeMeasurement(){
+  if(!boardSolved || !currentObject){
+    setOut('Need solved board and active object', 'warn'); return;
+  }
+  const p1v1 = currentObject.p1_v1, p2v1 = currentObject.p2_v1, p1v2 = currentObject.p1_v2, p2v2 = currentObject.p2_v2;
+  if(!(p1v1 && p2v1 && p1v2 && p2v2)){
+    setOut('Need both endpoints in both views', 'warn'); return;
+  }
+
+  const X1 = triangulatePoint(p1v1, p1v2);
+  const X2 = triangulatePoint(p2v1, p2v2);
+  const d = sub3(X2, X1);
+
+  let measured;
+  if(document.getElementById('axisSel').value === 'table_normal'){
+    measured = Math.abs(d[2]);
+  }else{
+    measured = Math.hypot(d[0], d[1]);
+  }
+
+  const F = fundamentalMatrix();
+  const e1 = pointLineDistance(lineFromF(F, p1v1), p1v2);
+  const e2 = pointLineDistance(lineFromF(F, p2v1), p2v2);
+  const epi = 0.5*(e1+e2);
+
+  const gt = parseFloat(document.getElementById('gtMm').value);
+  const pct = Number.isFinite(gt) && gt > 0 ? Math.abs(measured-gt)/gt*100 : null;
+
+  results.push({
+    axis: document.getElementById('axisSel').value,
+    measured,
+    truth: Number.isFinite(gt) ? gt : null,
+    pct,
+    pose1: pose1.id,
+    pose2: pose2.id,
+    epi
+  });
+  refreshResults();
+  setOut(`Measured ${round(measured,2)} mm`, 'ok');
+  log(`[measure] ${document.getElementById('axisSel').value} = ${round(measured,2)} mm | epi ${round(epi,2)} px`);
+}
+function refreshResults(){
+  const tb = document.querySelector('#resTable tbody');
+  tb.innerHTML = '';
+  results.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td><td>${r.axis}</td><td>${round(r.measured,2)}</td>
+      <td>${r.truth==null?'':round(r.truth,2)}</td><td>${r.pct==null?'':round(r.pct,2)}</td>
+      <td>${r.pose1}</td><td>${r.pose2}</td><td>${round(r.epi,2)}</td>`;
+    tb.appendChild(tr);
+  });
+}
+function clearResults(){ results = []; refreshResults(); }
+
+/********************************************************************
+ * RENDER
+ ********************************************************************/
+function renderLive(){
+  if(!streaming || !video.videoWidth) return;
+  ensureCanvasSize(video.videoWidth, video.videoHeight);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+}
+function renderFrame(frame){
+  if(!frame) return;
+  ensureCanvasSize(frame.width, frame.height);
+  ctx.putImageData(frame.imageData, 0, 0);
+}
+function drawRect(r, color='#00e676'){
+  if(!r) return;
+  const rr = scaleRect(r);
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = 3;
+  ctx.strokeRect(rr.x, rr.y, rr.w, rr.h);
+  ctx.restore();
+}
+function drawPoint(p, label, color='#ffeb3b'){
+  if(!p) return;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI*2); ctx.fill();
+  ctx.font = 'bold 16px system-ui'; ctx.fillText(label, p.x + 8, p.y - 8);
+  ctx.restore();
+}
+function boardLinesForDisplay(frame, info, pose){
+  if(!info || !pose || !document.getElementById('overlayBoardChk').checked) return;
+  info.matchedMarkers.forEach(m=>{
+    ctx.save();
+    ctx.strokeStyle = '#00c853'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(m.corners[0].x, m.corners[0].y);
+    for(let i=1;i<m.corners.length;i++) ctx.lineTo(m.corners[i].x, m.corners[i].y);
+    ctx.closePath(); ctx.stroke();
+    const c = m.corners.reduce((a,p)=>({x:a.x+p.x/4,y:a.y+p.y/4}),{x:0,y:0});
+    ctx.fillStyle = '#00c853'; ctx.font='bold 18px system-ui'; ctx.fillText(String(m.id), c.x+8, c.y-8);
+    ctx.restore();
+  });
+}
+function drawEpipolarIfNeeded(){
+  if(!currentObject || !boardSolved || !document.getElementById('overlayEpiChk').checked) return;
+  const F = fundamentalMatrix();
+  if(displayMode === 'v2'){
+    if(currentObject.p1_v1) drawEpiLine(lineFromF(F, currentObject.p1_v1), '#00bcd4');
+    if(currentObject.p2_v1) drawEpiLine(lineFromF(F, currentObject.p2_v1), '#ff9800');
+  }
+}
+function drawEpiLine(line, color){
+  const [a,b,c] = line;
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2;
+  let pts = [];
+  if(Math.abs(b) > 1e-6){
+    pts.push({x:0, y:-c/b});
+    pts.push({x:canvas.width, y:-(a*canvas.width+c)/b});
+  }else if(Math.abs(a) > 1e-6){
+    const x = -c/a;
+    pts.push({x, y:0}); pts.push({x, y:canvas.height});
+  }
+  ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); ctx.stroke();
+  ctx.restore();
+}
+function render(){
+  const f = getDisplayedFrame();
+  if(displayMode === 'live'){ renderLive(); }
+  else if(f){ renderFrame(f); }
+  else{
+    ensureCanvasSize(1280, 720);
+    ctx.fillStyle = '#111'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+
+  if(displayMode === 'v1'){
+    boardLinesForDisplay(frame1, detectorInfo1, pose1);
+    if(currentObject){
+      drawRect(currentObject.roi1, '#00e676');
+      drawPoint(currentObject.p1_v1, 'P1', '#00bcd4');
+      drawPoint(currentObject.p2_v1, 'P2', '#ff9800');
+    }
+  }else if(displayMode === 'v2'){
+    boardLinesForDisplay(frame2, detectorInfo2, pose2);
+    if(currentObject){
+      drawRect(currentObject.roi2, '#00e676');
+      drawPoint(currentObject.p1_v2, 'P1', '#00bcd4');
+      drawPoint(currentObject.p2_v2, 'P2', '#ff9800');
+    }
+    drawEpipolarIfNeeded();
+  }
+  if(drawDrag){
+    drawRect(drawDrag, '#f44336');
+  }
+}
+function renderLoop(){
+  if(streaming && displayMode === 'live') render();
+  requestAnimationFrame(renderLoop);
+}
+
+/********************************************************************
+ * POINTERS
+ ********************************************************************/
+function canvasPoint(evt){
+  const rect = canvas.getBoundingClientRect();
+  const x = (evt.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (evt.clientY - rect.top) * (canvas.height / rect.height);
+  return {x,y};
+}
+canvas.addEventListener('pointerdown', evt => {
+  if(activeTouches>0 && evt.pointerType==='mouse') return;
+  if(!actionMode || !currentObject) return;
+  const p = canvasPoint(evt);
+  if(actionMode.startsWith('roi_')){
+    drawDrag = { x1:p.x, y1:p.y, x2:p.x, y2:p.y };
+    canvas.setPointerCapture(evt.pointerId);
+  }else{
+    let roi = null, frame = null;
+    if(actionMode.endsWith('_v1')){
+      roi = currentObject.roi1; frame = frame1;
+    }else{
+      roi = currentObject.roi2; frame = frame2;
+    }
+    const rp = refinePoint(frame, p, roi);
+    currentObject[actionMode] = rp;
+    setOut(`${actionMode} set`, 'ok');
+    if(actionMode === 'p1_v1') actionMode = 'p2_v1';
+    else if(actionMode === 'p2_v1') actionMode = 'p1_v2';
+    else if(actionMode === 'p1_v2') actionMode = 'p2_v2';
+    else if(actionMode === 'p2_v2') actionMode = null;
+    render();
+  }
+});
+canvas.addEventListener('pointermove', evt => {
+  if(!drawDrag) return;
+  const p = canvasPoint(evt);
+  drawDrag.x2 = p.x; drawDrag.y2 = p.y;
+  render();
+});
+canvas.addEventListener('pointerup', evt => {
+  if(!drawDrag || !currentObject) return;
+  const p = canvasPoint(evt);
+  drawDrag.x2 = p.x; drawDrag.y2 = p.y;
+  if(actionMode === 'roi_v1') currentObject.roi1 = {...drawDrag};
+  if(actionMode === 'roi_v2') currentObject.roi2 = {...drawDrag};
+  drawDrag = null;
+  actionMode = null;
+  render();
+});
+canvas.addEventListener('touchstart', ()=>{ activeTouches++; }, {passive:true});
+canvas.addEventListener('touchend', ()=>{ activeTouches=Math.max(0,activeTouches-1); }, {passive:true});
+
+/********************************************************************
+ * BOOT
+ ********************************************************************/
+(function init(){
+  setStatus('boardDetail', `expected ids: ${BOARD.ids.join(',')}`);
+  log('[boot] board ids ' + BOARD.ids.join(', ') + ' | dictionary ' + BOARD.dictionary);
+})();
+</script>
+</body>
+</html>
