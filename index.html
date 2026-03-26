@@ -771,45 +771,82 @@ function pointLineDistance(line, p){
  * MEASUREMENT
  ********************************************************************/
 function computeMeasurement(){
-  if(!boardSolved || !currentObject){
-    setOut('Need solved board and active object', 'warn'); return;
+  try{
+    if(!boardSolved || !currentObject){
+      setOut('Need solved board and active object', 'warn');
+      log('[compute] blocked: boardSolved=' + boardSolved + ' currentObject=' + (!!currentObject));
+      return;
+    }
+
+    const p1v1 = currentObject.p1_v1;
+    const p2v1 = currentObject.p2_v1;
+    const p1v2 = currentObject.p1_v2;
+    const p2v2 = currentObject.p2_v2;
+
+    log('[compute] points present | ' +
+      `p1_v1=${!!p1v1} p2_v1=${!!p2v1} p1_v2=${!!p1v2} p2_v2=${!!p2v2}`);
+
+    if(!(p1v1 && p2v1 && p1v2 && p2v2)){
+      setOut('Need both endpoints in both views', 'warn');
+      return;
+    }
+
+    const X1 = triangulatePoint(p1v1, p1v2);
+    const X2 = triangulatePoint(p2v1, p2v2);
+
+    if(!X1 || !X2 || !X1.every(Number.isFinite) || !X2.every(Number.isFinite)){
+      setOut('Triangulation failed', 'warn');
+      log('[compute] triangulation failed | X1=' + JSON.stringify(X1) + ' X2=' + JSON.stringify(X2));
+      return;
+    }
+
+    const d = sub3(X2, X1);
+
+    let measured;
+    if(document.getElementById('axisSel').value === 'table_normal'){
+      measured = Math.abs(d[2]);
+    }else{
+      measured = Math.hypot(d[0], d[1]);
+    }
+
+    if(!Number.isFinite(measured)){
+      setOut('Measurement came out invalid', 'warn');
+      log('[compute] invalid measured value: ' + measured);
+      return;
+    }
+
+    let epi = null;
+    try{
+      const F = fundamentalMatrix();
+      const e1 = pointLineDistance(lineFromF(F, p1v1), p1v2);
+      const e2 = pointLineDistance(lineFromF(F, p2v1), p2v2);
+      epi = 0.5 * (e1 + e2);
+    }catch(err){
+      log('[compute] epipolar check failed: ' + (err.message || err));
+    }
+
+    const gt = parseFloat(document.getElementById('gtMm').value);
+    const pct = Number.isFinite(gt) && gt > 0 ? Math.abs(measured - gt) / gt * 100 : null;
+
+    results.push({
+      axis: document.getElementById('axisSel').value,
+      measured,
+      truth: Number.isFinite(gt) ? gt : null,
+      pct,
+      pose1: pose1 ? pose1.id : null,
+      pose2: pose2 ? pose2.id : null,
+      epi
+    });
+
+    refreshResults();
+    setOut(`Measured ${round(measured,2)} mm`, 'ok');
+    log(`[measure] ${document.getElementById('axisSel').value} = ${round(measured,2)} mm` +
+        (epi == null ? '' : ` | epi ${round(epi,2)} px`));
+  }catch(err){
+    setOut('Compute failed', 'warn');
+    log('[compute] ERROR: ' + (err && err.stack ? err.stack : (err.message || err)));
+    console.error(err);
   }
-  const p1v1 = currentObject.p1_v1, p2v1 = currentObject.p2_v1, p1v2 = currentObject.p1_v2, p2v2 = currentObject.p2_v2;
-  if(!(p1v1 && p2v1 && p1v2 && p2v2)){
-    setOut('Need both endpoints in both views', 'warn'); return;
-  }
-
-  const X1 = triangulatePoint(p1v1, p1v2);
-  const X2 = triangulatePoint(p2v1, p2v2);
-  const d = sub3(X2, X1);
-
-  let measured;
-  if(document.getElementById('axisSel').value === 'table_normal'){
-    measured = Math.abs(d[2]);
-  }else{
-    measured = Math.hypot(d[0], d[1]);
-  }
-
-  const F = fundamentalMatrix();
-  const e1 = pointLineDistance(lineFromF(F, p1v1), p1v2);
-  const e2 = pointLineDistance(lineFromF(F, p2v1), p2v2);
-  const epi = 0.5*(e1+e2);
-
-  const gt = parseFloat(document.getElementById('gtMm').value);
-  const pct = Number.isFinite(gt) && gt > 0 ? Math.abs(measured-gt)/gt*100 : null;
-
-  results.push({
-    axis: document.getElementById('axisSel').value,
-    measured,
-    truth: Number.isFinite(gt) ? gt : null,
-    pct,
-    pose1: pose1.id,
-    pose2: pose2.id,
-    epi
-  });
-  refreshResults();
-  setOut(`Measured ${round(measured,2)} mm`, 'ok');
-  log(`[measure] ${document.getElementById('axisSel').value} = ${round(measured,2)} mm | epi ${round(epi,2)} px`);
 }
 function refreshResults(){
   const tb = document.querySelector('#resTable tbody');
