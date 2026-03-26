@@ -894,28 +894,27 @@ function skew(v){
   return [[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]];
 }
 function fundamentalMatrix(){
-  const {K:K1} = projectionMatrix(frame1, pose1);
-  const {K:K2} = projectionMatrix(frame2, pose2);
-  const Rrel = [
-    [
-      pose2.rotation[0][0]*pose1.rotation[0][0] + pose2.rotation[0][1]*pose1.rotation[0][1] + pose2.rotation[0][2]*pose1.rotation[0][2],
-      pose2.rotation[0][0]*pose1.rotation[1][0] + pose2.rotation[0][1]*pose1.rotation[1][1] + pose2.rotation[0][2]*pose1.rotation[1][2],
-      pose2.rotation[0][0]*pose1.rotation[2][0] + pose2.rotation[0][1]*pose1.rotation[2][1] + pose2.rotation[0][2]*pose1.rotation[2][2]
-    ],
-    [
-      pose2.rotation[1][0]*pose1.rotation[0][0] + pose2.rotation[1][1]*pose1.rotation[0][1] + pose2.rotation[1][2]*pose1.rotation[0][2],
-      pose2.rotation[1][0]*pose1.rotation[1][0] + pose2.rotation[1][1]*pose1.rotation[1][1] + pose2.rotation[1][2]*pose1.rotation[1][2],
-      pose2.rotation[1][0]*pose1.rotation[2][0] + pose2.rotation[1][1]*pose1.rotation[2][1] + pose2.rotation[1][2]*pose1.rotation[2][2]
-    ],
-    [
-      pose2.rotation[2][0]*pose1.rotation[0][0] + pose2.rotation[2][1]*pose1.rotation[0][1] + pose2.rotation[2][2]*pose1.rotation[0][2],
-      pose2.rotation[2][0]*pose1.rotation[1][0] + pose2.rotation[2][1]*pose1.rotation[1][1] + pose2.rotation[2][2]*pose1.rotation[1][2],
-      pose2.rotation[2][0]*pose1.rotation[2][0] + pose2.rotation[2][1]*pose1.rotation[2][1] + pose2.rotation[2][2]*pose1.rotation[2][2]
-    ]
-  ];
-  const trel = sub3(pose2.translation, matVec3(Rrel, pose1.translation));
+  const K1 = frameK(frame1), K2 = frameK(frame2);
+
+  // pose.rotation maps board/world -> camera
+  // Relative transform cam1 -> cam2:
+  // X2 = Rrel * X1 + trel
+  // where Rrel = R2 * R1^T
+  const R1 = pose1.rotation;
+  const R2 = pose2.rotation;
+  const t1 = pose1.translation;
+  const t2 = pose2.translation;
+
+  const R1T = transpose3(R1);
+  const Rrel = multiply3(R2, R1T);
+
+  const Rrel_t1 = matVec3(Rrel, t1);
+  const trel = sub3(t2, Rrel_t1);
+
   const E = multiply3(skew(trel), Rrel);
-  const K1inv = invK(K1), K2invT = transpose3(invK(K2));
+  const K1inv = invK(K1);
+  const K2invT = transpose3(invK(K2));
+
   return multiply3(K2invT, multiply3(E, K1inv));
 }
 function multiply3(A,B){
