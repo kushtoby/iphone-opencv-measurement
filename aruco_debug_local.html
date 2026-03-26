@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>aruco_debug_local.html</title>
+  <style>
+    :root{
+      --maxw: 980px; --radius: 14px; --border: 1px solid #e6e6e6;
+      --bg:#fafafa; --fg:#111; --muted:#666; --ok:#0a7a2f; --warn:#b00020; --card:#fff;
+    }
+    *{box-sizing:border-box}
+    body{margin:12px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+    .wrap{max-width:var(--maxw);margin:0 auto}
+    h1{margin:0 0 8px;font-size:24px;text-align:center}
+    .sub{text-align:center;color:var(--muted);margin:0 0 12px;font-size:14px}
+    .toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;background:var(--card);border:var(--border);border-radius:var(--radius);padding:10px;margin-bottom:10px}
+    .toolbar button,.toolbar input{width:100%;min-width:0;padding:10px 12px;border-radius:12px;border:var(--border);background:#fff;font-size:15px}
+    .toolbar button.primary{background:#111;color:#fff;border-color:#111}
+    .toolbar button:disabled{opacity:.5}
+    .grid{display:grid;grid-template-columns:1.4fr 1fr;gap:10px}
+    .card{background:var(--card);border:var(--border);border-radius:var(--radius);padding:10px}
+    canvas{width:100%;background:#000;border-radius:12px;border:var(--border);display:block}
+    .status{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+    .pill{padding:10px 12px;border:var(--border);border-radius:12px;background:#fff;font-size:13px;line-height:1.35}
+    .ok{color:var(--ok);font-weight:700}.warn{color:var(--warn);font-weight:700}.muted{color:var(--muted)}
+    .small{font-size:12px;color:var(--muted)}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+    .row label{display:flex;gap:6px;align-items:center;font-size:14px}
+    .row input[type="checkbox"]{transform:scale(1.1)}
+    .tableWrap{max-height:240px;overflow:auto;border:var(--border);border-radius:12px;margin-top:8px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{padding:8px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+    th{position:sticky;top:0;background:#fff}
+    pre{margin:8px 0 0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.28;max-height:420px;overflow:auto;background:#fbfbfb;border:var(--border);border-radius:12px;padding:10px}
+    code{background:#f3f3f3;padding:1px 4px;border-radius:6px}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}.toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}.status{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ArUco Debug — Local JS</h1>
+  <div class="sub">Put <code>cv.js</code> and <code>aruco.js</code> from the js-aruco2 repo’s <code>src</code> folder in the same folder as this HTML, then open this page.</div>
+
+  <div class="toolbar">
+    <button id="startBtn" class="primary">Start camera</button>
+    <button id="stopBtn" disabled>Stop camera</button>
+    <button id="detectBtn" disabled>Pause detect</button>
+    <button id="snapBtn" disabled>Snapshot</button>
+
+    <input id="expectedIds" type="text" value="0,1,2,3" />
+    <input id="dictName" type="text" value="ARUCO" />
+    <input id="minMarkers" type="number" value="2" min="1" max="4" step="1" />
+    <input id="noteField" type="text" value="Needs local ./cv.js and ./aruco.js" />
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <canvas id="canvas"></canvas>
+      <div class="row">
+        <label><input type="checkbox" id="showBoxes" checked> Show boxes</label>
+        <label><input type="checkbox" id="showCorners" checked> Show corners</label>
+        <label><input type="checkbox" id="showCenter" checked> Show center</label>
+      </div>
+      <div class="status">
+        <div class="pill" id="libStatus">Library: <span class="warn">loading...</span></div>
+        <div class="pill" id="detectStatus">Detection: <span class="muted">idle</span></div>
+        <div class="pill" id="idStatus">Detected IDs: <span class="muted">none</span></div>
+        <div class="pill" id="matchStatus">Known board matches: <span class="muted">none</span></div>
+      </div>
+      <div class="status">
+        <div class="pill" id="fpsStatus">FPS: <span class="muted">-</span></div>
+        <div class="pill" id="frameStatus">Frame: <span class="muted">-</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="small">Expected local files:</div>
+      <ul class="small">
+        <li><code>./cv.js</code></li>
+        <li><code>./aruco.js</code></li>
+      </ul>
+      <div class="small">Expected IDs default to <code>0,1,2,3</code>.</div>
+
+      <div class="tableWrap">
+        <table>
+          <thead><tr><th>#</th><th>ID</th><th>Matched?</th><th>Center</th><th>Corners</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="row" style="justify-content:space-between;">
+        <div class="small">This page uses <code>new AR.Detector({ dictionaryName: 'ARUCO' })</code>.</div>
+        <button id="clearLogBtn" style="padding:8px 10px;border-radius:10px;border:1px solid #e6e6e6;background:#fff;">Clear log</button>
+      </div>
+      <pre id="log"></pre>
+    </div>
+  </div>
+</div>
+
+<video id="video" playsinline autoplay style="display:none;"></video>
+
+<script src="./cv.js"></script>
+<script src="./aruco.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video');
+  const canvas = $('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently:true });
+
+  let stream = null, raf = 0, running = false, detectEnabled = true, snapshotMode = false;
+  let detector = null, detectorLoaded = false, lastTs = performance.now(), frameCount = 0;
+
+  function log(msg){
+    const t = new Date().toLocaleTimeString();
+    $('log').textContent = `[${t}] ${msg}\n` + $('log').textContent;
+  }
+  function parseExpectedIds(){
+    return $('expectedIds').value.split(',').map(s=>s.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
+  }
+  function setLibStatus(ok, text){ $('libStatus').innerHTML = `Library: <span class="${ok?'ok':'warn'}">${text}</span>`; }
+  function setDetectStatus(kind, text){ $('detectStatus').innerHTML = `Detection: <span class="${kind}">${text}</span>`; }
+  function updateIdStatus(ids){ $('idStatus').innerHTML = `Detected IDs: <span class="${ids.length?'ok':'muted'}">${ids.length?ids.join(', '):'none'}</span>`; }
+  function updateMatchStatus(matches, minNeeded){
+    $('matchStatus').innerHTML = `Known board matches: <span class="${matches.length>=minNeeded?'ok':'warn'}">${matches.length?matches.join(', '):'none'} (${matches.length}/${minNeeded}+ needed)</span>`;
+  }
+  function roundPt(p){ return `${Math.round(p.x)},${Math.round(p.y)}`; }
+  function polyCenter(corners){
+    let sx=0, sy=0; const n=corners.length||1;
+    for(const p of corners){ sx += p.x; sy += p.y; }
+    return { x:sx/n, y:sy/n };
+  }
+  function resizeCanvas(){ if(video.videoWidth && video.videoHeight){ canvas.width = video.videoWidth; canvas.height = video.videoHeight; } }
+  function drawFrame(){ ctx.drawImage(video, 0, 0, canvas.width, canvas.height); }
+  function drawMarker(m, matched){
+    const color = matched ? '#00c853' : '#ff1744';
+    const c = m.corners || [];
+    if(c.length < 4) return;
+    if($('showBoxes').checked){
+      ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(c[0].x,c[0].y); for(let i=1;i<c.length;i++) ctx.lineTo(c[i].x,c[i].y); ctx.closePath(); ctx.stroke(); ctx.restore();
+    }
+    if($('showCorners').checked){
+      ctx.save(); ctx.fillStyle = color; ctx.font = '12px system-ui';
+      for(let i=0;i<c.length;i++){ ctx.beginPath(); ctx.arc(c[i].x,c[i].y,4,0,Math.PI*2); ctx.fill(); ctx.fillText(String(i), c[i].x+6, c[i].y-6); }
+      ctx.restore();
+    }
+    const p = polyCenter(c);
+    ctx.save(); ctx.fillStyle = color; ctx.font = 'bold 18px system-ui'; ctx.fillText(String(m.id), p.x+8, p.y-8);
+    if($('showCenter').checked){ ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill(); }
+    ctx.restore();
+  }
+  function updateTable(markers, expected){
+    $('tbody').innerHTML = '';
+    markers.forEach((m,i) => {
+      const ctr = polyCenter(m.corners||[]);
+      const matched = expected.includes(Number(m.id));
+      const cornersText = (m.corners||[]).map(roundPt).join(' | ');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${i+1}</td><td>${m.id ?? '?'}</td><td class="${matched?'ok':'warn'}">${matched?'yes':'no'}</td><td>${roundPt(ctr)}</td><td>${cornersText}</td>`;
+      $('tbody').appendChild(tr);
+    });
+  }
+  function normalizeMarkers(markers){
+    return (markers || []).map(m => ({
+      id: Number(m.id),
+      corners: (m.corners || []).map(p => ({ x:p.x, y:p.y }))
+    })).filter(m => Number.isFinite(m.id) && m.corners.length >= 4);
+  }
+
+  function loadDetector(){
+    try{
+      if(typeof window.AR === 'undefined' || typeof window.AR.Detector !== 'function'){
+        setLibStatus(false, 'AR.Detector missing');
+        log('[lib] Local scripts loaded, but AR.Detector is missing');
+        log('[lib] Make sure ./cv.js and ./aruco.js are the js-aruco2 src files');
+        return;
+      }
+      const dictName = ($('dictName').value || 'ARUCO').trim() || 'ARUCO';
+      detector = new window.AR.Detector({ dictionaryName: dictName });
+      detectorLoaded = true;
+      setLibStatus(true, `local files loaded, dict=${dictName}`);
+      log("[lib] Loaded local ./cv.js and ./aruco.js");
+      log(`[lib] Created detector with new AR.Detector({ dictionaryName: '${dictName}' })`);
+    }catch(err){
+      setLibStatus(false, 'local detector init failed');
+      log(`[lib] Detector init error: ${err.message || err}`);
+    }
+  }
+
+  function processFrame(){
+    drawFrame();
+    if(!detectEnabled){ setDetectStatus('muted', 'paused'); return; }
+    if(!detectorLoaded || !detector){ setDetectStatus('warn', 'no detector loaded'); return; }
+
+    const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
+    let rawMarkers = [];
+    try{ rawMarkers = detector.detect(imageData); }
+    catch(err){ setDetectStatus('warn', 'detector threw error'); log(`[detect] detector.detect(imageData) error: ${err.message || err}`); return; }
+
+    const markers = normalizeMarkers(rawMarkers);
+    const expected = parseExpectedIds();
+    const ids = markers.map(m => m.id);
+    const matches = ids.filter(id => expected.includes(id));
+    const minNeeded = Math.max(1, Number($('minMarkers').value || 2));
+
+    updateIdStatus(ids);
+    updateMatchStatus(matches, minNeeded);
+    updateTable(markers, expected);
+    for(const m of markers) drawMarker(m, expected.includes(m.id));
+
+    if(!markers.length) setDetectStatus('warn', 'no markers detected');
+    else if(matches.length < minNeeded) setDetectStatus('warn', 'insufficient known markers for pose');
+    else setDetectStatus('ok', 'enough known markers detected');
+
+    $('frameStatus').innerHTML = `Frame: <span class="muted">${canvas.width}×${canvas.height} | markers ${markers.length}</span>`;
+  }
+
+  function tick(ts=performance.now()){
+    if(!running) return;
+    if(video.videoWidth && video.videoHeight && (!canvas.width || !canvas.height)) resizeCanvas();
+    if(video.readyState >= 2 && canvas.width && canvas.height) processFrame();
+    frameCount++;
+    const dt = ts - lastTs;
+    if(dt >= 1000){
+      const fps = frameCount * 1000 / dt;
+      $('fpsStatus').innerHTML = `FPS: <span class="muted">${fps.toFixed(1)}</span>`;
+      frameCount = 0; lastTs = ts;
+    }
+    if(snapshotMode){ running = false; return; }
+    raf = requestAnimationFrame(tick);
+  }
+
+  async function startCamera(){
+    if(stream) return;
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({
+        video:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080} },
+        audio:false
+      });
+      video.srcObject = stream; await video.play(); resizeCanvas();
+      running = true; detectEnabled = true; snapshotMode = false;
+      $('startBtn').disabled = true; $('stopBtn').disabled = false; $('detectBtn').disabled = false; $('snapBtn').disabled = false;
+      $('detectBtn').textContent = 'Pause detect';
+      log('[cam] Camera started');
+      tick();
+    }catch(err){
+      log(`[cam] Start failed: ${err.message || err}`);
+      setDetectStatus('warn', 'camera start failed');
+    }
+  }
+
+  function stopCamera(){
+    running = false; cancelAnimationFrame(raf); raf = 0;
+    if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+    video.srcObject = null;
+    $('startBtn').disabled = false; $('stopBtn').disabled = true; $('detectBtn').disabled = true; $('snapBtn').disabled = true;
+    setDetectStatus('muted', 'stopped');
+    log('[cam] Camera stopped');
+  }
+
+  $('startBtn').addEventListener('click', startCamera);
+  $('stopBtn').addEventListener('click', stopCamera);
+  $('detectBtn').addEventListener('click', () => { detectEnabled = !detectEnabled; $('detectBtn').textContent = detectEnabled ? 'Pause detect' : 'Resume detect'; log(`[detect] ${detectEnabled?'resumed':'paused'}`); });
+  $('snapBtn').addEventListener('click', () => { snapshotMode = true; log('[frame] Snapshot frozen'); });
+  $('clearLogBtn').addEventListener('click', () => { $('log').textContent = ''; });
+  window.addEventListener('resize', resizeCanvas);
+
+  function boot(){
+    setLibStatus(false, 'waiting for local files');
+    setDetectStatus('muted', 'idle');
+    updateIdStatus([]);
+    updateMatchStatus([], Math.max(1, Number($('minMarkers').value || 2)));
+    loadDetector();
+    log(`[boot] Expected board IDs: ${parseExpectedIds().join(', ')}`);
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
