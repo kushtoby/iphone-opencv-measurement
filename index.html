@@ -1212,6 +1212,7 @@ canvas.addEventListener('pointerdown', evt => {
     }
     const rp = refinePoint(frame, p, roi);
     currentObject[actionMode] = rp;
+    log(`[click] ${actionMode} raw=(${round(imgPt.x,1)},${round(imgPt.y,1)}) refined=(${round(rp.x,1)},${round(rp.y,1)}) view=${showView}`);
     setOut(`${actionMode} set`, 'ok');
     if(actionMode === 'p1_v1') actionMode = 'p2_v1';
     else if(actionMode === 'p2_v1') actionMode = 'p1_v2';
