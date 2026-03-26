@@ -1,671 +1,253 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>index.html</title>
-  <style>
-    :root{ --border:1px solid #d9d9d9; --bg:#f5f6f8; --card:#fff; --ok:#0a7a2f; --warn:#b00020; --muted:#666; --radius:14px; }
-    *{ box-sizing:border-box; }
-    body{ margin:0; padding:14px; background:var(--bg); color:#111; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
-    h2{ margin:0 0 12px; font-size:22px; }
-    canvas{ width:100%; max-width:100%; background:#000; border:var(--border); border-radius:16px; display:block; }
-    .toolbar{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
-    button,input{ border:var(--border); border-radius:12px; padding:10px 12px; font-size:15px; background:#fff; min-width:0; }
-    button.primary{ background:#111; color:#fff; border-color:#111; }
-    button:disabled{ opacity:.5; }
-    .pill,.section{ border:var(--border); border-radius:var(--radius); background:var(--card); }
-    .pill{ grid-column:1/-1; padding:10px 12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
-    .grp{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .section{ padding:10px; margin-top:10px; }
-    .row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
-    .small{ font-size:12px; color:var(--muted); }
-    .ok{ color:var(--ok); font-weight:800; }
-    .warn{ color:var(--warn); font-weight:800; }
-    pre{ margin:8px 0 0; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.25; max-height:220px; overflow:auto; border:var(--border); border-radius:12px; padding:10px; background:#fbfbfb; }
-    .resultsBox{ max-height:260px; overflow:auto; border:var(--border); border-radius:12px; margin-top:8px; }
-    table{ width:100%; border-collapse:collapse; font-size:13px; }
-    th,td{ border-bottom:1px solid #eee; padding:8px; text-align:left; white-space:nowrap; }
-    th{ position:sticky; top:0; background:#fff; }
-    @media (min-width:900px){ .toolbar{ grid-template-columns:repeat(4,minmax(0,1fr)); } }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Planar Measurement</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#111;color:#eee}
+  .wrap{max-width:1100px;margin:0 auto;padding:12px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  button,input{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #444;background:#222;color:#eee}
+  button.primary{background:#0b6efd;border-color:#0b6efd}
+  button:disabled{opacity:.45}
+  .panel{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:10px;margin-bottom:10px}
+  #canvas{width:100%;height:auto;max-height:72vh;background:#000;border-radius:12px;touch-action:none}
+  #out.ok{color:#9df59d} #out.warn{color:#ffd27f}
+  table{width:100%;border-collapse:collapse} th,td{border:1px solid #333;padding:6px;text-align:left}
+  pre{white-space:pre-wrap;max-height:220px;overflow:auto;margin:0}
+  .small{font-size:.92rem;color:#bdbdbd}
+</style>
 </head>
 <body>
-  <h2>Planar Metric Measurement — single image</h2>
-
-  <video id="video" autoplay playsinline style="display:none"></video>
-  <canvas id="rawCanvas" style="display:none"></canvas>
-  <canvas id="canvas"></canvas>
-
-  <div class="toolbar">
-    <button id="startBtn" class="primary" onclick="startCamera()">Start</button>
-    <button id="freezeBtn" class="primary" onclick="freezeFrame()" disabled>Freeze</button>
-    <button id="resumeBtn" onclick="resumeLive()" disabled>Resume</button>
-    <button id="clearObjBtn" onclick="clearCurrentObject()" disabled>Clear object</button>
-
-    <button id="roiBtn" onclick="beginAction('roi')" disabled>ROI</button>
-    <button id="p1Btn" onclick="beginAction('p1')" disabled>P1</button>
-    <button id="p2Btn" onclick="beginAction('p2')" disabled>P2</button>
-    <button id="computeBtn" class="primary" onclick="computeMeasurement()" disabled>Compute</button>
-
-    <div class="pill">
-      <div class="grp">
-        <label><input type="checkbox" id="undistortChk" checked> Undistort</label>
-        <label><input type="checkbox" id="refineChk" checked> Refine clicks</label>
-        <label>Refine px <input id="refineRad" type="number" value="16" min="4" max="40" step="1" style="width:84px"></label>
-        <label><input type="checkbox" id="liveDetectChk" checked> Live detect</label>
-      </div>
-      <div class="grp small">Board ids 12–19 • marker 50 mm • gap 10 mm</div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div><b>Status</b></div>
-    <div class="row small">
-      <div id="cameraStatus">camera: idle</div>
-      <div id="frameStatus">frame: live</div>
-      <div id="boardStatus">board: none</div>
-      <div id="detectStatus">live ids: none</div>
-      <div id="objStatus">object: none</div>
-    </div>
-    <div id="out" style="margin-top:8px;font-weight:800"></div>
-  </div>
-
-  <div class="section">
-    <div><b>How to use</b></div>
-    <ol class="small" style="margin:8px 0 0 18px; padding:0; line-height:1.45">
-      <li>Place the board in the same plane as the dimension you want to measure.</li>
-      <li>Start camera and make sure the board is detected.</li>
-      <li>Freeze the frame.</li>
-      <li>Draw ROI around the object.</li>
-      <li>Tap P1 and click the first endpoint. Tap P2 and click the second endpoint.</li>
-      <li>Compute. The app maps both clicks into board-plane millimeters and measures the distance.</li>
-    </ol>
-  </div>
-
-  <div class="section">
-    <div><b>Results</b></div>
+<div class="wrap">
+  <div class="panel">
     <div class="row">
-      <label>Object <input id="objName" type="text" placeholder="optional" style="width:150px"></label>
-      <label>Ground truth mm <input id="gtMm" type="number" min="0" step="0.1" style="width:120px"></label>
+      <button id="startBtn" class="primary" onclick="startCamera()">Start</button>
+      <button id="freezeBtn" class="primary" onclick="freezeFrame()" disabled>Freeze</button>
+      <button id="resumeBtn" onclick="resumeLive()" disabled>Resume</button>
+      <button id="roiBtn" onclick="beginRoi()" disabled>ROI</button>
+      <button id="p1Btn" onclick="beginPoint('p1')" disabled>P1</button>
+      <button id="p2Btn" onclick="beginPoint('p2')" disabled>P2</button>
+      <button id="computeBtn" class="primary" onclick="computeMeasurement()" disabled>Compute</button>
+      <button onclick="clearMarks()">Clear marks</button>
       <button onclick="clearResults()">Clear results</button>
+      <label>Truth mm <input id="truthMm" type="number" step="0.1" style="width:110px"></label>
+      <label>Refine px <input id="refinePx" type="number" step="1" value="18" style="width:80px"></label>
     </div>
-    <div class="resultsBox">
-      <table id="resTable">
-        <thead>
-          <tr>
-            <th>#</th><th>Object</th><th>Measured mm</th><th>Truth mm</th><th>% err</th><th>Board ids</th><th>Reproj px</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <div id="out" class="small">Place the board in the same plane as the dimension you want to measure.</div>
+    <div class="row small">
+      <div id="cameraStatus">camera: off</div>
+      <div id="boardStatus">board: not solved</div>
+      <div id="actionStatus">action: none</div>
     </div>
   </div>
 
-  <div class="section">
-    <div><b>Log</b></div>
-    <pre id="log"></pre>
+  <div class="panel">
+    <video id="video" playsinline muted style="display:none"></video>
+    <canvas id="canvas"></canvas>
   </div>
+
+  <div class="panel">
+    <table>
+      <thead><tr><th>#</th><th>Measured</th><th>Truth</th><th>% error</th><th>Board pts</th></tr></thead>
+      <tbody id="resultsBody"></tbody>
+    </table>
+  </div>
+
+  <div class="panel"><pre id="log"></pre></div>
+</div>
 
 <script src="./cv.js"></script>
 <script src="./aruco.js"></script>
 <script>
 'use strict';
 
-const CALIB = {
-  calW: 1080,
-  calH: 1920,
-  fx: 1388.13835,
-  fy: 1388.73166,
-  cx: 583.186733,
-  cy: 913.686033,
-  dist: [0.11153592, -0.21737664, -0.00028422, 0.00925723, 0.21312604]
-};
-
-// Plane coordinates in millimeters, y down from top-left of board bounding box.
 const BOARD = {
   dictionary: 'ARUCO',
   ids: [12,13,14,15,16,17,18,19],
   markerSizeMm: 50,
   gapMm: 10,
-  centersMm: {
+  // plane coordinates in mm, origin at board top-left, x right, y down
+  centers: {
     12:[25,25], 13:[85,25], 14:[145,25],
     15:[25,85], 16:[85,85], 17:[145,85],
     18:[25,145],19:[85,145]
-  },
-  boardWidthMm: 170,
-  boardHeightMm: 170
+  }
 };
 
-let detector = null;
-let streaming = false;
-let frozen = false;
-let rawFrame = null;      // {width,height,imageData}
-let displayFrame = null;  // same shape, maybe undistorted
-let liveDetectorInfo = null;
-let frozenDetectorInfo = null;
-let frozenHomography = null; // {imageToPlane, planeToImage, reprojPx}
-let currentObject = null; // {roi,p1,p2}
-let actionMode = null;
-let drawDrag = null;
-let results = [];
-let rafId = null;
-let lastLiveDetectTs = 0;
+let detector=null, streaming=false, frozen=false, rafId=0;
+let liveMarkers=[], frozenFrame=null, frozenMarkers=[];
+let Himg2plane=null;
+let current={roi:null,p1:null,p2:null};
+let actionMode=null, dragStart=null, dragRect=null;
+let results=[];
 
-const video = document.getElementById('video');
-const rawCanvas = document.getElementById('rawCanvas');
-const rawCtx = rawCanvas.getContext('2d', {willReadFrequently:true});
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d', {willReadFrequently:true});
+const video=document.getElementById('video');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d',{willReadFrequently:true});
 
-function log(msg){
-  const el = document.getElementById('log');
-  const t = new Date().toLocaleTimeString();
-  el.textContent = `[${t}] ${msg}\n` + el.textContent;
-}
-function setOut(msg, cls=''){ const el = document.getElementById('out'); el.className = cls; el.textContent = msg || ''; }
-function setStatus(id, txt){ document.getElementById(id).textContent = txt; }
+function log(msg){ const el=document.getElementById('log'); const t=new Date().toLocaleTimeString(); el.textContent=`[${t}] ${msg}\n`+el.textContent; }
+function setOut(msg, cls=''){ const el=document.getElementById('out'); el.className='small '+cls; el.textContent=msg; }
+function setStatus(id, txt){ document.getElementById(id).textContent=txt; }
 function round(v,n=2){ return Number(v).toFixed(n); }
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-function norm2(v){ return Math.hypot(v[0],v[1]); }
-function sub2(a,b){ return [a[0]-b[0], a[1]-b[1]]; }
-function distance2D(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
-function canvasPoint(evt){
-  const rect = canvas.getBoundingClientRect();
-  const x = (evt.clientX - rect.left) * (canvas.width / rect.width);
-  const y = (evt.clientY - rect.top) * (canvas.height / rect.height);
-  return {x,y};
-}
-function sortCornersClockwise(corners){
-  const sums = corners.map(p => p.x + p.y);
-  const diffs = corners.map(p => p.x - p.y);
-  const tl = corners[sums.indexOf(Math.min(...sums))];
-  const br = corners[sums.indexOf(Math.max(...sums))];
-  const tr = corners[diffs.indexOf(Math.max(...diffs))];
-  const bl = corners[diffs.indexOf(Math.min(...diffs))];
-  return [tl,tr,br,bl];
-}
-function markerPlaneCorners(id){
-  const c = BOARD.centersMm[id];
-  if(!c) return null;
-  const h = BOARD.markerSizeMm / 2;
-  return [
-    {x:c[0]-h, y:c[1]-h},
-    {x:c[0]+h, y:c[1]-h},
-    {x:c[0]+h, y:c[1]+h},
-    {x:c[0]-h, y:c[1]+h}
-  ];
-}
-function frameK(frame){
-  const sx = frame.width / CALIB.calW, sy = frame.height / CALIB.calH;
-  return [
-    [CALIB.fx*sx, 0, CALIB.cx*sx],
-    [0, CALIB.fy*sy, CALIB.cy*sy],
-    [0,0,1]
-  ];
-}
-function makeDetector(){
-  if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){
-    throw new Error('Local aruco.js not loaded correctly');
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function ensureCanvasSize(w,h){ if(canvas.width!==w||canvas.height!==h){ canvas.width=w; canvas.height=h; } }
+function captureCurrentFrame(){ const w=video.videoWidth,h=video.videoHeight; const tmp=document.createElement('canvas'); tmp.width=w; tmp.height=h; const tctx=tmp.getContext('2d',{willReadFrequently:true}); tctx.drawImage(video,0,0,w,h); return {width:w,height:h,imageData:tctx.getImageData(0,0,w,h)}; }
+function imageDataToCanvasImage(frame,targetCtx){ const cnv=document.createElement('canvas'); cnv.width=frame.width; cnv.height=frame.height; cnv.getContext('2d').putImageData(frame.imageData,0,0); targetCtx.drawImage(cnv,0,0); }
+function getCanvasPoint(evt){ const rect=canvas.getBoundingClientRect(); const sx=canvas.width/rect.width, sy=canvas.height/rect.height; return {x:(evt.clientX-rect.left)*sx, y:(evt.clientY-rect.top)*sy}; }
+function norm2(v){ return Math.hypot(v.x,v.y); }
+function dist2(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+function normalizeBox(a,b){ const x=Math.min(a.x,b.x), y=Math.min(a.y,b.y); return {x, y, w:Math.abs(a.x-b.x), h:Math.abs(a.y-b.y)}; }
+function pointInRect(p,r){ return r && p.x>=r.x && p.x<=r.x+r.w && p.y>=r.y && p.y<=r.y+r.h; }
+function sortCornersClockwise(corners){ const sums=corners.map(p=>p.x+p.y), diffs=corners.map(p=>p.x-p.y); const tl=corners[sums.indexOf(Math.min(...sums))]; const br=corners[sums.indexOf(Math.max(...sums))]; const tr=corners[diffs.indexOf(Math.max(...diffs))]; const bl=corners[diffs.indexOf(Math.min(...diffs))]; return [tl,tr,br,bl]; }
+function markerPlaneCorners(id){ const c=BOARD.centers[id]; if(!c) return null; const s=BOARD.markerSizeMm/2; return [ {x:c[0]-s,y:c[1]-s}, {x:c[0]+s,y:c[1]-s}, {x:c[0]+s,y:c[1]+s}, {x:c[0]-s,y:c[1]+s} ]; }
+function transpose(A){ return A[0].map((_,c)=>A.map(r=>r[c])); }
+function matMul(A,B){ const rows=A.length, cols=B[0].length, inner=B.length; const C=Array.from({length:rows},()=>Array(cols).fill(0)); for(let r=0;r<rows;r++){ for(let c=0;c<cols;c++){ let s=0; for(let k=0;k<inner;k++) s+=A[r][k]*B[k][c]; C[r][c]=s; } } return C; }
+function matVecMul(A,x){ return A.map(row=>row.reduce((s,v,i)=>s+v*x[i],0)); }
+function solveLinear(A,b){ const n=A.length; const M=A.map((row,i)=>row.slice().concat([b[i]])); for(let col=0; col<n; col++){ let piv=col; for(let r=col+1;r<n;r++) if(Math.abs(M[r][col])>Math.abs(M[piv][col])) piv=r; if(Math.abs(M[piv][col])<1e-12) return null; if(piv!==col){ const tmp=M[col]; M[col]=M[piv]; M[piv]=tmp; } const div=M[col][col]; for(let c=col;c<=n;c++) M[col][c]/=div; for(let r=0;r<n;r++){ if(r===col) continue; const f=M[r][col]; for(let c=col;c<=n;c++) M[r][c]-=f*M[col][c]; } } return M.map(row=>row[n]); }
+function solveHomographyImageToPlane(corresp){
+  if(corresp.length<4) return null;
+  const A=[], b=[];
+  for(const q of corresp){
+    const x=q.img.x, y=q.img.y, X=q.plane.x, Y=q.plane.y;
+    A.push([x,y,1,0,0,0,-X*x,-X*y]); b.push(X);
+    A.push([0,0,0,x,y,1,-Y*x,-Y*y]); b.push(Y);
   }
-  try{
-    return new AR.Detector({ dictionaryName: BOARD.dictionary });
-  }catch(_err){
-    return new AR.Detector();
+  const At=transpose(A), AtA=matMul(At,A), Atb=matVecMul(At,b);
+  const h=solveLinear(AtA,Atb);
+  if(!h) return null;
+  return [[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]];
+}
+function transformPoint2D(p,H){ const w=H[2][0]*p.x+H[2][1]*p.y+H[2][2]; if(Math.abs(w)<1e-9) return null; return { x:(H[0][0]*p.x+H[0][1]*p.y+H[0][2])/w, y:(H[1][0]*p.x+H[1][1]*p.y+H[1][2])/w }; }
+function detectMarkers(frame){ try{ return detector.detect(frame.imageData)||[]; }catch(e){ log('[detect] '+(e.message||e)); return []; } }
+function buildBoardHomography(markers){
+  const corr=[];
+  for(const m of markers){
+    const id=Number(m.id); if(!BOARD.ids.includes(id)) continue;
+    const imgCorners=sortCornersClockwise(m.corners.map(c=>({x:c.x,y:c.y})));
+    const planeCorners=markerPlaneCorners(id); if(!planeCorners) continue;
+    for(let i=0;i<4;i++) corr.push({img:imgCorners[i], plane:planeCorners[i]});
   }
+  if(corr.length<16) return {H:null,count:corr.length/4};
+  return {H:solveHomographyImageToPlane(corr), count:corr.length/4};
 }
-function cloneImageData(src){
-  return new ImageData(new Uint8ClampedArray(src.data), src.width, src.height);
-}
-function undistortImageData(frame){
-  const src = cv.matFromImageData(frame.imageData);
-  const dst = new cv.Mat();
-  const sx = frame.width / CALIB.calW, sy = frame.height / CALIB.calH;
-  const K = cv.matFromArray(3,3,cv.CV_64F,[
-    CALIB.fx*sx,0,CALIB.cx*sx,
-    0,CALIB.fy*sy,CALIB.cy*sy,
-    0,0,1
-  ]);
-  const dist = cv.matFromArray(1,5,cv.CV_64F,CALIB.dist);
-  if(typeof cv.undistort === 'function') cv.undistort(src,dst,K,dist); else src.copyTo(dst);
-  const rgba = new ImageData(new Uint8ClampedArray(dst.data), dst.cols, dst.rows);
-  src.delete(); dst.delete(); K.delete(); dist.delete();
-  return { width:frame.width, height:frame.height, imageData:rgba };
-}
-function drawFrame(frame){
-  if(!frame) return;
-  canvas.width = frame.width; canvas.height = frame.height;
-  ctx.putImageData(frame.imageData, 0, 0);
-}
-function getActiveFrame(){ return frozen ? displayFrame : displayFrame; }
-
-function detectBoard(frame){
-  if(!frame || !detector) return null;
-  const markers = detector.detect(frame.imageData) || [];
-  const matched = markers.filter(m => BOARD.ids.includes(Number(m.id)));
-  const ids = matched.map(m => Number(m.id)).sort((a,b)=>a-b);
-  let imagePts = [];
-  let planePts = [];
-
-  for(const m of matched){
-    const orderedImg = sortCornersClockwise(m.corners.map(p => ({x:p.x, y:p.y})));
-    const orderedPlane = markerPlaneCorners(Number(m.id));
-    if(!orderedPlane) continue;
-    for(let i=0;i<4;i++){
-      imagePts.push(orderedImg[i].x, orderedImg[i].y);
-      planePts.push(orderedPlane[i].x, orderedPlane[i].y);
+function refinePoint(p){
+  if(!frozenFrame) return p;
+  const r=Math.max(2, parseInt(document.getElementById('refinePx').value||'18',10));
+  const x0=Math.max(1,Math.floor(p.x-r)), y0=Math.max(1,Math.floor(p.y-r));
+  const x1=Math.min(frozenFrame.width-2,Math.ceil(p.x+r)), y1=Math.min(frozenFrame.height-2,Math.ceil(p.y+r));
+  const data=frozenFrame.imageData.data; const w=frozenFrame.width;
+  let best=null, bestScore=-1;
+  for(let y=y0;y<=y1;y++){
+    for(let x=x0;x<=x1;x++){
+      if(current.roi && !pointInRect({x,y}, current.roi)) continue;
+      const idx=(y*w+x)*4;
+      const g=(data[idx]+data[idx+1]+data[idx+2])/3;
+      const idxL=(y*w+(x-1))*4, idxR=(y*w+(x+1))*4, idxU=((y-1)*w+x)*4, idxD=((y+1)*w+x)*4;
+      const gL=(data[idxL]+data[idxL+1]+data[idxL+2])/3, gR=(data[idxR]+data[idxR+1]+data[idxR+2])/3;
+      const gU=(data[idxU]+data[idxU+1]+data[idxU+2])/3, gD=(data[idxD]+data[idxD+1]+data[idxD+2])/3;
+      const gx=gR-gL, gy=gD-gU; const score=gx*gx+gy*gy;
+      const dist=(x-p.x)*(x-p.x)+(y-p.y)*(y-p.y);
+      const weighted=score-0.15*dist;
+      if(weighted>bestScore){ bestScore=weighted; best={x,y}; }
     }
   }
-
-  if(matched.length < 1) return { allMarkers:markers, matchedMarkers:matched, ids, homography:null, reprojPx:null, outer:null };
-
-  let imageToPlane = null, planeToImage = null, reprojPx = null;
-  try{
-    const src = cv.matFromArray(imagePts.length/2, 1, cv.CV_32FC2, imagePts);
-    const dst = cv.matFromArray(planePts.length/2, 1, cv.CV_32FC2, planePts);
-    const H = cv.findHomography(src, dst, cv.RANSAC, 4.0);
-    if(H && !H.empty()){
-      const Hinv = new cv.Mat();
-      cv.invert(H, Hinv);
-      imageToPlane = homographyMatToArray(H);
-      planeToImage = homographyMatToArray(Hinv);
-      reprojPx = meanReprojectionError(imagePts, planePts, planeToImage);
-      Hinv.delete();
-    }
-    src.delete(); dst.delete(); if(H) H.delete();
-  }catch(err){
-    log('[board] homography failed: ' + (err.message || err));
-  }
-
-  return {
-    allMarkers: markers,
-    matchedMarkers: matched,
-    ids,
-    homography: imageToPlane ? { imageToPlane, planeToImage } : null,
-    reprojPx,
-    outer: planeToImage ? boardOuterImageQuad(planeToImage) : null
-  };
+  return best||p;
 }
-function homographyMatToArray(H){
-  const d = H.data64F;
-  return [[d[0],d[1],d[2]],[d[3],d[4],d[5]],[d[6],d[7],d[8]]];
+function updateButtons(){
+  document.getElementById('freezeBtn').disabled=!streaming||frozen;
+  document.getElementById('resumeBtn').disabled=!frozen;
+  document.getElementById('roiBtn').disabled=!frozen;
+  document.getElementById('p1Btn').disabled=!frozen;
+  document.getElementById('p2Btn').disabled=!frozen;
+  document.getElementById('computeBtn').disabled=!(frozen && Himg2plane && current.p1 && current.p2);
 }
-function transformPoint2D(point, H){
-  const x = point.x, y = point.y;
-  const w = H[2][0]*x + H[2][1]*y + H[2][2];
-  if(Math.abs(w) < 1e-9) return null;
-  return {
-    x: (H[0][0]*x + H[0][1]*y + H[0][2]) / w,
-    y: (H[1][0]*x + H[1][1]*y + H[1][2]) / w
-  };
+function drawMarkers(markers, color='#00e5ff'){ ctx.lineWidth=3; ctx.strokeStyle=color; ctx.fillStyle=color; for(const m of markers){ const c=sortCornersClockwise(m.corners.map(q=>({x:q.x,y:q.y}))); ctx.beginPath(); ctx.moveTo(c[0].x,c[0].y); for(let i=1;i<4;i++) ctx.lineTo(c[i].x,c[i].y); ctx.closePath(); ctx.stroke(); ctx.fillText(String(m.id), c[0].x+4, c[0].y-4); } }
+function render(){
+  if(streaming && !frozen){ ctx.drawImage(video,0,0,canvas.width,canvas.height); drawMarkers(liveMarkers,'#00e5ff'); }
+  else if(frozen && frozenFrame){ imageDataToCanvasImage(frozenFrame, ctx); drawMarkers(frozenMarkers,'#00ff88'); }
+  else { ctx.clearRect(0,0,canvas.width,canvas.height); }
+  if(current.roi){ ctx.strokeStyle='#ffd54f'; ctx.lineWidth=3; ctx.strokeRect(current.roi.x,current.roi.y,current.roi.w,current.roi.h); }
+  if(dragRect){ ctx.strokeStyle='#ff9800'; ctx.lineWidth=2; ctx.strokeRect(dragRect.x,dragRect.y,dragRect.w,dragRect.h); }
+  for(const key of ['p1','p2']){ const p=current[key]; if(!p) continue; ctx.fillStyle=key==='p1'?'#ff5252':'#8bc34a'; ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='#000'; ctx.lineWidth=2; ctx.stroke(); ctx.fillStyle='#fff'; ctx.fillText(key.toUpperCase(), p.x+9, p.y-9); }
 }
-function meanReprojectionError(imagePtsFlat, planePtsFlat, planeToImage){
-  const n = imagePtsFlat.length / 2;
-  let s = 0;
-  for(let i=0;i<n;i++){
-    const pPlane = {x:planePtsFlat[2*i], y:planePtsFlat[2*i+1]};
-    const pImg = {x:imagePtsFlat[2*i], y:imagePtsFlat[2*i+1]};
-    const pr = transformPoint2D(pPlane, planeToImage);
-    if(!pr) continue;
-    s += distance2D(pr, pImg);
-  }
-  return s / n;
-}
-function boardOuterImageQuad(planeToImage){
-  return [
-    transformPoint2D({x:0,y:0}, planeToImage),
-    transformPoint2D({x:BOARD.boardWidthMm,y:0}, planeToImage),
-    transformPoint2D({x:BOARD.boardWidthMm,y:BOARD.boardHeightMm}, planeToImage),
-    transformPoint2D({x:0,y:BOARD.boardHeightMm}, planeToImage)
-  ];
-}
-
-async function startCamera(){
-  if(typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    setOut('Camera API not available in this browser', 'warn');
-    log('[cam] getUserMedia unavailable');
-    return;
-  }
-  if(typeof AR === 'undefined' || typeof AR.Detector !== 'function'){
-    setOut('Local aruco.js not loaded correctly', 'warn');
-    log('[boot] AR.Detector missing');
-    return;
-  }
-
-  try{
-    detector = makeDetector();
-  }catch(err){
-    setOut('Board detector failed to initialize', 'warn');
-    log('[boot] detector init failed: ' + (err.message || err));
-    return;
-  }
-
-  try{
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 30, max: 30 }
-      },
-      audio: false
-    });
-    video.srcObject = stream;
-    await video.play();
-
-    const finishSetup = () => {
-      rawCanvas.width = video.videoWidth;
-      rawCanvas.height = video.videoHeight;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      streaming = true;
-      frozen = false;
-      currentObject = null;
-      rawFrame = null;
-      displayFrame = null;
-      liveDetectorInfo = null;
-      frozenDetectorInfo = null;
-      frozenHomography = null;
-      actionMode = null;
-      drawDrag = null;
-
-      setStatus('cameraStatus', `camera: ${video.videoWidth}x${video.videoHeight}`);
-      setStatus('frameStatus', 'frame: live');
-      setStatus('boardStatus', 'board: none');
-      setStatus('detectStatus', 'live ids: none');
-      setStatus('objStatus', 'object: none');
-      setOut('Camera started. Place board coplanar with the object, then Freeze.', 'ok');
-
-      updateButtons();
-      if(!rafId) loop();
-      log('[cam] started');
-    };
-
-    if (video.readyState >= 1 && video.videoWidth > 0) finishSetup();
-    else video.onloadedmetadata = finishSetup;
-  }catch(err){
-    const msg = (err && (err.message || err.name)) ? (err.message || err.name) : String(err);
-    setOut('Camera failed. Use HTTPS and allow camera permission.', 'warn');
-    log('[cam] ' + msg);
-  }
-}
-function captureCurrentFrame(){
-  rawCtx.drawImage(video, 0, 0, rawCanvas.width, rawCanvas.height);
-  const img = rawCtx.getImageData(0,0,rawCanvas.width,rawCanvas.height);
-  const frame = { width:rawCanvas.width, height:rawCanvas.height, imageData:img };
-  return document.getElementById('undistortChk').checked ? undistortImageData(frame) : frame;
-}
-function loop(){
-  rafId = requestAnimationFrame(loop);
+function renderLoop(){
   if(!streaming) return;
   if(!frozen){
-    const now = performance.now();
-    rawFrame = captureCurrentFrame();
-    displayFrame = rawFrame;
-    if(document.getElementById('liveDetectChk').checked && now - lastLiveDetectTs > 180){
-      liveDetectorInfo = detectBoard(displayFrame);
-      lastLiveDetectTs = now;
-      const ids = (liveDetectorInfo && liveDetectorInfo.ids.length) ? liveDetectorInfo.ids.join(', ') : 'none';
-      setStatus('detectStatus', 'live ids: ' + ids);
-      if(liveDetectorInfo && liveDetectorInfo.homography){
-        setStatus('boardStatus', `board: live (${liveDetectorInfo.ids.length} ids, reproj ${round(liveDetectorInfo.reprojPx||0,1)} px)`);
-      }else{
-        setStatus('boardStatus', `board: none`);
-      }
+    const now=performance.now();
+    if(now-(renderLoop.lastDetect||0)>220 && video.videoWidth>0){
+      try{ const frame=captureCurrentFrame(); ensureCanvasSize(frame.width,frame.height); liveMarkers=detectMarkers(frame); setStatus('boardStatus', `board: live ids ${liveMarkers.filter(m=>BOARD.ids.includes(Number(m.id))).map(m=>m.id).join(', ')||'none'}`); renderLoop.lastDetect=now; }catch(e){}
     }
+    render();
+    rafId=requestAnimationFrame(renderLoop);
   }
-  render();
+}
+async function startCamera(){
+  try{
+    if(typeof AR==='undefined' || typeof AR.Detector!=='function'){ setOut('aruco.js not loaded correctly','warn'); log('[boot] AR.Detector missing'); return; }
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ setOut('Camera API unavailable','warn'); return; }
+    detector = new AR.Detector({ dictionaryName: BOARD.dictionary });
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'}, width:{ideal:1080}, height:{ideal:1920} }, audio:false });
+    video.srcObject=stream;
+    await video.play();
+    ensureCanvasSize(video.videoWidth, video.videoHeight);
+    streaming=true; frozen=false; liveMarkers=[]; frozenFrame=null; Himg2plane=null; current={roi:null,p1:null,p2:null};
+    setStatus('cameraStatus', `camera: ${video.videoWidth}x${video.videoHeight}`);
+    setOut('Camera started. Align the board and press Freeze.','ok');
+    updateButtons();
+    cancelAnimationFrame(rafId); renderLoop();
+    log('[cam] started');
+  }catch(err){ setOut('Camera start failed: '+(err.message||err), 'warn'); log('[cam] '+(err.message||err)); }
 }
 function freezeFrame(){
   if(!streaming) return;
-  rawFrame = captureCurrentFrame();
-  displayFrame = rawFrame;
-  frozenDetectorInfo = detectBoard(displayFrame);
-  frozenHomography = frozenDetectorInfo?.homography || null;
-  frozen = true;
-  setStatus('frameStatus', 'frame: frozen');
-  if(frozenHomography){
-    setStatus('boardStatus', `board: frozen (${frozenDetectorInfo.ids.length} ids, reproj ${round(frozenDetectorInfo.reprojPx||0,1)} px)`);
-    setOut('Board detected. Draw ROI, then mark P1 and P2.', 'ok');
-    log(`[freeze] board ids ${frozenDetectorInfo.ids.join(', ')} | reproj ${round(frozenDetectorInfo.reprojPx||0,2)} px`);
-  }else{
-    setStatus('boardStatus', 'board: not found');
-    setOut('Board not detected in frozen frame.', 'warn');
-    log('[freeze] board not found');
-  }
-  currentObject = { roi:null, p1:null, p2:null };
-  updateButtons();
-  render();
+  frozenFrame=captureCurrentFrame();
+  frozen=true;
+  frozenMarkers=detectMarkers(frozenFrame).filter(m=>BOARD.ids.includes(Number(m.id)));
+  const solved=buildBoardHomography(frozenMarkers);
+  Himg2plane=solved.H;
+  if(Himg2plane){ setOut(`Frame frozen. Board solved from ${solved.count} markers. Draw ROI and click P1/P2.`, 'ok'); setStatus('boardStatus', `board: solved (${solved.count} markers)`); log('[board] solved from ids '+frozenMarkers.map(m=>m.id).join(', ')); }
+  else { setOut(`Board solve failed. Need at least 4 visible board markers.`, 'warn'); setStatus('boardStatus', 'board: not solved'); log('[board] solve failed'); }
+  updateButtons(); render();
 }
-function resumeLive(){
-  if(!streaming) return;
-  frozen = false;
-  currentObject = null;
-  frozenDetectorInfo = null;
-  frozenHomography = null;
-  actionMode = null;
-  drawDrag = null;
-  setStatus('frameStatus', 'frame: live');
-  setStatus('objStatus', 'object: none');
-  setOut('Live resumed.', '');
-  updateButtons();
-}
-function beginAction(mode){
-  if(!frozen || !currentObject || !frozenHomography) return;
-  actionMode = mode;
-  if(mode === 'roi') setOut('Drag ROI around the object.', '');
-  if(mode === 'p1') setOut('Tap first endpoint.', '');
-  if(mode === 'p2') setOut('Tap second endpoint.', '');
-}
-function clearCurrentObject(){
-  currentObject = frozen ? { roi:null,p1:null,p2:null } : null;
-  actionMode = null; drawDrag = null;
-  setStatus('objStatus', frozen ? 'object: ready' : 'object: none');
-  setOut('Current object cleared.', '');
-  updateButtons();
-  render();
-}
-function updateButtons(){
-  document.getElementById('freezeBtn').disabled = !streaming || frozen;
-  document.getElementById('resumeBtn').disabled = !streaming || !frozen;
-  document.getElementById('clearObjBtn').disabled = !frozen || !currentObject;
-  document.getElementById('roiBtn').disabled = !frozen || !frozenHomography || !currentObject;
-  document.getElementById('p1Btn').disabled = !frozen || !frozenHomography || !currentObject;
-  document.getElementById('p2Btn').disabled = !frozen || !frozenHomography || !currentObject;
-  document.getElementById('computeBtn').disabled = !(frozen && frozenHomography && currentObject && currentObject.p1 && currentObject.p2);
-  setStatus('objStatus', !currentObject ? 'object: none' : `object: ${currentObject.roi ? 'roi ' : ''}${currentObject.p1 ? 'p1 ' : ''}${currentObject.p2 ? 'p2' : ''}`.trim() || 'object: ready');
-}
-
-function refinePoint(frame, clickPt, roi){
-  if(!document.getElementById('refineChk').checked || !frame) return clickPt;
-  const rad = clamp(parseInt(document.getElementById('refineRad').value || '16',10), 4, 40);
-  const x0 = clamp(Math.round(clickPt.x - rad), 0, frame.width-1);
-  const y0 = clamp(Math.round(clickPt.y - rad), 0, frame.height-1);
-  const x1 = clamp(Math.round(clickPt.x + rad), 0, frame.width-1);
-  const y1 = clamp(Math.round(clickPt.y + rad), 0, frame.height-1);
-  const w = Math.max(2, x1-x0+1), h = Math.max(2, y1-y0+1);
-
-  if(roi){
-    const rx = Math.min(roi.x1, roi.x2), ry = Math.min(roi.y1, roi.y2), rw = Math.abs(roi.x2-roi.x1), rh = Math.abs(roi.y2-roi.y1);
-    if(clickPt.x < rx-4 || clickPt.x > rx+rw+4 || clickPt.y < ry-4 || clickPt.y > ry+rh+4) return clickPt;
-  }
-
-  let src=null, gray=null, patch=null, corners=null, edges=null;
-  try{
-    src = cv.matFromImageData(frame.imageData);
-    gray = new cv.Mat();
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    const rect = new cv.Rect(x0, y0, w, h);
-    patch = gray.roi(rect);
-
-    corners = new cv.Mat();
-    cv.goodFeaturesToTrack(patch, corners, 30, 0.01, 3);
-    let best = null, bestD = Infinity;
-    for(let i=0;i<corners.rows;i++){
-      const px = corners.data32F[i*2] + x0;
-      const py = corners.data32F[i*2+1] + y0;
-      const d = Math.hypot(px - clickPt.x, py - clickPt.y);
-      if(d < bestD){ bestD = d; best = {x:px, y:py}; }
-    }
-    if(best && bestD <= rad) return best;
-
-    edges = new cv.Mat();
-    cv.Canny(patch, edges, 60, 140);
-    best = null; bestD = Infinity;
-    for(let yy=0; yy<edges.rows; yy++){
-      for(let xx=0; xx<edges.cols; xx++){
-        if(edges.ucharPtr(yy,xx)[0] > 0){
-          const px = xx + x0, py = yy + y0;
-          const d = Math.hypot(px - clickPt.x, py - clickPt.y);
-          if(d < bestD){ bestD = d; best = {x:px, y:py}; }
-        }
-      }
-    }
-    if(best && bestD <= rad) return best;
-  }catch(err){
-    log('[refine] failed: ' + (err.message || err));
-  }finally{
-    if(src) src.delete(); if(gray) gray.delete(); if(patch) patch.delete(); if(corners) corners.delete(); if(edges) edges.delete();
-  }
-  return clickPt;
-}
-
-canvas.addEventListener('pointerdown', evt => {
-  if(!frozen || !currentObject) return;
-  const p = canvasPoint(evt);
-  if(actionMode === 'roi'){
-    drawDrag = { x1:p.x, y1:p.y, x2:p.x, y2:p.y };
-    canvas.setPointerCapture(evt.pointerId);
-    return;
-  }
-  if(actionMode === 'p1' || actionMode === 'p2'){
-    const rp = refinePoint(displayFrame, p, currentObject.roi);
-    currentObject[actionMode] = rp;
-    log(`[click] ${actionMode}=(${round(rp.x,1)},${round(rp.y,1)})`);
-    setOut(`${actionMode} set`, 'ok');
-    actionMode = null;
-    updateButtons();
-    render();
-  }
-});
-canvas.addEventListener('pointermove', evt => {
-  if(!drawDrag) return;
-  const p = canvasPoint(evt);
-  drawDrag.x2 = p.x; drawDrag.y2 = p.y;
-  render();
-});
-canvas.addEventListener('pointerup', evt => {
-  if(!drawDrag || !currentObject) return;
-  const p = canvasPoint(evt);
-  drawDrag.x2 = p.x; drawDrag.y2 = p.y;
-  currentObject.roi = { ...drawDrag };
-  drawDrag = null;
-  actionMode = null;
-  setOut('ROI set', 'ok');
-  updateButtons();
-  render();
-});
-
+function resumeLive(){ frozen=false; frozenFrame=null; frozenMarkers=[]; Himg2plane=null; current={roi:null,p1:null,p2:null}; actionMode=null; dragStart=null; dragRect=null; setOut('Live resumed.'); setStatus('boardStatus','board: live'); updateButtons(); renderLoop(); }
+function beginRoi(){ actionMode='roi'; setStatus('actionStatus','action: draw ROI'); }
+function beginPoint(which){ actionMode=which; setStatus('actionStatus',`action: click ${which.toUpperCase()}`); }
+function clearMarks(){ current={roi:null,p1:null,p2:null}; actionMode=null; dragStart=null; dragRect=null; updateButtons(); render(); setOut('Cleared marks.'); }
 function computeMeasurement(){
-  if(!(frozen && frozenHomography && currentObject && currentObject.p1 && currentObject.p2)) return;
-  const planeP1 = transformPoint2D(currentObject.p1, frozenHomography.imageToPlane);
-  const planeP2 = transformPoint2D(currentObject.p2, frozenHomography.imageToPlane);
-  if(!planeP1 || !planeP2){ setOut('Point transform failed.', 'warn'); return; }
-  const d = sub2([planeP2.x, planeP2.y], [planeP1.x, planeP1.y]);
-  const measured = norm2(d);
-  const gt = parseFloat(document.getElementById('gtMm').value);
-  const errPct = Number.isFinite(gt) && gt > 0 ? (100*Math.abs(measured-gt)/gt) : null;
-
-  results.push({
-    name: document.getElementById('objName').value.trim(),
-    measured,
-    gt: Number.isFinite(gt) ? gt : null,
-    errPct,
-    ids: (frozenDetectorInfo?.ids || []).join(','),
-    reprojPx: frozenDetectorInfo?.reprojPx ?? null,
-    p1: planeP1,
-    p2: planeP2
-  });
+  if(!Himg2plane || !current.p1 || !current.p2){ setOut('Need board + P1 + P2', 'warn'); return; }
+  const P1=transformPoint2D(current.p1, Himg2plane);
+  const P2=transformPoint2D(current.p2, Himg2plane);
+  if(!P1 || !P2){ setOut('Homography transform failed','warn'); return; }
+  const mm=Math.hypot(P2.x-P1.x, P2.y-P1.y);
+  const truth=parseFloat(document.getElementById('truthMm').value||'');
+  const err=Number.isFinite(truth)&&truth>0? (100*Math.abs(mm-truth)/truth) : null;
+  results.unshift({mm,truth,err,boardPts:frozenMarkers.length*4});
   renderResults();
-  setOut(`Measured ${round(measured,2)} mm`, 'ok');
-  log(`[measure] ${round(measured,2)} mm | p1_plane=(${round(planeP1.x,1)},${round(planeP1.y,1)}) p2_plane=(${round(planeP2.x,1)},${round(planeP2.y,1)}) | reproj ${round(frozenDetectorInfo?.reprojPx||0,2)} px`);
+  setOut(`Measured ${round(mm,2)} mm`, 'ok');
+  log(`[measure] mm=${round(mm,2)} | P1plane=(${round(P1.x,1)},${round(P1.y,1)}) P2plane=(${round(P2.x,1)},${round(P2.y,1)})`);
 }
-function renderResults(){
-  const tb = document.querySelector('#resTable tbody');
-  tb.innerHTML = '';
-  results.forEach((r,i) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${i+1}</td><td>${escapeHtml(r.name||'')}</td><td>${round(r.measured,2)}</td><td>${r.gt==null?'':round(r.gt,2)}</td><td>${r.errPct==null?'':round(r.errPct,2)}</td><td>${escapeHtml(r.ids)}</td><td>${r.reprojPx==null?'':round(r.reprojPx,2)}</td>`;
-    tb.appendChild(tr);
-  });
-}
-function clearResults(){ results = []; renderResults(); setOut('Results cleared.', ''); }
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function renderResults(){ const tb=document.getElementById('resultsBody'); tb.innerHTML=results.map((r,i)=>`<tr><td>${i+1}</td><td>${round(r.mm,2)} mm</td><td>${Number.isFinite(r.truth)?round(r.truth,2)+' mm':'--'}</td><td>${r.err==null?'--':round(r.err,2)+'%'}</td><td>${r.boardPts}</td></tr>`).join(''); }
+function clearResults(){ results=[]; renderResults(); }
 
-function render(){
-  if(!displayFrame){ ctx.clearRect(0,0,canvas.width,canvas.height); return; }
-  drawFrame(displayFrame);
+canvas.addEventListener('pointerdown', e=>{
+  if(!frozen) return;
+  const p=getCanvasPoint(e);
+  if(actionMode==='roi'){ dragStart=p; dragRect={x:p.x,y:p.y,w:0,h:0}; render(); return; }
+  if(actionMode==='p1' || actionMode==='p2'){
+    const rp=refinePoint(p); current[actionMode]=rp; setOut(`${actionMode.toUpperCase()} set`, 'ok'); log(`[click] ${actionMode} raw=(${round(p.x,1)},${round(p.y,1)}) refined=(${round(rp.x,1)},${round(rp.y,1)})`); actionMode=null; setStatus('actionStatus','action: none'); updateButtons(); render();
+  }
+});
+canvas.addEventListener('pointermove', e=>{
+  if(actionMode==='roi' && dragStart){ const p=getCanvasPoint(e); dragRect=normalizeBox(dragStart,p); render(); }
+});
+canvas.addEventListener('pointerup', e=>{
+  if(actionMode==='roi' && dragStart){ const p=getCanvasPoint(e); current.roi=normalizeBox(dragStart,p); dragStart=null; dragRect=null; actionMode=null; setStatus('actionStatus','action: none'); setOut('ROI set','ok'); updateButtons(); render(); }
+});
 
-  const info = frozen ? frozenDetectorInfo : liveDetectorInfo;
-  if(info?.matchedMarkers){
-    ctx.lineWidth = 2;
-    for(const m of info.matchedMarkers){
-      const corners = sortCornersClockwise(m.corners.map(p => ({x:p.x, y:p.y})));
-      ctx.strokeStyle = '#00ff99';
-      ctx.beginPath();
-      ctx.moveTo(corners[0].x, corners[0].y);
-      for(let i=1;i<corners.length;i++) ctx.lineTo(corners[i].x, corners[i].y);
-      ctx.closePath(); ctx.stroke();
-      ctx.fillStyle = '#00ff99';
-      ctx.font = 'bold 16px system-ui';
-      ctx.fillText(String(m.id), corners[0].x + 4, corners[0].y - 4);
-    }
-  }
-
-  if(info?.outer?.every(Boolean)){
-    ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(info.outer[0].x, info.outer[0].y);
-    for(let i=1;i<info.outer.length;i++) ctx.lineTo(info.outer[i].x, info.outer[i].y);
-    ctx.closePath(); ctx.stroke();
-  }
-
-  if(currentObject?.roi){
-    const rx = Math.min(currentObject.roi.x1, currentObject.roi.x2);
-    const ry = Math.min(currentObject.roi.y1, currentObject.roi.y2);
-    const rw = Math.abs(currentObject.roi.x2-currentObject.roi.x1);
-    const rh = Math.abs(currentObject.roi.y2-currentObject.roi.y1);
-    ctx.strokeStyle = '#29b6f6'; ctx.lineWidth = 2; ctx.strokeRect(rx,ry,rw,rh);
-  }
-  if(drawDrag){
-    const rx = Math.min(drawDrag.x1, drawDrag.x2);
-    const ry = Math.min(drawDrag.y1, drawDrag.y2);
-    const rw = Math.abs(drawDrag.x2-drawDrag.x1);
-    const rh = Math.abs(drawDrag.y2-drawDrag.y1);
-    ctx.strokeStyle = '#29b6f6'; ctx.setLineDash([6,4]); ctx.lineWidth = 2; ctx.strokeRect(rx,ry,rw,rh); ctx.setLineDash([]);
-  }
-  if(currentObject?.p1){ drawPoint(currentObject.p1, '#ff5252', 'P1'); }
-  if(currentObject?.p2){ drawPoint(currentObject.p2, '#00c853', 'P2'); }
-  if(currentObject?.p1 && currentObject?.p2){
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(currentObject.p1.x,currentObject.p1.y); ctx.lineTo(currentObject.p2.x,currentObject.p2.y); ctx.stroke();
-  }
-}
-function drawPoint(p, color, label){
-  ctx.fillStyle = color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill(); ctx.stroke();
-  ctx.font = 'bold 14px system-ui'; ctx.fillStyle = color; ctx.fillText(label, p.x + 8, p.y - 8);
-}
-
-(function init(){
-  setStatus('cameraStatus', 'camera: idle');
-  setStatus('frameStatus', 'frame: live');
-  setStatus('boardStatus', 'board: none');
-  setStatus('detectStatus', 'live ids: none');
-  setStatus('objStatus', 'object: none');
-  updateButtons();
-  log('[boot] planar app ready | board ids ' + BOARD.ids.join(', '));
-})();
+log('[boot] planar app ready');
+updateButtons();
 </script>
 </body>
 </html>
